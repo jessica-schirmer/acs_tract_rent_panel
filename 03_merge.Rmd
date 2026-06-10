@@ -1,0 +1,407 @@
+---
+title: "ACS_step3"
+author: "Jessica Schirmer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+```
+
+# Overview
+This script merges ACS data from multiple surveys and calculates change variables.
+
+
+# Setup
+
+## Load Packages
+```{r setup, include=FALSE}
+rm(list = ls())
+
+
+library(Hmisc)
+library(dplyr)
+library(tidycensus)
+library(tidyverse)
+library(spatstat)
+library(matrixStats)
+library(survey)    
+library(srvyr)
+
+## Define data directory
+data_dir <- "/Users/jschirmer/Documents/1Working/ADU_Rent/data/"
+
+
+```
+
+## Define helper functions
+
+```{r}
+
+#' Load feather data with optional subfolder
+#'
+#' @param path Base data directory path
+#' @param folder Optional subfolder name (NULL if file is in base directory)
+#' @param name Filename including extension
+#' @return Data frame from feather file
+load_data <- function(path, folder = NULL, name) {
+  file_path <- if (!is.null(folder)) {
+    file.path(path, folder, name)
+  } else {
+    file.path(path, name)
+  }
+  
+  if (!file.exists(file_path)) {
+    stop("File not found: ", file_path)
+  }
+  
+  arrow::read_feather(file_path)
+}
+
+
+#' Merge data
+#'
+#' @param left_df left dataframe
+#' @param right_df right dataframe
+
+#' @return Merged dataframe
+merge_df <- function(left_df, right_df) {
+    left_df <- left_df |>
+        mutate(base_id=TRUE)
+
+    right_df <- right_df |>
+        mutate(post_id=TRUE)
+
+    join_df <- full_join(left_df, right_df, by = "tr2010_id") |>
+        mutate(
+        merge = case_when(
+            base_id & post_id ~ "both",
+            base_id ~ "base",
+            post_id ~ "post",
+            .default = NA_character_
+        )
+
+        ) 
+
+        return(join_df)
+
+}
+
+
+
+#' Rename variables
+#'
+#' @param df Data frame
+#' @param yr year of survey 
+#' @return Data frame with modified variable names-- labeled for year of survey (Note: this step implicitly determines which variables are kept in the following step.)
+rename_vars <- function(df, yr) {
+    est_var_list <- c("rentE", "lqcrentE", "popE", "huE", "rhuE", 
+                      "med_hvalE",
+                     "rhu_lrE", "rhu_lr2E",  "med_hhincE", "pctrhuE", "pctvacE", 
+                     "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "mfE")
+    moe_var_list <- c("rentM", "lqcrentM", "popM", "huM", "rhuM", 
+                      "med_hvalM",
+                    #  "rhu_lrM", "rhu_lr2M",  "pctvacM", "pcthspM", "pctaaM",
+                     "med_hhincM", "pctrhuM", "pctblkM", "pcthspM" )
+    cv_var_list <- c("rentCV",  "popCV", "huCV", "rhuCV", 
+                      "med_hvalCV",
+                    #  "rhu_lrCV", "rhu_lr2CV",  "pctvacCV", "pctaaCV", "lqcrentCV",
+                     "med_hhincCV", "pctrhuCV", "pctblkCV" , "pcthspCV")
+  for (i in c(est_var_list, moe_var_list, cv_var_list)) { 
+    new_var_name <- paste0(i, "_", yr)
+    df <- df |>
+      dplyr::rename(!!new_var_name := !!i)
+  }
+  
+  return(df)
+}
+
+#' Select variables
+#'
+#' @param df Data frame
+#' @param yr year of survey 
+#' @param var_list List of additional variables
+#' @return Data frame with only selected variables
+select_vars <- function(df, yr, var_list) {
+
+    df <- df |>
+        select(ends_with("id"), ends_with(yr), var_list)
+
+  
+  return(df)
+}
+
+
+#' Apply inflation adjustment
+#'
+#' @param df Data frame
+#' @param yr year of survey 
+#' @return Data frame with dollar values adjusted to 2023 values
+infl_adj_vars <- function(df, yr, var_list) {
+    dollar_vars <- c("rentE", "lqcrentE", "med_hhincE", "med_hvalE",
+                    "rentM", "lqcrentM", "med_hhincM", "med_hvalM")
+    for (i in dollar_vars) { 
+        if (yr=="16"){
+            var_name <- paste0(i, "_", yr)
+            df <- df |>
+                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * 1.27)
+
+    }
+
+}
+  return(df)
+}
+
+
+
+#' Calculate change variables
+#'
+#' @param df 
+#' @return dataframe with change variables
+calc_change_vars <- function(df) {
+  df |>
+    mutate(rentPOST = ifelse(rentE_16>0, rentE_23/rentE_16, NA),
+           interp_rentPOST = ifelse(rentE_16>0, interp_rent/rentE_16, NA),
+            lqcrentPOST = ifelse(lqcrentE_16>0, lqcrentE_23/lqcrentE_16, NA),
+            # rentPRE = ifelse(rentE_09>0, rentE_16/rentE_09,NA),
+            huPOST = ifelse(huE_16>0, huE_23/huE_16,NA), 
+            rhuPOST = ifelse(rhuE_16>0, rhuE_23/rhuE_16,NA),
+            rhu_lrPOST = ifelse(rhu_lrE_16>0, rhu_lrE_23/rhu_lrE_16, NA),
+            rhu_lr2POST = ifelse(rhu_lr2E_16>0, rhu_lr2E_23/rhu_lr2E_16, NA),
+            # rhucashPOST = ifelse(rhucashE_16>0, rhucashE_23/rhucashE_16,NA),
+            med_hhincPOST = ifelse(med_hhincE_16>0, med_hhincE_23/med_hhincE_16,NA),
+            pctrhuPOST = ifelse(pctrhuE_16>0, pctrhuE_23/pctrhuE_16, NA), 
+            pctvacPOST = ifelse(pctvacE_16>0, pctvacE_23/pctvacE_16,NA),
+            popPOST = ifelse(popE_16>0, popE_23/popE_16, NA), 
+            ) |>
+    mutate(m_flag_rentPOST = if_else(is.na(rentPOST), 1, 0),
+           m_flag_rhuPOST = if_else(is.na(rhuPOST), 1, 0) ) 
+
+}
+
+
+
+
+#' Calculate comb MOE, CV
+#'
+#' @param df 
+#' @return dataframe with CV calculations
+calc_cv_change_vars <- function(df) {
+  df |>
+    mutate(
+            # TEMPLATE: MOE FOR RATIO
+            # MOE_RATIO = if_else(
+            #     EST_DENOM != 0, 
+            #     sqrt(pmax(0, (MOE_NUM^2) - (RATIO^2) * (MOE_DENOM^2))) / EST_DENOM,
+            #     NA_real_
+            # ),      
+            moe_rentPOST = if_else(
+                rentE_16 != 0, 
+                sqrt(pmax(0, (rentM_23^2) - (rentPOST^2) * (rentM_16^2))) / rentE_16,
+                NA_real_
+            ),
+            # moe_interp_rentPOST = if_else(
+            #     rentE_16 != 0, 
+            #     sqrt(pmax(0, (interp_rentM^2) - (interp_rentPOST^2) * (rentM_16^2))) / rentE_16,
+            #     NA_real_
+            # ),
+            moe_rhuPOST = if_else(
+                rhuE_16!= 0, 
+                sqrt(pmax(0, (rhuM_23^2) - (rhuPOST^2) * (rhuM_16^2))) / rhuE_16,
+                NA_real_
+            ),   
+            moe_med_hhincPOST = if_else(
+                med_hhincE_16!= 0, 
+                sqrt(pmax(0, (med_hhincM_23^2) - (med_hhincPOST^2) * (med_hhincM_16^2))) / med_hhincE_16,
+                NA_real_
+            ),   
+            rentPOSTCV =  (moe_rentPOST/1.645)/rentPOST,  
+            # interp_rentPOSTCV =  (moe_interp_rentPOST/1.645)/rentPOST,  
+            rhuPOSTCV =  (moe_rhuPOST/1.645)/rhuPOST, 
+            med_hhincPOSTCV = (moe_med_hhincPOST/1.645)/med_hhincPOST,
+
+            ) 
+}
+
+
+
+
+
+#' Save data
+#'
+#' @param df Data frame
+#' @param dir Directory
+#' @param name 
+#' @return Data frame with renamed ID variable and dummy ID
+save_data <- function(df, dir, name) {
+    df |>
+        arrow::write_feather(paste0(dir,name))
+}
+
+
+
+```
+
+# Data Import and Preparation
+
+# Bring in 2023 ACS data
+```{r setup, include=FALSE}
+
+# # Load 2005-2009 ACS data
+# rent_09 <- load_data(data_dir, NULL, "acs_09_step2.feather")
+
+# Load 2019-2023 ACS data
+acs_23 <- load_data(data_dir, NULL, "acs_step2_23.feather")
+
+# Rename variables
+acs_23 <- rename_vars(acs_23, "23")
+
+# Select variables
+# var_list <- c("pct_miss_rent", "pct_tc_rent")
+# var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_23", "interp_rent", "interp_rentCV", "interp_rentM")
+var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_23", "interp_rent")
+acs_23 <- select_vars(acs_23, "23", var_list)
+
+# Apply inflation adjustment
+# n/a
+
+
+
+
+
+
+```
+
+```{r}
+
+# Load 2012-2016 ACS data
+acs_16 <- load_data(data_dir, NULL, "acs_step2_16.feather")
+
+# Rename variables
+acs_16 <- rename_vars(acs_16, "16")
+
+# Select variables
+var_list <- c("m_flag_rent" , "m_flag_lqcrent", "m_flag_rhu", "m_flag_med_hval", 
+               "zero_flag_rhu", "tc_flag_rent", "tc_flag_lqcrent", "tc_flag_med_hval")
+acs_16 <- select_vars(acs_16, "16", var_list)
+
+# Apply inflation adjustmen
+summary(acs_16$rentE_16)
+acs_16 <- infl_adj_vars(acs_16, "16")
+summary(acs_16$rentE_16)
+
+# table(acs_16$m_flag1_16, useNA="ifany")
+```
+
+# Merge tract rent data sets
+```{r setup, include=FALSE}
+
+# Merge post rent data 
+acs_16_23 <- merge_df(acs_16, acs_23)
+table(acs_16_23$merge)
+
+# Keep all
+acs_16_23 <- acs_16_23 |>
+  # dplyr::filter(merge=="both") |>
+  select(-c(merge)) |>
+  mutate(base_id=TRUE)
+
+acs_full <- acs_16_23
+
+# # Merge pre- baseline rent data
+# rent_full <- full_join(rent_16_23, rent_09,
+#                   by = "tr2010_id") %>%
+#   mutate(
+#     merge = case_when(
+#       base_id & pre_id ~ "both",
+#       base_id ~ "base",
+#       pre_id ~ "pre"
+#     ),
+#     .keep = "unused"
+#   ) %>% 
+#   as_tibble() 
+# table(rent_full$merge)
+# # all but 20 of the base tracts merged the post- tracts merged
+# # 97% of tracts w/ rent data in 2016 have rent data for pre and post
+
+# # Keep all
+# acs_full <- acs_full |>
+#   # dplyr::filter(merge=="both") |>
+#   select(-c(merge))
+
+
+```
+
+# Calculate change in rent measures
+
+```{r setup, include=FALSE}
+
+# Calculate change variables
+acs_full <- calc_change_vars(acs_full)
+
+table(acs_full$m_flag_rentPOST)
+table(acs_full$m_flag_rhuPOST)
+
+# Calculate CV for change variables
+acs_full <- calc_cv_change_vars (acs_full)
+
+# Save file
+acs_full %>% 
+  arrow::write_feather(paste0(data_dir, "acs_full.feather"))
+
+```
+
+
+```{r setup, include=FALSE}
+
+print("Summary Stats: CV, 2016 Rental housing units ")
+summary(acs_full$rhuCV_16)
+print("Summary Stats: CV, 2023 Rental housing units ")
+summary(acs_full$rhuCV_23)
+
+print("Summary Stats: CV, 2016 Median rent ")
+summary(acs_full$rentCV_16)
+print("Summary Stats: CV, 2023 Median rent ")
+summary(acs_full$rentCV_23)
+
+print("Summary Stats: CV, Rent change")
+summary(acs_full$rentPOSTCV)
+print("Summary Stats: CV, Rental housing unit change")
+summary(acs_full$rhuPOSTCV)
+
+print("Summary Stats: CV, Rent change")
+summary(acs_full$interp_rentPOSTCV)
+print("Summary Stats: CV, Rental housing unit change")
+summary(acs_full$rhuPOSTCV)
+
+
+print("Summary Stats: CV, 2016 Median household income ")
+summary(acs_full$med_hhincCV_16)
+print("Summary Stats: CV, 2023 Median household income ")
+summary(acs_full$med_hhincCV_23)
+
+print("Summary Stats: CV, Median income change")
+summary(acs_full$med_hhincPOSTCV)
+
+cor(acs_full$interp_rentPOST, acs_full$rentPOST, use = "complete.obs")
+# correlation between interpolated rent change and weighed median rent change is .88
+
+
+```
+
+```{r}
+
+```

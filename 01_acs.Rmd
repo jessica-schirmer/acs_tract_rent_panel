@@ -1,0 +1,415 @@
+---
+title: "ACS_step1"
+author: "Jessica Schirmer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+```
+
+# Overview
+This script imports ACS variables for tract-level analysis.
+
+
+# Setup
+
+## Load Packages
+```{r setup, include=FALSE}
+rm(list = ls())
+# install.packages("tidycensus")
+# install.packages("Hmisc")   
+# install.packages("spatstat")
+# install.packages("matrixStats")
+# install.packages("survey")
+# install.packages("srvyr")
+
+
+library(Hmisc)
+library(dplyr)
+library(tidycensus)
+library(tidyverse)
+library(spatstat)
+library(matrixStats)
+library(survey)    # core survey analysis functions
+library(srvyr)  # tidyverse-style wrapper (I'll show both if helpful)
+
+# census_api_key("REDACTED_NONFUNCTIONAL_CENSUS_API_KEY", install=TRUE)
+
+data_dir <- "/Users/jschirmer/Documents/ADU/data/"
+
+
+```
+
+## Define helper functions
+
+```{r}
+#' Calculate aggregate rent cat from ACS estimates
+#'
+#' @param start ACS starting rent category
+#' @param end ACS ending rent category
+#' @return agg rent cat count
+#' @details agg_rent_Cat = sum(start, start+1, ... end)
+rent_cat_sum <- function(start, end) {
+  rowSums(across(any_of(paste0("grentcat", start:end, "E"))), na.rm = TRUE)
+}
+
+
+#' Summary statistics for a single ACS estimate included in a dataframe
+#'
+#' @param df Data frame
+#' @param var_name ACS estimate name
+#' @return Summary statistics
+summ_var <- function(df, var_name) {
+  moe_name <- sub("E$", "M", var_name)
+  cv_name <- sub("E$", "CV", var_name)
+  summarise(
+    df,
+    var        = var_name,
+    n          = sum(!is.na(.data[[var_name]])),
+    n_missing  = sum(is.na(.data[[var_name]])),
+    mean       = mean(.data[[var_name]], na.rm = TRUE),
+    min        = min(.data[[var_name]],  na.rm = TRUE),
+    max        = max(.data[[var_name]],  na.rm = TRUE),
+    mean_error = if (moe_name %in% names(df)) mean(.data[[moe_name]], na.rm = TRUE) else NA_real_,
+    mean_cv    = if (cv_name %in% names(df)) mean(.data[[cv_name]], na.rm = TRUE) else NA_real_, 
+    p75_cv     = if (cv_name %in% names(df)) quantile(.data[[cv_name]], 0.75, na.rm = TRUE) else NA_real_,
+    p90_cv     = if (cv_name %in% names(df)) quantile(.data[[cv_name]], 0.9, na.rm = TRUE) else NA_real_
+  )
+}
+
+
+#' Rename ID
+#'
+#' @param df Data frame
+#' @param new_name 
+#' @param old_name 
+#' @return Data frame with renamed ID variable and dummy ID
+rename_id <- function(df, new_name, old_name) {
+  df <- df |>
+    rename({{new_name}} := {{old_name}}) |>
+    mutate(rent_id = TRUE)
+}
+
+
+#' Save data
+#'
+#' @param df Data frame
+#' @param dir Directory
+#' @param name 
+#' @return Data frame with renamed ID variable and dummy ID
+save_data <- function(df, dir, name) {
+    df |>
+        arrow::write_feather(paste0(dir,name))
+}
+
+
+
+```
+
+
+## Define target variables
+
+```{r}
+# Load variables
+v16 <- load_variables(2016, "acs5")
+v23 <- load_variables(2023, "acs5")
+  
+# Try calling variables at the tract level
+v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
+              pop_rent="B25008_003", # Renter Population (Total Population in Occupied Housing Units by Tenure: Total Renter-Occupied
+              hu="B25001_001", # Total Housing units
+              # hu_ten="B25003_001", # Total Housing Unites (by tenure)
+              hh="B11001_001", # Total Households
+              sfd_base="B25024_001",
+              sfd_det="B25024_002", #single_family detached
+              sfd_att="B25024_003", # single-family attached
+              duplex="B25024_004", # 2 units
+              quadplex="B25024_005", # 3 or 4 units
+              mf_5_9="B25024_006", # 3 or 4 units
+              mf_10_19="B25024_007", # 10 to 19 units
+              mf_20_49="B25024_008", # 20 to 49 units
+              mf_50="B25024_009", # 50 and over
+              mobhm="B25024_010", # Mobile home
+              oth_units="B25024_011", # Boat, RV, van, etc
+              rhu_base= "B25003_001", 
+              rhu="B25003_003", # Renter Occupied Housing Units
+              ohu="B25003_002", # Owner occupied Housing Units
+              rent="B25064_001", # Median gross rent
+              rentmv1yr="B25113_002", # Median rent for households that moved in 2021 or later
+              rentmv5yr="B25113_003", # Median rent for households that moved from 2018 to 2020
+              rent1bdr="B25031_003", # Median rent for 1 bedroom
+              rent2bdr="B25031_004", # Median rent for 2 bedroom
+              rent3bdr="B25031_005", # Median rent for 3 bedroom
+              rentyrblt="B25111_001", 
+              rentyrblt_14_16="B25111_002", # Median rent for units built 2014 or later
+              rentyrblt_10_13="B25111_003", # Median rent for units built 2010 to 2013
+              rentyrblt_00_09="B25111_004", # Median rent for units built 2000 to 2009
+              rentyrblt_90_99="B25111_005", # Median rent for units built 1990 to 1999
+              rhutot = "B25063_001", # Number of units with rent computed
+              rhucash = "B25063_002",
+              rhunocash = "B25063_027",
+              grentcat1="B25063_003", # 	GROSS RENT-Less than $100
+              grentcat2="B25063_004", # 	GROSS RENT-$100-149
+              grentcat3="B25063_005", # 	GROSS RENT-$150-199
+              grentcat4="B25063_006", # 	GROSS RENT-$200-249
+              grentcat5="B25063_007", # 	GROSS RENT-$250-299
+              grentcat6="B25063_008", # 	GROSS RENT-$300-349
+              grentcat7="B25063_009", # 	GROSS RENT-$350-450
+              grentcat8="B25063_010", # 	GROSS RENT-$400-449
+              grentcat9="B25063_011", # 	GROSS RENT-$450-500
+              grentcat10 = "B25063_012", # GROSS RENT-$500-549
+              grentcat11 = "B25063_013", # GROSS RENT-$550-599
+              grentcat12 = "B25063_014", # GROSS RENT-$600-649
+              grentcat13 = "B25063_015", # GROSS RENT-$650-699
+              grentcat14 = "B25063_016", # GROSS RENT-$700-749
+              grentcat15 = "B25063_017",  # GROSS RENT-$750-799
+              grentcat16 = "B25063_018", # GROSS RENT-$800-899
+              grentcat17 = "B25063_019", # GROSS RENT-$900-999
+              grentcat18 = "B25063_020", # GROSS RENT-$1,000-1,249
+              grentcat19 = "B25063_021", # GROSS RENT-$1,250-1,499
+              grentcat20 = "B25063_022", # GROSS RENT-$1,500-1,999
+              grentcat21 = "B25063_023", # GROSS RENT-$2,000-2,499
+              grentcat22 = "B25063_024", # GROSS RENT-$2,500-2,999
+              grentcat23 = "B25063_025",  # GROSS RENT-$3,000-3,499
+              grentcat24 = "B25063_026",  # GROSS RENT-$3,500 or Greater
+              # pop_race="B03002_001", # Total: Hispanic or Latino by Race
+              # pop_nhspwt="B03002_003", # Total: Non-Hispanic White
+              # pop_nhspblk="B03002_004", # Total: Non-Hispanic Black
+              # pop_hsp="B03002_012", # Total: Hispanic
+              # pop_hspwt="B03002_013", # Total: Hispanic White
+              # pop_hspblk="B03002_014", # Total: Hispanic Black
+              med_hval = "B25077_001", # Median house value
+              pop_race="B02001_001", # Total: Race
+              pop_blk="B02001_003", # Black pop
+              pop_aa="B02001_005", # Asian pop
+              pop_ethn="B03003_001", # Total: Ethnicity pop
+              pop_hsp="B03003_003", # Hispanic pop
+              lqcrent="B25057_001", # LOWER CONTRACT RENT QUARTILE (DOLLARS)
+              grent_3="B25063_003", # 	GROSS RENT-Less than $100
+              grent_20="B25063_020", # 	GROSS RENT-$1,000 to $1,249
+              grent_26="B25063_026", # 	GROSS RENT-$3,500 or more
+              med_hhinc= "B19013_001", # Median Household income
+              tot_vac_base= "B25002_001", # Vacant housing units
+              tot_vac= "B25002_003" # Vacant housing units
+              )
+
+
+
+v23_save <- v16_save
+
+
+```
+
+# Data Import and Preparation
+
+## Bring in 2012-2016 ACS Tract Variables
+
+```{r }
+
+# Load ACS tables
+acs_trt_16 <- get_acs(geography = "tract",
+                       state = "CA",
+                       variables = v16_save,
+                       year = 2016,
+                       output = "wide",
+                       survey = "acs5")
+
+
+# Calculate low rent housing units
+acs_trt_16 <- acs_trt_16 |>
+  mutate(
+         rhu_lrE = rent_cat_sum(1,17),
+         rhu_lr2E = rent_cat_sum(1,19)
+
+         )
+
+
+# Check missing data + margin of error
+vars <- c("popE", "rentE")
+
+out <- map_dfr(vars, ~summ_var(acs_trt_16, .x))
+out
+
+# Rename ID 
+acs_trt_16 <- rename_id(acs_trt_16, tr2010_id, GEOID)
+
+# Save file
+save_data(acs_trt_16, data_dir, "acs_step1_16.feather")
+
+rm(v16, v16_save)
+```
+
+## Bring in 2019-2023 ACS Block Group Variables
+
+```{r pressure, echo=FALSE}
+
+# Load ACS tables
+acs_bg_23 <- get_acs(geography = "block group",
+                       state = "CA",
+                       variables = v23_save,
+                       year = 2023,
+                       output = "wide",
+                       survey = "acs5")
+
+
+# # Calculate pct_vars + low rent housing units
+# acs_bg_23 <- acs_bg_23 |>
+#   mutate(popCV = calc_cv(popE, popM),
+#          huCV = calc_cv(huE, huM),
+#          rentCV = calc_cv(rentE, rentM),
+
+#          pctrhu = calc_pct(rhuE, rhu_baseE),
+#          pctvac = calc_pct(tot_vacE, tot_vac_baseE),
+#          pctblk = calc_pct(pop_blkE, pop_raceE),
+#          pctaa = calc_pct(pop_aaE, pop_raceE),
+#          pcthsp = calc_pct(pop_hspE, pop_raceE),
+#          pctsfd = calc_pct(sfd_detE, sfd_baseE),
+
+#          rhu_lrE = rent_cat_sum(1,18),
+#          rhu_lr2E = rent_cat_sum(1,20)
+
+#          )
+
+
+# Calculate low rent housing units
+acs_bg_23 <- acs_bg_23 |>
+  mutate(rhu_lrE = rent_cat_sum(1,18),
+         rhu_lr2E = rent_cat_sum(1,20)
+
+         )
+
+# Check for missing data + margin of error
+vars <- c("popE", "rentE")
+
+out <- map_dfr(vars, ~summ_var(acs_bg_23, .x))
+out
+
+
+
+# Rename ID variables
+acs_bg_23 <- rename_id(acs_bg_23, bg2020_id, GEOID)
+
+# Save file
+save_data(acs_bg_23, data_dir, "acs_step1_23.feather")
+
+rm(v23, v23_save)
+```
+
+# Crosswalk Import and Preparation
+
+## Bring in crosswalk: 2023 block group to 2010 tracts
+
+```{r pressure, echo=FALSE}
+xwalk <- read_csv("/Users/jschirmer/Documents/ADU/data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv") |>
+  mutate(x_id = TRUE) 
+
+# Check missing data
+
+xwalk|>
+  summarise(
+    across(c(wt_pop, wt_hh), list(
+      n = ~sum(!is.na(.)),
+      pct_missing = ~100 * sum(is.na(.)) / n(),
+      mean = ~mean(., na.rm = TRUE),
+      min = ~min(., na.rm = TRUE),
+      max = ~max(., na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}")
+  ) 
+
+xwalk|>
+  summarise(
+    across(c(wt_hu, wt_renthu), list(
+      n = ~sum(!is.na(.)),
+      pct_missing = ~100 * sum(is.na(.)) / n(),
+      mean = ~mean(., na.rm = TRUE),
+      min = ~min(., na.rm = TRUE),
+      max = ~max(., na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}")
+  ) 
+
+# Check duplicates
+length(unique(xwalk$bg2020ge)) ## 25617
+length(unique(rent_bg_23$bg2020_id)) ## 25607
+
+# Rename variables
+xwalk <- xwalk |>
+  rename(bg2020_id = bg2020ge,
+         tr2010_id = tr2010ge) |>
+  select(c(bg2020_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
+
+# Save file
+xwalk %>% 
+  arrow::write_feather(paste0(data_dir, "xwalk_bg23_tr10.feather"))
+
+rm(xwalk)
+
+```
+
+## Bring in crosswalk: 2000 tract to 2010 tracts
+
+```{r pressure, echo=FALSE}
+xwalk <- read_csv("/Users/jschirmer/Documents/ADU/data-raw-temp/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv") |>
+  mutate(x_id = TRUE) 
+
+# Check missing data
+
+xwalk|>
+  summarise(
+    across(c(wt_pop, wt_hh), list(
+      n = ~sum(!is.na(.)),
+      pct_missing = ~100 * sum(is.na(.)) / n(),
+      mean = ~mean(., na.rm = TRUE),
+      min = ~min(., na.rm = TRUE),
+      max = ~max(., na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}")
+  ) 
+
+xwalk|>
+  summarise(
+    across(c(wt_hu, wt_renthu), list(
+      n = ~sum(!is.na(.)),
+      pct_missing = ~100 * sum(is.na(.)) / n(),
+      mean = ~mean(., na.rm = TRUE),
+      min = ~min(., na.rm = TRUE),
+      max = ~max(., na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}")
+  ) 
+
+# Check duplicates
+length(unique(xwalk$tr2000ge)) ## 7050
+length(unique(rent_trt_09$tr2000_id)) ## 7049
+
+# Rename variables
+xwalk <- xwalk |>
+  rename(tr2000_id = tr2000ge,
+         tr2010_id = tr2010ge) |>
+  select(c(tr2000_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
+
+# Save file
+xwalk %>% 
+  arrow::write_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
+
+rm(xwalk)
+
+```
+
+
+

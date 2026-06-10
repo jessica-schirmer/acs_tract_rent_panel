@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude update *)",
+      "Read(//Users/jschirmer/research/ADU_Rent/data-raw-temp/**)",
+      "Read(//Users/jschirmer/research/ADU_Rent/data/**)",
+      "Read(//Users/jschirmer/Documents/**)",
+      "Read(//Users/jschirmer/Documents/ADU/data-raw-temp/**)",
+      "Read(//Users/jschirmer/research/ADU_Rent/**)",
+      "Bash(grep -nE '^```\\\\{r' 01_acs.Rmd)"
+    ]
+  }
+}
