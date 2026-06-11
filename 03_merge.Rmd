@@ -1,5 +1,5 @@
 ---
-title: "ACS_step3"
+title: "ACS Step 3 — Merge surveys and build the ACS tract panel"
 author: "Jessica Schirmer"
 date: "`r Sys.Date()`"
 output:
@@ -18,253 +18,87 @@ knitr::opts_chunk$set(
   fig.width = 10,
   fig.height = 6
 )
-
 ```
 
-# Overview
-This script merges ACS data from multiple surveys and calculates change variables.
+## Notebook Overview
 
+**Inputs:**
 
-# Setup
+- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region).
+- `../../../data/acs_step2_23.feather` — 2019–2023 ACS tract measures (SCAG region), aggregated to 2010 tracts.
 
-## Load Packages
-```{r setup, include=FALSE}
+**Outputs:**
+
+- `../../../data/acs_full.feather` — the ACS tract panel: 2016 and 2023 measures
+  (2016 dollars inflation-adjusted to 2023) side by side on `tr2010_id`, with
+  change measures (level `*POST` ratios and share/rate `*PPC` percentage-point
+  differences) and their coefficients of variation.
+
+This notebook:
+
+1. Sets up the environment (packages, helper functions, data directory)
+2. Imports and prepares the 2019–2023 and 2012–2016 tract measures (rename, select, inflation-adjust)
+3. Merges the two surveys and calculates change variables
+4. Validates the saved output
+
+This step only **merges** existing tract measures and derives change variables;
+both inputs are already restricted to the SCAG region (in `02_assemble.Rmd`), so
+no further sample restriction happens here.
+
+# 1. Set up environment
+
+## 1.1 Load packages
+
+```{r load-packages, message=FALSE, warning=FALSE}
 rm(list = ls())
 
-
+library(here)          # project-root-relative paths via here::here()
 library(Hmisc)
 library(dplyr)
 library(tidycensus)
 library(tidyverse)
 library(spatstat)
 library(matrixStats)
-library(survey)    
+library(survey)
 library(srvyr)
-
-## Define data directory
-data_dir <- "/Users/jschirmer/Documents/1Working/ADU_Rent/data/"
-
-
 ```
 
-## Define helper functions
+## 1.2 Load helper functions
 
-```{r}
+This stage's helpers — feather I/O, the survey `merge_df()`, variable
+renaming/selection, inflation adjustment, and the change-variable functions —
+live in `R/merge_helpers.R`. That file is self-contained for this notebook (its
+`merge_df()` differs from the one used by `02_assemble.Rmd`).
 
-#' Load feather data with optional subfolder
-#'
-#' @param path Base data directory path
-#' @param folder Optional subfolder name (NULL if file is in base directory)
-#' @param name Filename including extension
-#' @return Data frame from feather file
-load_data <- function(path, folder = NULL, name) {
-  file_path <- if (!is.null(folder)) {
-    file.path(path, folder, name)
-  } else {
-    file.path(path, name)
-  }
-  
-  if (!file.exists(file_path)) {
-    stop("File not found: ", file_path)
-  }
-  
-  arrow::read_feather(file_path)
-}
-
-
-#' Merge data
-#'
-#' @param left_df left dataframe
-#' @param right_df right dataframe
-
-#' @return Merged dataframe
-merge_df <- function(left_df, right_df) {
-    left_df <- left_df |>
-        mutate(base_id=TRUE)
-
-    right_df <- right_df |>
-        mutate(post_id=TRUE)
-
-    join_df <- full_join(left_df, right_df, by = "tr2010_id") |>
-        mutate(
-        merge = case_when(
-            base_id & post_id ~ "both",
-            base_id ~ "base",
-            post_id ~ "post",
-            .default = NA_character_
-        )
-
-        ) 
-
-        return(join_df)
-
-}
-
-
-
-#' Rename variables
-#'
-#' @param df Data frame
-#' @param yr year of survey 
-#' @return Data frame with modified variable names-- labeled for year of survey (Note: this step implicitly determines which variables are kept in the following step.)
-rename_vars <- function(df, yr) {
-    est_var_list <- c("rentE", "lqcrentE", "popE", "huE", "rhuE", 
-                      "med_hvalE",
-                     "rhu_lrE", "rhu_lr2E",  "med_hhincE", "pctrhuE", "pctvacE", 
-                     "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "mfE")
-    moe_var_list <- c("rentM", "lqcrentM", "popM", "huM", "rhuM", 
-                      "med_hvalM",
-                    #  "rhu_lrM", "rhu_lr2M",  "pctvacM", "pcthspM", "pctaaM",
-                     "med_hhincM", "pctrhuM", "pctblkM", "pcthspM" )
-    cv_var_list <- c("rentCV",  "popCV", "huCV", "rhuCV", 
-                      "med_hvalCV",
-                    #  "rhu_lrCV", "rhu_lr2CV",  "pctvacCV", "pctaaCV", "lqcrentCV",
-                     "med_hhincCV", "pctrhuCV", "pctblkCV" , "pcthspCV")
-  for (i in c(est_var_list, moe_var_list, cv_var_list)) { 
-    new_var_name <- paste0(i, "_", yr)
-    df <- df |>
-      dplyr::rename(!!new_var_name := !!i)
-  }
-  
-  return(df)
-}
-
-#' Select variables
-#'
-#' @param df Data frame
-#' @param yr year of survey 
-#' @param var_list List of additional variables
-#' @return Data frame with only selected variables
-select_vars <- function(df, yr, var_list) {
-
-    df <- df |>
-        select(ends_with("id"), ends_with(yr), var_list)
-
-  
-  return(df)
-}
-
-
-#' Apply inflation adjustment
-#'
-#' @param df Data frame
-#' @param yr year of survey 
-#' @return Data frame with dollar values adjusted to 2023 values
-infl_adj_vars <- function(df, yr, var_list) {
-    dollar_vars <- c("rentE", "lqcrentE", "med_hhincE", "med_hvalE",
-                    "rentM", "lqcrentM", "med_hhincM", "med_hvalM")
-    for (i in dollar_vars) { 
-        if (yr=="16"){
-            var_name <- paste0(i, "_", yr)
-            df <- df |>
-                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * 1.27)
-
-    }
-
-}
-  return(df)
-}
-
-
-
-#' Calculate change variables
-#'
-#' @param df 
-#' @return dataframe with change variables
-calc_change_vars <- function(df) {
-  df |>
-    mutate(rentPOST = ifelse(rentE_16>0, rentE_23/rentE_16, NA),
-           interp_rentPOST = ifelse(rentE_16>0, interp_rent/rentE_16, NA),
-            lqcrentPOST = ifelse(lqcrentE_16>0, lqcrentE_23/lqcrentE_16, NA),
-            # rentPRE = ifelse(rentE_09>0, rentE_16/rentE_09,NA),
-            huPOST = ifelse(huE_16>0, huE_23/huE_16,NA), 
-            rhuPOST = ifelse(rhuE_16>0, rhuE_23/rhuE_16,NA),
-            rhu_lrPOST = ifelse(rhu_lrE_16>0, rhu_lrE_23/rhu_lrE_16, NA),
-            rhu_lr2POST = ifelse(rhu_lr2E_16>0, rhu_lr2E_23/rhu_lr2E_16, NA),
-            # rhucashPOST = ifelse(rhucashE_16>0, rhucashE_23/rhucashE_16,NA),
-            med_hhincPOST = ifelse(med_hhincE_16>0, med_hhincE_23/med_hhincE_16,NA),
-            pctrhuPOST = ifelse(pctrhuE_16>0, pctrhuE_23/pctrhuE_16, NA), 
-            pctvacPOST = ifelse(pctvacE_16>0, pctvacE_23/pctvacE_16,NA),
-            popPOST = ifelse(popE_16>0, popE_23/popE_16, NA), 
-            ) |>
-    mutate(m_flag_rentPOST = if_else(is.na(rentPOST), 1, 0),
-           m_flag_rhuPOST = if_else(is.na(rhuPOST), 1, 0) ) 
-
-}
-
-
-
-
-#' Calculate comb MOE, CV
-#'
-#' @param df 
-#' @return dataframe with CV calculations
-calc_cv_change_vars <- function(df) {
-  df |>
-    mutate(
-            # TEMPLATE: MOE FOR RATIO
-            # MOE_RATIO = if_else(
-            #     EST_DENOM != 0, 
-            #     sqrt(pmax(0, (MOE_NUM^2) - (RATIO^2) * (MOE_DENOM^2))) / EST_DENOM,
-            #     NA_real_
-            # ),      
-            moe_rentPOST = if_else(
-                rentE_16 != 0, 
-                sqrt(pmax(0, (rentM_23^2) - (rentPOST^2) * (rentM_16^2))) / rentE_16,
-                NA_real_
-            ),
-            # moe_interp_rentPOST = if_else(
-            #     rentE_16 != 0, 
-            #     sqrt(pmax(0, (interp_rentM^2) - (interp_rentPOST^2) * (rentM_16^2))) / rentE_16,
-            #     NA_real_
-            # ),
-            moe_rhuPOST = if_else(
-                rhuE_16!= 0, 
-                sqrt(pmax(0, (rhuM_23^2) - (rhuPOST^2) * (rhuM_16^2))) / rhuE_16,
-                NA_real_
-            ),   
-            moe_med_hhincPOST = if_else(
-                med_hhincE_16!= 0, 
-                sqrt(pmax(0, (med_hhincM_23^2) - (med_hhincPOST^2) * (med_hhincM_16^2))) / med_hhincE_16,
-                NA_real_
-            ),   
-            rentPOSTCV =  (moe_rentPOST/1.645)/rentPOST,  
-            # interp_rentPOSTCV =  (moe_interp_rentPOST/1.645)/rentPOST,  
-            rhuPOSTCV =  (moe_rhuPOST/1.645)/rhuPOST, 
-            med_hhincPOSTCV = (moe_med_hhincPOST/1.645)/med_hhincPOST,
-
-            ) 
-}
-
-
-
-
-
-#' Save data
-#'
-#' @param df Data frame
-#' @param dir Directory
-#' @param name 
-#' @return Data frame with renamed ID variable and dummy ID
-save_data <- function(df, dir, name) {
-    df |>
-        arrow::write_feather(paste0(dir,name))
-}
-
-
-
+```{r load-helpers}
+source(here::here("R", "merge_helpers.R"))
 ```
 
-# Data Import and Preparation
+## 1.3 Set data directory
 
-# Bring in 2023 ACS data
-```{r setup, include=FALSE}
+```{r set-paths}
+# Trailing slash is intentional: save_data() builds paths with paste0().
+data_dir <- "../../../data/"
+```
 
+# 2. Import and prepare survey measures
+
+## 2.1 Load and prepare 2019–2023 measures
+
+Load the assembled 2023 tract measures, suffix their variables with `_23`, and
+keep the analytic variable set plus a few extra quality/derived columns
+(`pct_miss_rent`, `pct_miss_hval`, `tc_flag_rent_23`, `interp_rent`). The analytic
+set now also carries the renamed multifamily count `mf5E`, the non-single-family-
+attached count `nsfaE`, and the rental / for-sale vacancy rates
+`pctrvacE` / `pctsvacE` (added to `rename_vars()` so they get the year suffix).
+
+```{r prep-23}
 # # Load 2005-2009 ACS data
 # rent_09 <- load_data(data_dir, NULL, "acs_09_step2.feather")
 
 # Load 2019-2023 ACS data
 acs_23 <- load_data(data_dir, NULL, "acs_step2_23.feather")
+report_n(acs_23, "2023 tract measures loaded")
 
 # Rename variables
 acs_23 <- rename_vars(acs_23, "23")
@@ -277,24 +111,28 @@ acs_23 <- select_vars(acs_23, "23", var_list)
 
 # Apply inflation adjustment
 # n/a
-
-
-
-
-
-
 ```
 
-```{r}
+## 2.2 Load and prepare 2012–2016 measures
 
+### Decision: Inflation-adjust 2016 dollars to 2023 dollars
+
+Dollar-denominated 2016 measures (median rent, lower-quartile contract rent,
+median household income, median house value — estimates and their margins of
+error) are multiplied by **1.27** to express them in 2023 dollars, so that
+change variables in §3.2 compare *real* values across the two periods. The
+adjustment is applied only to the 2016 vintage (`infl_adj_vars(..., "16")`).
+
+```{r prep-16}
 # Load 2012-2016 ACS data
 acs_16 <- load_data(data_dir, NULL, "acs_step2_16.feather")
+report_n(acs_16, "2016 tract measures loaded")
 
 # Rename variables
 acs_16 <- rename_vars(acs_16, "16")
 
 # Select variables
-var_list <- c("m_flag_rent" , "m_flag_lqcrent", "m_flag_rhu", "m_flag_med_hval", 
+var_list <- c("m_flag_rent" , "m_flag_lqcrent", "m_flag_rhu", "m_flag_med_hval",
                "zero_flag_rhu", "tc_flag_rent", "tc_flag_lqcrent", "tc_flag_med_hval")
 acs_16 <- select_vars(acs_16, "16", var_list)
 
@@ -306,12 +144,28 @@ summary(acs_16$rentE_16)
 # table(acs_16$m_flag1_16, useNA="ifany")
 ```
 
-# Merge tract rent data sets
-```{r setup, include=FALSE}
+# 3. Merge surveys and calculate change variables
 
-# Merge post rent data 
+## 3.1 Merge 2016 and 2023 tract measures
+
+### Decision: Keep all tracts (full join, not inner join)
+
+The two surveys are full-joined on `tr2010_id` and **all** tracts are retained —
+the inner-join filter (`filter(merge=="both")`) is intentionally left commented
+out. Tracts present in only one period keep `NA` for the other period's measures;
+change variables (§3.2) are guarded so they are `NA` when a base value is
+missing or zero. There is therefore **no row-dropping filter** in this notebook.
+
+```{r merge-surveys}
+# Merge post rent data
+n_16 <- nrow(acs_16)
+n_23 <- nrow(acs_23)
 acs_16_23 <- merge_df(acs_16, acs_23)
 table(acs_16_23$merge)
+cat(sprintf("Merged %s (2016) and %s (2023) tracts -> %s panel rows\n",
+            formatC(n_16, format = "d", big.mark = ","),
+            formatC(n_23, format = "d", big.mark = ","),
+            formatC(nrow(acs_16_23), format = "d", big.mark = ",")))
 
 # Keep all
 acs_16_23 <- acs_16_23 |>
@@ -331,8 +185,8 @@ acs_full <- acs_16_23
 #       pre_id ~ "pre"
 #     ),
 #     .keep = "unused"
-#   ) %>% 
-#   as_tibble() 
+#   ) %>%
+#   as_tibble()
 # table(rent_full$merge)
 # # all but 20 of the base tracts merged the post- tracts merged
 # # 97% of tracts w/ rent data in 2016 have rent data for pre and post
@@ -341,32 +195,65 @@ acs_full <- acs_16_23
 # acs_full <- acs_full |>
 #   # dplyr::filter(merge=="both") |>
 #   select(-c(merge))
-
-
 ```
 
-# Calculate change in rent measures
+## 3.2 Calculate change variables and their CVs
 
-```{r setup, include=FALSE}
+### Decision: Level changes are ratios; share / rate changes are percentage-point differences
 
+Dollar- and count-denominated change ("POST") variables are the ratio of the
+2023 value to the (inflation-adjusted) 2016 value, defined only where the 2016
+denominator is positive (otherwise `NA`).
+
+Share and rate change variables are instead **percentage-point differences**
+(`value_23 - value_16`, named `*PPC`): the renter-occupied share `pctrhuPPC`, the
+overall vacant share `pctvacPPC`, and the rental / for-sale vacancy rates
+`pctrvacPPC` / `pctsvacPPC`. A difference is the natural change for a rate, is
+defined wherever both periods are present (so it avoids the large zero-base `NA`
+counts a ratio produces for rates that are often `0`), and is bounded in roughly
+[−1, 1]. The carried `mf5E` / `nsfaE` counts are levels only and get no change
+variable.
+
+`m_flag_rentPOST` / `m_flag_rhuPOST` mark missing change values. Coefficients of
+variation for the key (level) change variables come from ratio-MOE propagation in
+`calc_cv_change_vars()`; the share / rate `*PPC` differences carry no CV.
+
+```{r change-vars}
 # Calculate change variables
 acs_full <- calc_change_vars(acs_full)
 
 table(acs_full$m_flag_rentPOST)
 table(acs_full$m_flag_rhuPOST)
 
+# Quick distribution check on the share / rate percentage-point changes
+# (expected range roughly [-1, 1])
+summary(acs_full$pctrhuPPC)
+summary(acs_full$pctvacPPC)
+summary(acs_full$pctrvacPPC)
+summary(acs_full$pctsvacPPC)
+
 # Calculate CV for change variables
 acs_full <- calc_cv_change_vars (acs_full)
-
-# Save file
-acs_full %>% 
-  arrow::write_feather(paste0(data_dir, "acs_full.feather"))
-
 ```
 
+## 3.3 Save the ACS tract panel
 
-```{r setup, include=FALSE}
+**Output:** `acs_full.feather` — the ACS tract panel feeding the downstream
+analysis stages.
 
+```{r save-panel}
+report_n(acs_full, "ACS tract panel to save")
+
+# Save file
+acs_full %>%
+  arrow::write_feather(paste0(data_dir, "acs_full.feather"))
+```
+
+## 3.4 Summarize coefficients of variation
+
+Quick reliability check: CV distributions for the level and change measures.
+
+```{r summarize-cv}
 print("Summary Stats: CV, 2016 Rental housing units ")
 summary(acs_full$rhuCV_16)
 print("Summary Stats: CV, 2023 Rental housing units ")
@@ -398,10 +285,64 @@ summary(acs_full$med_hhincPOSTCV)
 
 cor(acs_full$interp_rentPOST, acs_full$rentPOST, use = "complete.obs")
 # correlation between interpolated rent change and weighed median rent change is .88
-
-
 ```
 
-```{r}
+# 4. Validate outputs
 
+Re-loads the saved panel and checks key uniqueness, missingness on critical
+variables, the encoding of the flag columns, and the distribution of every
+numeric column.
+
+```{r reload-panel}
+acs_out <- arrow::read_feather(paste0(data_dir, "acs_full.feather"))
+```
+
+## 4.1 Check key uniqueness and duplicates
+
+Expected: the panel is unique on `tr2010_id`.
+
+```{r validate-keys-panel}
+cat("acs_full:", nrow(acs_out), "rows |",
+    n_distinct(acs_out$tr2010_id), "unique tr2010_id |",
+    sum(duplicated(acs_out$tr2010_id)), "duplicate ids\n")
+```
+
+## 4.2 Check missingness on critical variables
+
+Expected: no missing `tr2010_id`. Missingness in the change ratios reflects
+tracts present in only one period or with a non-positive base value; we report
+counts rather than impose a threshold.
+
+```{r validate-missingness-panel}
+cat("acs_full missing tr2010_id:    ", sum(is.na(acs_out$tr2010_id)), "\n")
+cat("acs_full missing rentE_16:     ", sum(is.na(acs_out$rentE_16)), "\n")
+cat("acs_full missing rentE_23:     ", sum(is.na(acs_out$rentE_23)), "\n")
+cat("acs_full missing rentPOST:     ", sum(is.na(acs_out$rentPOST)), "\n")
+cat("acs_full missing interp_rentPOST:", sum(is.na(acs_out$interp_rentPOST)), "\n")
+```
+
+## 4.3 Check flag-variable encoding
+
+The data-quality / change flags (`m_flag_*`, `zero_flag_*`, `tc_flag_*`) should
+be 0/1 integers, not string labels. The `base_id` / `post_id` columns are
+join indicators (logical) and are reported for transparency.
+
+```{r validate-flags-panel}
+flag_cols <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs_out), value = TRUE)
+for (f in flag_cols) {
+  cat("acs_full", f, "-> class:", class(acs_out[[f]]),
+      "| values:", paste(sort(unique(acs_out[[f]])), collapse = ", "), "\n")
+}
+cat("acs_full base_id class:", class(acs_out$base_id),
+    "| post_id class:", class(acs_out$post_id), "\n")
+```
+
+## 4.4 Summarize numeric variable distributions
+
+Mean, min, and max for every numeric column in the panel. Watch for impossible
+values (negative counts, change ratios far from a plausible range, or shares
+outside [0, 1]).
+
+```{r validate-numeric-panel}
+print_numeric_summary(acs_out, "acs_full")
 ```

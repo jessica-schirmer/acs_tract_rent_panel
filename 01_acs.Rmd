@@ -1,5 +1,5 @@
 ---
-title: "ACS_step1"
+title: "ACS Step 1 — Import ACS variables and geographic crosswalks"
 author: "Jessica Schirmer"
 date: "`r Sys.Date()`"
 output:
@@ -18,117 +18,121 @@ knitr::opts_chunk$set(
   fig.width = 10,
   fig.height = 6
 )
-
 ```
 
-# Overview
-This script imports ACS variables for tract-level analysis.
+## Notebook Overview
 
+**Inputs:**
 
-# Setup
+- US Census Bureau ACS 5-year API (via `tidycensus`): 2012–2016 ACS at the
+  **tract** level and 2019–2023 ACS at the **block-group** level, California.
+- `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`
+  — NHGIS geographic crosswalk, 2020 block groups → 2010 tracts (allocation weights).
+- `../../../data-raw-temp/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv`
+  — NHGIS geographic crosswalk, 2000 tracts → 2010 tracts (allocation weights).
 
-## Load Packages
-```{r setup, include=FALSE}
+**Outputs:**
+
+- `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
+- `../../../data/acs_step1_23.feather` — 2019–2023 ACS estimates, one row per 2020 CA block group.
+- `../../../data/xwalk_bg23_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
+- `../../../data/xwalk_tr00_tr10.feather` — 2000 tract → 2010 tract crosswalk (weights).
+
+This notebook:
+
+1. Sets up the environment (packages, helper functions, data paths)
+2. Defines the target ACS variables to extract
+3. Imports and prepares the 2012–2016 ACS tract data
+4. Imports and prepares the 2019–2023 ACS block-group data
+5. Imports and prepares the geographic crosswalks
+6. Validates the saved outputs
+
+This step only **imports and stores** source data; it performs no row-level
+filtering or sample restriction. Geographic harmonization (aggregating the
+2019–2023 block-group data to 2010 tracts using these crosswalks) happens in
+`02_assemble.Rmd`.
+
+# 1. Set up environment
+
+## 1.1 Load packages
+
+```{r load-packages, message=FALSE, warning=FALSE}
 rm(list = ls())
+
+# One-time installs (left commented for reference):
 # install.packages("tidycensus")
-# install.packages("Hmisc")   
+# install.packages("Hmisc")
 # install.packages("spatstat")
 # install.packages("matrixStats")
 # install.packages("survey")
 # install.packages("srvyr")
+# install.packages("here")
+# install.packages("arrow")
 
-
+library(here)          # project-root-relative paths via here::here()
 library(Hmisc)
 library(dplyr)
 library(tidycensus)
 library(tidyverse)
 library(spatstat)
 library(matrixStats)
-library(survey)    # core survey analysis functions
-library(srvyr)  # tidyverse-style wrapper (I'll show both if helpful)
+library(survey)        # core survey analysis functions
+library(srvyr)         # tidyverse-style wrapper for survey
 
-# census_api_key("REDACTED_NONFUNCTIONAL_CENSUS_API_KEY", install=TRUE)
-
-data_dir <- "/Users/jschirmer/Documents/ADU/data/"
-
-
+# Census API key:
+# tidycensus requires a Census API key. Do NOT hard-code the key in this file.
+# Set it once per machine with the line below (run interactively, then remove),
+# or store CENSUS_API_KEY in your .Renviron so it loads automatically.
+# census_api_key(Sys.getenv("CENSUS_API_KEY"), install = TRUE)
 ```
 
-## Define helper functions
+## 1.2 Load helper functions
 
-```{r}
-#' Calculate aggregate rent cat from ACS estimates
-#'
-#' @param start ACS starting rent category
-#' @param end ACS ending rent category
-#' @return agg rent cat count
-#' @details agg_rent_Cat = sum(start, start+1, ... end)
-rent_cat_sum <- function(start, end) {
-  rowSums(across(any_of(paste0("grentcat", start:end, "E"))), na.rm = TRUE)
-}
+Reusable helpers (`rent_cat_sum()`, `summ_var()`, `rename_id()`, `save_data()`,
+and the diagnostic helpers `report_n()` / `print_numeric_summary()`) live in
+`R/helpers.R` and are loaded here. Keeping them in one documented file lets every
+notebook in this stage share the same definitions.
 
-
-#' Summary statistics for a single ACS estimate included in a dataframe
-#'
-#' @param df Data frame
-#' @param var_name ACS estimate name
-#' @return Summary statistics
-summ_var <- function(df, var_name) {
-  moe_name <- sub("E$", "M", var_name)
-  cv_name <- sub("E$", "CV", var_name)
-  summarise(
-    df,
-    var        = var_name,
-    n          = sum(!is.na(.data[[var_name]])),
-    n_missing  = sum(is.na(.data[[var_name]])),
-    mean       = mean(.data[[var_name]], na.rm = TRUE),
-    min        = min(.data[[var_name]],  na.rm = TRUE),
-    max        = max(.data[[var_name]],  na.rm = TRUE),
-    mean_error = if (moe_name %in% names(df)) mean(.data[[moe_name]], na.rm = TRUE) else NA_real_,
-    mean_cv    = if (cv_name %in% names(df)) mean(.data[[cv_name]], na.rm = TRUE) else NA_real_, 
-    p75_cv     = if (cv_name %in% names(df)) quantile(.data[[cv_name]], 0.75, na.rm = TRUE) else NA_real_,
-    p90_cv     = if (cv_name %in% names(df)) quantile(.data[[cv_name]], 0.9, na.rm = TRUE) else NA_real_
-  )
-}
-
-
-#' Rename ID
-#'
-#' @param df Data frame
-#' @param new_name 
-#' @param old_name 
-#' @return Data frame with renamed ID variable and dummy ID
-rename_id <- function(df, new_name, old_name) {
-  df <- df |>
-    rename({{new_name}} := {{old_name}}) |>
-    mutate(rent_id = TRUE)
-}
-
-
-#' Save data
-#'
-#' @param df Data frame
-#' @param dir Directory
-#' @param name 
-#' @return Data frame with renamed ID variable and dummy ID
-save_data <- function(df, dir, name) {
-    df |>
-        arrow::write_feather(paste0(dir,name))
-}
-
-
-
+```{r load-helpers}
+source(here::here("R", "helpers.R"))
 ```
 
+## 1.3 Set data paths
 
-## Define target variables
+All paths are relative to this repository, which is the integration point
+between pipeline stages. Raw source files are read from `../../../data-raw-temp/`
+(never modified); processed outputs are written to `../../../data/`.
 
-```{r}
-# Load variables
+```{r set-paths}
+# Trailing slash on data_dir is intentional: save_data() builds paths with paste0().
+data_dir <- "../../../data/"
+raw_dir  <- "../../../data-raw-temp"
+```
+
+# 2. Define target ACS variables
+
+## 2.1 Load ACS variable dictionaries
+
+The full ACS variable dictionaries are loaded for interactive lookup of Census
+table/variable codes while selecting measures. They are not used in any
+downstream transformation.
+
+```{r load-variable-dictionaries}
 v16 <- load_variables(2016, "acs5")
 v23 <- load_variables(2023, "acs5")
-  
-# Try calling variables at the tract level
+```
+
+## 2.2 Specify variables to extract
+
+`v16_save` maps short, analysis-friendly names to Census variable codes. The
+same set is reused for 2023 (`v23_save`) so the two vintages share an identical
+variable layout. Inline comments give the plain-language meaning of each code.
+
+This set includes vacancy-status detail from table B25004: `vac_forrent` (vacant
+units for rent) and `vac_forsale` (vacant units for sale only).
+
+```{r specify-variables}
+# Variables to pull at the tract / block-group level
 v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
               pop_rent="B25008_003", # Renter Population (Total Population in Occupied Housing Units by Tenure: Total Renter-Occupied
               hu="B25001_001", # Total Housing units
@@ -139,13 +143,13 @@ v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
               sfd_att="B25024_003", # single-family attached
               duplex="B25024_004", # 2 units
               quadplex="B25024_005", # 3 or 4 units
-              mf_5_9="B25024_006", # 3 or 4 units
+              mf_5_9="B25024_006", # 5 to 9 units
               mf_10_19="B25024_007", # 10 to 19 units
               mf_20_49="B25024_008", # 20 to 49 units
               mf_50="B25024_009", # 50 and over
               mobhm="B25024_010", # Mobile home
               oth_units="B25024_011", # Boat, RV, van, etc
-              rhu_base= "B25003_001", 
+              rhu_base= "B25003_001",
               rhu="B25003_003", # Renter Occupied Housing Units
               ohu="B25003_002", # Owner occupied Housing Units
               rent="B25064_001", # Median gross rent
@@ -154,7 +158,7 @@ v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
               rent1bdr="B25031_003", # Median rent for 1 bedroom
               rent2bdr="B25031_004", # Median rent for 2 bedroom
               rent3bdr="B25031_005", # Median rent for 3 bedroom
-              rentyrblt="B25111_001", 
+              rentyrblt="B25111_001",
               rentyrblt_14_16="B25111_002", # Median rent for units built 2014 or later
               rentyrblt_10_13="B25111_003", # Median rent for units built 2010 to 2013
               rentyrblt_00_09="B25111_004", # Median rent for units built 2000 to 2009
@@ -168,9 +172,9 @@ v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
               grentcat4="B25063_006", # 	GROSS RENT-$200-249
               grentcat5="B25063_007", # 	GROSS RENT-$250-299
               grentcat6="B25063_008", # 	GROSS RENT-$300-349
-              grentcat7="B25063_009", # 	GROSS RENT-$350-450
+              grentcat7="B25063_009", # 	GROSS RENT-$350-399
               grentcat8="B25063_010", # 	GROSS RENT-$400-449
-              grentcat9="B25063_011", # 	GROSS RENT-$450-500
+              grentcat9="B25063_011", # 	GROSS RENT-$450-499
               grentcat10 = "B25063_012", # GROSS RENT-$500-549
               grentcat11 = "B25063_013", # GROSS RENT-$550-599
               grentcat12 = "B25063_014", # GROSS RENT-$600-649
@@ -203,24 +207,26 @@ v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
               grent_20="B25063_020", # 	GROSS RENT-$1,000 to $1,249
               grent_26="B25063_026", # 	GROSS RENT-$3,500 or more
               med_hhinc= "B19013_001", # Median Household income
-              tot_vac_base= "B25002_001", # Vacant housing units
-              tot_vac= "B25002_003" # Vacant housing units
+              tot_vac_base= "B25002_001", # Total housing units (occupancy-status base)
+              tot_vac= "B25002_003", # Vacant housing units
+              vac_forrent= "B25004_002", # Vacant: for rent (available rental units)
+              vac_forsale= "B25004_004" # Vacant: for sale only (available for-sale units)
               )
 
 
 
 v23_save <- v16_save
-
-
 ```
 
-# Data Import and Preparation
+# 3. Import and prepare 2012–2016 ACS tract data
 
-## Bring in 2012-2016 ACS Tract Variables
+## 3.1 Download 2016 ACS tract estimates
 
-```{r }
+Pulls the selected variables for all California census tracts from the 2012–2016
+ACS 5-year file in wide format (one column per estimate `*E` and margin of error
+`*M`). Expected: one row per CA 2010-vintage tract (~8,057).
 
-# Load ACS tables
+```{r download-acs-tract-16}
 acs_trt_16 <- get_acs(geography = "tract",
                        state = "CA",
                        variables = v16_save,
@@ -228,36 +234,72 @@ acs_trt_16 <- get_acs(geography = "tract",
                        output = "wide",
                        survey = "acs5")
 
+report_n(acs_trt_16, "2016 ACS tracts imported")
+```
 
-# Calculate low rent housing units
+## 3.2 Derive low-rent housing-unit counts
+
+### Decision: Year-specific low-rent category cutoffs
+
+We build two aggregate "low rent" renter-occupied housing-unit counts by summing
+contiguous gross-rent categories (table B25063). For **2016** we use categories
+**1–17** (`rhu_lrE`) and **1–19** (`rhu_lr2E`).
+
+**Rationale:**
+
+- The gross-rent categories are fixed dollar bins that do not move with
+  inflation, so the dollar value of a given "low rent" threshold drifts upward
+  over time.
+- To keep the *real* rent threshold roughly comparable across vintages, the
+  2019–2023 cutoffs are shifted up by one category (1–18 / 1–20; see Section 4.2).
+
+```{r derive-low-rent-16}
 acs_trt_16 <- acs_trt_16 |>
   mutate(
-         rhu_lrE = rent_cat_sum(1,17),
-         rhu_lr2E = rent_cat_sum(1,19)
+    rhu_lrE  = rent_cat_sum(1, 17),
+    rhu_lr2E = rent_cat_sum(1, 19)
+  )
+```
 
-         )
+## 3.3 Check missingness and margins of error
 
+Quick data-quality probe on two bellwether estimates (population and median
+gross rent): counts, missingness, mean/range, and mean margin of error.
 
-# Check missing data + margin of error
+```{r check-missingness-16}
 vars <- c("popE", "rentE")
 
 out <- map_dfr(vars, ~summ_var(acs_trt_16, .x))
 out
+```
 
-# Rename ID 
+## 3.4 Rename geographic ID and save
+
+Renames `GEOID` to `tr2010_id` (and tags the table with the `rent_id` join
+flag), then writes the output. **Output:** `acs_step1_16.feather` — 2012–2016 ACS
+estimates with one row per 2010 CA tract, consumed by `02_assemble.Rmd`.
+
+```{r save-acs-tract-16}
 acs_trt_16 <- rename_id(acs_trt_16, tr2010_id, GEOID)
 
-# Save file
+report_n(acs_trt_16, "2016 ACS tracts saved")
 save_data(acs_trt_16, data_dir, "acs_step1_16.feather")
 
 rm(v16, v16_save)
 ```
 
-## Bring in 2019-2023 ACS Block Group Variables
+# 4. Import and prepare 2019–2023 ACS block-group data
 
-```{r pressure, echo=FALSE}
+## 4.1 Download 2023 ACS block-group estimates
 
-# Load ACS tables
+### Decision: Pull 2019–2023 at the block-group level
+
+The 2019–2023 ACS is imported at the **block-group** level (not tract), because
+2020-vintage block groups can be allocated to 2010 tracts using the NHGIS
+crosswalk loaded in Section 5.1. Aggregation to 2010 tracts happens downstream in
+`02_assemble.Rmd`. Expected: one row per CA 2020-vintage block group (~25,000+).
+
+```{r download-acs-bg-23}
 acs_bg_23 <- get_acs(geography = "block group",
                        state = "CA",
                        variables = v23_save,
@@ -265,61 +307,92 @@ acs_bg_23 <- get_acs(geography = "block group",
                        output = "wide",
                        survey = "acs5")
 
+report_n(acs_bg_23, "2023 ACS block groups imported")
 
-# # Calculate pct_vars + low rent housing units
+# # Retained exploratory code: earlier pct/CV derivations, kept for reference.
+# # These rely on calc_cv()/calc_pct() helpers and are computed downstream instead.
 # acs_bg_23 <- acs_bg_23 |>
 #   mutate(popCV = calc_cv(popE, popM),
 #          huCV = calc_cv(huE, huM),
 #          rentCV = calc_cv(rentE, rentM),
-
 #          pctrhu = calc_pct(rhuE, rhu_baseE),
 #          pctvac = calc_pct(tot_vacE, tot_vac_baseE),
 #          pctblk = calc_pct(pop_blkE, pop_raceE),
 #          pctaa = calc_pct(pop_aaE, pop_raceE),
 #          pcthsp = calc_pct(pop_hspE, pop_raceE),
 #          pctsfd = calc_pct(sfd_detE, sfd_baseE),
-
 #          rhu_lrE = rent_cat_sum(1,18),
 #          rhu_lr2E = rent_cat_sum(1,20)
-
 #          )
+```
 
+## 4.2 Derive low-rent housing-unit counts
 
-# Calculate low rent housing units
+### Decision: Shift low-rent cutoffs up one category for 2019–2023
+
+For **2023** we use gross-rent categories **1–18** (`rhu_lrE`) and **1–20**
+(`rhu_lr2E`) — one category higher than the 2016 cutoffs (Section 3.2) — to hold
+the real (inflation-adjusted) low-rent threshold roughly constant across vintages.
+
+```{r derive-low-rent-23}
 acs_bg_23 <- acs_bg_23 |>
-  mutate(rhu_lrE = rent_cat_sum(1,18),
-         rhu_lr2E = rent_cat_sum(1,20)
+  mutate(
+    rhu_lrE  = rent_cat_sum(1, 18),
+    rhu_lr2E = rent_cat_sum(1, 20)
+  )
+```
 
-         )
+## 4.3 Check missingness and margins of error
 
-# Check for missing data + margin of error
+Same bellwether data-quality probe as Section 3.3, on the block-group data.
+
+```{r check-missingness-23}
 vars <- c("popE", "rentE")
 
 out <- map_dfr(vars, ~summ_var(acs_bg_23, .x))
 out
+```
 
+## 4.4 Rename geographic ID and save
 
+Renames `GEOID` to `bg2020_id` (and tags the `rent_id` flag), then writes the
+output. **Output:** `acs_step1_23.feather` — 2019–2023 ACS estimates with one row
+per 2020 CA block group, consumed by `02_assemble.Rmd`.
 
-# Rename ID variables
+```{r save-acs-bg-23}
 acs_bg_23 <- rename_id(acs_bg_23, bg2020_id, GEOID)
 
-# Save file
+report_n(acs_bg_23, "2023 ACS block groups saved")
 save_data(acs_bg_23, data_dir, "acs_step1_23.feather")
 
 rm(v23, v23_save)
 ```
 
-# Crosswalk Import and Preparation
+# 5. Import and prepare geographic crosswalks
 
-## Bring in crosswalk: 2023 block group to 2010 tracts
+## 5.1 Crosswalk 2023 block groups to 2010 tracts
 
-```{r pressure, echo=FALSE}
-xwalk <- read_csv("/Users/jschirmer/Documents/ADU/data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv") |>
-  mutate(x_id = TRUE) 
+### Decision: Use NHGIS weighted crosswalks for geographic harmonization
 
-# Check missing data
+We use the NHGIS block-group-to-tract crosswalk, which provides allocation
+weights (`wt_pop`, `wt_hh`, `wt_hu`, `wt_renthu`) giving the share of each source
+geography's population / households / housing units / renter housing units that
+falls into each target tract. Downstream aggregation (`02_assemble.Rmd`) uses
+these weights to apportion block-group estimates to 2010 tracts.
 
-xwalk|>
+Because a single block group can split across multiple tracts (and vice versa),
+the crosswalk is intentionally **many-to-many**: the unique row key is the
+(`bg2020_id`, `tr2010_id`) pair, not either ID alone.
+
+```{r import-xwalk-bg-tr}
+xwalk <- read_csv(file.path(raw_dir, "nhgis", "nhgis_bg2020_tr2010_06",
+                            "nhgis_bg2020_tr2010_06.csv")) |>
+  mutate(x_id = TRUE)
+
+report_n(xwalk, "bg2020->tr2010 crosswalk imported")
+
+# Missing-data check on the weight columns
+xwalk |>
   summarise(
     across(c(wt_pop, wt_hh), list(
       n = ~sum(!is.na(.)),
@@ -329,9 +402,9 @@ xwalk|>
       max = ~max(., na.rm = TRUE)
     ),
     .names = "{.col}_{.fn}")
-  ) 
+  )
 
-xwalk|>
+xwalk |>
   summarise(
     across(c(wt_hu, wt_renthu), list(
       n = ~sum(!is.na(.)),
@@ -341,35 +414,47 @@ xwalk|>
       max = ~max(., na.rm = TRUE)
     ),
     .names = "{.col}_{.fn}")
-  ) 
+  )
 
-# Check duplicates
-length(unique(xwalk$bg2020ge)) ## 25617
-length(unique(rent_bg_23$bg2020_id)) ## 25607
+# Key check: rows should be unique on the (block group, tract) pair.
+# Duplicate block-group IDs are EXPECTED here (split block groups).
+cat(sprintf(
+  "bg2020->tr2010: %s rows | %s unique (bg, tract) pairs | %s block groups | %s tracts\n",
+  formatC(nrow(xwalk), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$bg2020ge, xwalk$tr2010ge), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$bg2020ge), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$tr2010ge), format = "d", big.mark = ",")
+))
 
-# Rename variables
+# Rename to pipeline ID names and keep only key + weight columns
 xwalk <- xwalk |>
   rename(bg2020_id = bg2020ge,
          tr2010_id = tr2010ge) |>
   select(c(bg2020_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
 
-# Save file
-xwalk %>% 
+# Output: xwalk_bg23_tr10.feather — 2020 block group -> 2010 tract weights
+report_n(xwalk, "bg2020->tr2010 crosswalk saved")
+xwalk |>
   arrow::write_feather(paste0(data_dir, "xwalk_bg23_tr10.feather"))
 
 rm(xwalk)
-
 ```
 
-## Bring in crosswalk: 2000 tract to 2010 tracts
+## 5.2 Crosswalk 2000 tracts to 2010 tracts
 
-```{r pressure, echo=FALSE}
-xwalk <- read_csv("/Users/jschirmer/Documents/ADU/data-raw-temp/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv") |>
-  mutate(x_id = TRUE) 
+The NHGIS 2000-tract-to-2010-tract crosswalk, used to harmonize 2000-vintage
+tract geographies to 2010 tracts. As in Section 5.1 the crosswalk is
+many-to-many, keyed on the (`tr2000_id`, `tr2010_id`) pair.
 
-# Check missing data
+```{r import-xwalk-tr-tr}
+xwalk <- read_csv(file.path(raw_dir, "nhgis", "nhgis_tr2000_tr2010_06",
+                            "nhgis_tr2000_tr2010_06.csv")) |>
+  mutate(x_id = TRUE)
 
-xwalk|>
+report_n(xwalk, "tr2000->tr2010 crosswalk imported")
+
+# Missing-data check on the weight columns
+xwalk |>
   summarise(
     across(c(wt_pop, wt_hh), list(
       n = ~sum(!is.na(.)),
@@ -379,9 +464,9 @@ xwalk|>
       max = ~max(., na.rm = TRUE)
     ),
     .names = "{.col}_{.fn}")
-  ) 
+  )
 
-xwalk|>
+xwalk |>
   summarise(
     across(c(wt_hu, wt_renthu), list(
       n = ~sum(!is.na(.)),
@@ -391,25 +476,113 @@ xwalk|>
       max = ~max(., na.rm = TRUE)
     ),
     .names = "{.col}_{.fn}")
-  ) 
+  )
 
-# Check duplicates
-length(unique(xwalk$tr2000ge)) ## 7050
-length(unique(rent_trt_09$tr2000_id)) ## 7049
+# Key check: rows should be unique on the (2000 tract, 2010 tract) pair.
+# Duplicate 2000-tract IDs are EXPECTED here (split tracts).
+cat(sprintf(
+  "tr2000->tr2010: %s rows | %s unique (tr2000, tr2010) pairs | %s 2000 tracts | %s 2010 tracts\n",
+  formatC(nrow(xwalk), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$tr2000ge, xwalk$tr2010ge), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$tr2000ge), format = "d", big.mark = ","),
+  formatC(n_distinct(xwalk$tr2010ge), format = "d", big.mark = ",")
+))
 
-# Rename variables
+# Rename to pipeline ID names and keep only key + weight columns
 xwalk <- xwalk |>
   rename(tr2000_id = tr2000ge,
          tr2010_id = tr2010ge) |>
   select(c(tr2000_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
 
-# Save file
-xwalk %>% 
+# Output: xwalk_tr00_tr10.feather — 2000 tract -> 2010 tract weights
+report_n(xwalk, "tr2000->tr2010 crosswalk saved")
+xwalk |>
   arrow::write_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
 
 rm(xwalk)
-
 ```
 
+# 6. Validate outputs
 
+This section re-loads the four saved outputs from `../../../data/` and checks
+each for key uniqueness, missingness on critical variables, the encoding of the
+join-flag columns, and the distribution (mean / range) of every numeric column.
+Re-reading the written files confirms the save round-tripped correctly.
 
+```{r reload-outputs}
+acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step1_16.feather"))
+acs23_out <- arrow::read_feather(paste0(data_dir, "acs_step1_23.feather"))
+xbg_out   <- arrow::read_feather(paste0(data_dir, "xwalk_bg23_tr10.feather"))
+xtr_out   <- arrow::read_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
+```
+
+## 6.1 Check key uniqueness and duplicates
+
+Expected: the ACS tables are unique on their geographic ID; the crosswalks are
+unique on their (source, target) key pair (individual source/target IDs repeat
+by design).
+
+```{r validate-keys}
+cat("acs_step1_16: ", nrow(acs16_out), "rows |",
+    n_distinct(acs16_out$tr2010_id), "unique tr2010_id |",
+    sum(duplicated(acs16_out$tr2010_id)), "duplicate ids\n")
+
+cat("acs_step1_23: ", nrow(acs23_out), "rows |",
+    n_distinct(acs23_out$bg2020_id), "unique bg2020_id |",
+    sum(duplicated(acs23_out$bg2020_id)), "duplicate ids\n")
+
+cat("xwalk_bg23_tr10: ", nrow(xbg_out), "rows |",
+    n_distinct(xbg_out$bg2020_id, xbg_out$tr2010_id), "unique (bg, tract) pairs |",
+    sum(duplicated(xbg_out[c("bg2020_id", "tr2010_id")])), "duplicate pairs\n")
+
+cat("xwalk_tr00_tr10: ", nrow(xtr_out), "rows |",
+    n_distinct(xtr_out$tr2000_id, xtr_out$tr2010_id), "unique (tr2000, tr2010) pairs |",
+    sum(duplicated(xtr_out[c("tr2000_id", "tr2010_id")])), "duplicate pairs\n")
+```
+
+## 6.2 Check missingness on critical variables
+
+Expected: no missing geographic IDs. Some missingness in median rent (`rentE`)
+is expected for sparsely-renter-occupied geographies; we report the counts rather
+than impose a threshold here.
+
+```{r validate-missingness}
+cat("acs_step1_16 missing tr2010_id:", sum(is.na(acs16_out$tr2010_id)), "\n")
+cat("acs_step1_16 missing rentE:    ", sum(is.na(acs16_out$rentE)), "\n")
+cat("acs_step1_23 missing bg2020_id:", sum(is.na(acs23_out$bg2020_id)), "\n")
+cat("acs_step1_23 missing rentE:    ", sum(is.na(acs23_out$rentE)), "\n")
+
+cat("xwalk_bg23_tr10 missing keys:",
+    sum(is.na(xbg_out$bg2020_id) | is.na(xbg_out$tr2010_id)), "\n")
+cat("xwalk_tr00_tr10 missing keys:",
+    sum(is.na(xtr_out$tr2000_id) | is.na(xtr_out$tr2010_id)), "\n")
+```
+
+## 6.3 Check flag-variable encoding
+
+The join flags (`rent_id`, `x_id`) should be logical `TRUE`/`FALSE`, not string
+labels. Expected: class `logical` for each.
+
+```{r validate-flags}
+cat("acs_step1_16 rent_id class:", class(acs16_out$rent_id),
+    "| values:", paste(unique(acs16_out$rent_id), collapse = ", "), "\n")
+cat("acs_step1_23 rent_id class:", class(acs23_out$rent_id),
+    "| values:", paste(unique(acs23_out$rent_id), collapse = ", "), "\n")
+cat("xwalk_bg23_tr10 x_id class:", class(xbg_out$x_id),
+    "| values:", paste(unique(xbg_out$x_id), collapse = ", "), "\n")
+cat("xwalk_tr00_tr10 x_id class:", class(xtr_out$x_id),
+    "| values:", paste(unique(xtr_out$x_id), collapse = ", "), "\n")
+```
+
+## 6.4 Summarize numeric variable distributions
+
+Mean, min, and max for every numeric column in each output. Watch for impossible
+values (negative counts, weights outside [0, 1], or estimates far outside
+plausible ACS ranges).
+
+```{r validate-numeric-summaries}
+print_numeric_summary(acs16_out, "acs_step1_16")
+print_numeric_summary(acs23_out, "acs_step1_23")
+print_numeric_summary(xbg_out,   "xwalk_bg23_tr10")
+print_numeric_summary(xtr_out,   "xwalk_tr00_tr10")
+```

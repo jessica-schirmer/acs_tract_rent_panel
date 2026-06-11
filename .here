@@ -1,0 +1,4 @@
+This file anchors here::here() to the acs_tract repository root so that
+source(here::here("R", "helpers.R")) resolves correctly. There is no .Rproj or
+git root in this folder, so this sentinel marks the project root for the `here`
+package. See https://here.r-lib.org/ for details.
