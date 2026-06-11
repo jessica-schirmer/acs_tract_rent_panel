@@ -2,7 +2,7 @@
 ## Project: ADU Rent
 ## Processing phase: Clean ACS tract data
 
-Processing phase: This repository covers selection of variables, cleaning, and creation of analysis measures for 2012-2016 and 2019-2023 ACS for 2010 tracts.
+Processing phase: This repository covers selection of variables, cleaning, and creation of analysis measures for 2012-2016 and 2020-2024 ACS for 2010 tracts.
 
 ## Overview
 Academic research project evaluating the impact of ADU policy on rents. 

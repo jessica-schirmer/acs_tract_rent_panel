@@ -1,12 +1,12 @@
-# Schema: `acs_step1_23.feather`
+# Schema: `acs_step1_24.feather`
 
-**Produced by:** `01_acs.Rmd` (Step 1) · **Source:** 2019–2023 ACS 5-year, **block-group** level, California (`tidycensus::get_acs`)
+**Produced by:** `01_acs.Rmd` (Step 1) · **Source:** 2020–2024 ACS 5-year, **block-group** level, California (`tidycensus::get_acs`)
 
 **Grain:** one row per 2020-vintage California census block group.
 **Key:** `bg2020_id` (unique, non-missing).
 
 This file shares the **same variable layout** as `acs_step1_16.feather` — the
-extraction uses the identical variable set (`v23_save <- v16_save`). The
+extraction uses the identical variable set (`v24_save <- v16_save`). The
 differences are the geographic grain (block group, not tract), the key column
 name, and the low-rent cutoffs used for the derived columns.
 
@@ -30,10 +30,10 @@ codes and meanings are identical, including the B25004 vacancy-status detail
 
 | column | type | description |
 |---|---|---|
-| `rhu_lrE` | numeric | Low-rent renter housing units: row sum of `grentcat1E`–`grentcat18E`. Cutoff at category **18** (~$1,000–1,249) for the 2023 vintage — one bin higher than the 2016 file. |
+| `rhu_lrE` | numeric | Low-rent renter housing units: row sum of `grentcat1E`–`grentcat18E`. Cutoff at category **18** (~$1,000–1,249) for the 2024 vintage — one bin higher than the 2016 file. |
 | `rhu_lr2E` | numeric | Wider low-rent count: row sum of `grentcat1E`–`grentcat20E` (~$1,500–1,999). |
 | `rent_id` | logical | Join flag, constant `TRUE`. |
 
 **Downstream:** `02_assemble.Rmd` aggregates this block-group table up to 2010
-tracts using `xwalk_bg23_tr10.feather`. See the decision block in `01_acs.Rmd`
+tracts using `xwalk_bg24_tr10.feather`. See the decision block in `01_acs.Rmd`
 §4.1 for why these data are pulled at the block-group level.

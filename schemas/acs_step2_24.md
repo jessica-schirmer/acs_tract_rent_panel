@@ -1,6 +1,6 @@
-# Schema: `acs_step2_23.feather`
+# Schema: `acs_step2_24.feather`
 
-**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_23.feather` + `xwalk_bg23_tr10.feather`
+**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_24.feather` + `xwalk_bg24_tr10.feather`
 
 **Grain:** one row per 2010-vintage tract **in the five SCAG-region counties**
 (Los Angeles 037, Orange 059, Riverside 065, San Bernardino 071, Ventura 111),
@@ -61,6 +61,6 @@ following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 
 | column | type | description |
 |---|---|---|
-| `tc_flag_rent_23` | integer (0/1) | 1 if the tract had any top-coded (`>= 3500`) renter rent before censoring. |
+| `tc_flag_rent_24` | integer (0/1) | 1 if the tract had any top-coded (`>= 3500`) renter rent before censoring. |
 | `rhu_id` | logical | Constant `TRUE`; tag added during aggregation. |
 | `merge`, `left_id`, `right_id` | character / logical | Join indicators retained from the final `merge_df()` steps (interpolated rent and top-code-flag merges). All rows should be `"both"`. |

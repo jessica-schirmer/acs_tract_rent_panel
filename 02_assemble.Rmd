@@ -24,19 +24,19 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step1_23.feather` — 2019–2023 ACS estimates, one row per 2020 CA block group.
-- `../../../data/xwalk_bg23_tr10.feather` — 2020 block group → 2010 tract allocation weights.
+- `../../../data/acs_step1_24.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
+- `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
 - `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
 
 **Outputs:**
 
-- `../../../data/acs_step2_23.feather` — 2019–2023 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missingness, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missingness, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
 
 This notebook:
 
 1. Sets up the environment (packages, helper functions, data directory, target counties)
-2. Assembles 2019–2023 ACS tract measures by weight-aggregating block groups to 2010 tracts
+2. Assembles 2020–2024 ACS tract measures by weight-aggregating block groups to 2010 tracts
 3. Prepares the 2012–2016 ACS tract measures
 4. Validates the saved outputs
 
@@ -86,20 +86,20 @@ data_dir <- "../../../data/"
 scag_counties <- c("037", "059", "111", "065", "071")
 ```
 
-# 2. Assemble 2019–2023 ACS tract measures
+# 2. Assemble 2020–2024 ACS tract measures
 
 ## 2.1 Import block-group ACS and crosswalk
 
 ```{r import-bg-and-xwalk}
-# Load 2023 ACS block group data
-acs_bg_23 <- load_data(data_dir, NULL, "acs_step1_23.feather")
-report_n(acs_bg_23, "2023 ACS block groups loaded")
+# Load 2024 ACS block group data
+acs_bg_24 <- load_data(data_dir, NULL, "acs_step1_24.feather")
+report_n(acs_bg_24, "2024 ACS block groups loaded")
 
-# acs_bg_23 <- acs_bg_23 |>
+# acs_bg_24 <- acs_bg_24 |>
 #   mutate(rentE=ifelse(rentE>3501,NA, rentE))
 
 # Bring in crosswalk
-xwalk <- load_data(data_dir, NULL, "xwalk_bg23_tr10.feather")
+xwalk <- load_data(data_dir, NULL, "xwalk_bg24_tr10.feather")
 report_n(xwalk, "bg2020->tr2010 crosswalk loaded")
 ```
 
@@ -120,7 +120,7 @@ on the crosswalk), so they are dropped.
 
 ```{r merge-and-restrict}
 # Merge xwalk and acs
-xwalk_join <- merge_df(xwalk, acs_bg_23,  "bg2020_id")
+xwalk_join <- merge_df(xwalk, acs_bg_24,  "bg2020_id")
 table(xwalk_join$merge)
 
 ## Check obs that failed to merge
@@ -158,7 +158,7 @@ check_tc_out
 # 18% (2508) block groups missing rent
 # 7.5% (811) block groups with rent are top-coded
 
-rm(xwalk, xwalk_join, xwalk_join_filt, acs_bg_23)
+rm(xwalk, xwalk_join, xwalk_join_filt, acs_bg_24)
 ```
 
 ## 2.3 Compute relative weights and top-code diagnostics
@@ -184,10 +184,10 @@ check_tc_out
 
 # Create top-coded flag
 tc_vars <- tc_vars |>
-    mutate (tc_flag_rent_23= if_else(!is.na(pct_tc_rent) & pct_tc_rent>0, 1, 0)) |>
-    select(tr2010_id, tc_flag_rent_23)
+    mutate (tc_flag_rent_24= if_else(!is.na(pct_tc_rent) & pct_tc_rent>0, 1, 0)) |>
+    select(tr2010_id, tc_flag_rent_24)
 
-table(tc_vars$tc_flag_rent_23)
+table(tc_vars$tc_flag_rent_24)
 ```
 
 ## 2.4 Censor top-coded values and build structure-type aggregates
@@ -197,7 +197,7 @@ table(tc_vars$tc_flag_rent_23)
 The ACS top-codes median gross rent (and the lower contract-rent quartile) at
 $3,500. Top-coded values are not true medians, so we set rent and `lqcrent`
 values `>= 3500` to `NA` before aggregating. A tract-level top-code flag
-(`tc_flag_rent_23`, built in §2.3) records where this occurred.
+(`tc_flag_rent_24`, built in §2.3) records where this occurred.
 
 ```{r censor-and-structure}
 # Censor top-coded
@@ -238,10 +238,10 @@ This produces one row per 2010 tract.
 ```{r aggregate-to-tracts}
 # Calculate aggregate vars
 n_bg <- nrow(acs_bg)
-acs_tr10_23 <- calc_agg_vars(acs_bg, tr2010_id)
+acs_tr10_24 <- calc_agg_vars(acs_bg, tr2010_id)
 cat(sprintf("Aggregated %s block-group rows to %s tract rows\n",
             formatC(n_bg, format = "d", big.mark = ","),
-            formatC(nrow(acs_tr10_23), format = "d", big.mark = ",")))
+            formatC(nrow(acs_tr10_24), format = "d", big.mark = ",")))
 ```
 
 ### Decision: Rename the 5+ multifamily count to `mf5E`
@@ -263,9 +263,9 @@ here as weighted **sums** using the housing-unit allocation weight `wt_hu` — t
 same weight `calc_agg_vars()` uses for the other housing-unit counts (e.g.
 `tot_vacE`) — and join them onto the tract table.
 
-```{r aggregate-supplemental-23}
+```{r aggregate-supplemental-24}
 # Rename the 5+ multifamily count so the aggregation cutoff is explicit
-acs_tr10_23 <- acs_tr10_23 |>
+acs_tr10_24 <- acs_tr10_24 |>
   rename(mf5E = mfE)
 
 # Weight-aggregate the counts calc_agg_vars() does not carry up (housing-unit
@@ -281,8 +281,8 @@ vac_owner_agg <- acs_bg |>
   )
 
 # Join onto the aggregated tract table (expect every tract to match: all "both")
-acs_tr10_23 <- merge_df(acs_tr10_23, vac_owner_agg, "tr2010_id")
-table(acs_tr10_23$merge)
+acs_tr10_24 <- merge_df(acs_tr10_24, vac_owner_agg, "tr2010_id")
+table(acs_tr10_24$merge)
 ```
 
 ## 2.6 Derive interpolated rent, missingness, percentage, and CV measures
@@ -312,23 +312,23 @@ Both rates are `NA` where the denominator is non-positive. Neither rate carries 
 margin-of-error / CV column, matching the existing `pctvacE` overall-vacancy
 share.
 
-```{r derive-measures-23}
+```{r derive-measures-24}
 # Calculate interpolated rent
-acs_interp_rent <- calc_interp_rent(acs_tr10_23)
+acs_interp_rent <- calc_interp_rent(acs_tr10_24)
 
 # Calculate % missing vars
-acs_tr10_23 <- calc_missing_vars(acs_tr10_23)
-summary(acs_tr10_23$pct_miss_rent)
+acs_tr10_24 <- calc_missing_vars(acs_tr10_24)
+summary(acs_tr10_24$pct_miss_rent)
 
 # Calculate % vars
-acs_tr10_23 <- calc_pct_vars(acs_tr10_23)
+acs_tr10_24 <- calc_pct_vars(acs_tr10_24)
 
 # Calculate MOE, CV
-acs_tr10_23 <- calc_cv(acs_tr10_23)
+acs_tr10_24 <- calc_cv(acs_tr10_24)
 
 # Build the combined non-single-family-attached count and the rental / for-sale
 # vacancy rates (see decision block above)
-acs_tr10_23 <- acs_tr10_23 |>
+acs_tr10_24 <- acs_tr10_24 |>
   mutate(
     nsfaE    = smfE + mf5E,
     pctrvacE = if_else((rhuE + vac_forrentE) > 0,
@@ -340,43 +340,43 @@ acs_tr10_23 <- acs_tr10_23 |>
 
 ## 2.7 Merge top-code flag and interpolated rent
 
-```{r merge-flags-23}
+```{r merge-flags-24}
 # Merge top-coded flag
-acs_tr10_23_tc <- merge_df(acs_tr10_23, tc_vars, "tr2010_id")
-table(acs_tr10_23_tc$merge)
-table(acs_tr10_23_tc$tc_flag_rent_23, useNA = "ifany")
+acs_tr10_24_tc <- merge_df(acs_tr10_24, tc_vars, "tr2010_id")
+table(acs_tr10_24_tc$merge)
+table(acs_tr10_24_tc$tc_flag_rent_24, useNA = "ifany")
 
 # Merge interpolated rent
-acs_tr10_23_interp <- merge_df(acs_tr10_23_tc, acs_interp_rent, "tr2010_id")
-table(acs_tr10_23_interp$merge)
-summary(acs_tr10_23_interp$interp_rent, useNA = "ifany")
-summary(acs_tr10_23_interp$rentE, useNA = "ifany")
-cor(acs_tr10_23_interp$interp_rent, acs_tr10_23_interp$rentE, use = "complete.obs")
+acs_tr10_24_interp <- merge_df(acs_tr10_24_tc, acs_interp_rent, "tr2010_id")
+table(acs_tr10_24_interp$merge)
+summary(acs_tr10_24_interp$interp_rent, useNA = "ifany")
+summary(acs_tr10_24_interp$rentE, useNA = "ifany")
+cor(acs_tr10_24_interp$interp_rent, acs_tr10_24_interp$rentE, use = "complete.obs")
 # correlation between weighted rent and interpolated rent is .94
 ```
 
-## 2.8 Save 2019–2023 tract output
+## 2.8 Save 2020–2024 tract output
 
-**Output:** `acs_step2_23.feather` — 2019–2023 ACS measures aggregated to 2010
+**Output:** `acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010
 tracts (SCAG region), consumed by `03_merge.Rmd`.
 
-```{r save-23}
-report_n(acs_tr10_23_interp, "2023 tract measures to save")
+```{r save-24}
+report_n(acs_tr10_24_interp, "2024 tract measures to save")
 
 # # Save file
-save_data(acs_tr10_23_interp, data_dir, "acs_step2_23.feather")
+save_data(acs_tr10_24_interp, data_dir, "acs_step2_24.feather")
 
 
 # rm(acs_bg)
 ```
 
-## 2.9 Check assembled 2023 measures
+## 2.9 Check assembled 2024 measures
 
-```{r check-vars-23}
+```{r check-vars-24}
 # Check CV
 # check_vars <- c("rentE", "rhuE", "huE", "popE", "med_hhincE", "med_hvalE", "pctblkE", "pct_miss_rent")
 check_vars <- c("rentE", "rhuE", "pct_miss_rent")
-out <- map_dfr(check_vars, ~summ_var(acs_tr10_23, .x))
+out <- map_dfr(check_vars, ~summ_var(acs_tr10_24, .x))
 out
 
 
@@ -387,26 +387,26 @@ out
 
 # # Check CV
 # check_vars <- c("rentCV", "med_hhincCV", "med_hvalCV", "pctblkCV", "huCV", "rhuCV", "popCV")
-# out <- map_dfr(check_vars, ~summ_var(acs_tr10_23, .x))
+# out <- map_dfr(check_vars, ~summ_var(acs_tr10_24, .x))
 # out
 
 # # Check % missing, % top-coded
 # # check_vars <- c("pct_miss_rent", "pct_tc_rent")
 # check_vars <- c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "pct_tc_hval")
 
-# out <- map_dfr(check_vars, ~summ_var(acs_tr10_23, .x))
+# out <- map_dfr(check_vars, ~summ_var(acs_tr10_24, .x))
 # out
 
 # Check % missing
 
-check_vars <- c("pct_miss_rent", "rentE", "tc_flag_rent_23")
+check_vars <- c("pct_miss_rent", "rentE", "tc_flag_rent_24")
 
-out <- map_dfr(check_vars, ~summ_var(acs_tr10_23_tc, .x))
+out <- map_dfr(check_vars, ~summ_var(acs_tr10_24_tc, .x))
 out
 
 # Check new vacancy-rate / structure measures (rates expected within [0, 1])
 check_vars <- c("pctrvacE", "pctsvacE", "nsfaE", "mf5E")
-out <- map_dfr(check_vars, ~summ_var(acs_tr10_23, .x))
+out <- map_dfr(check_vars, ~summ_var(acs_tr10_24, .x))
 out
 ```
 
@@ -455,21 +455,21 @@ median rent. Retained for provenance; intentionally left commented out.
 #   )
 
 
-# m_vars <- acs_tr10_23_tc |>
+# m_vars <- acs_tr10_24_tc |>
 #     mutate(trt_rhuE= rhuE,
 #             trt_rentE= rentE,
 #             trt_rhu_miss_rent= rhu_miss_rent) |>
-#     select(tr2010_id, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_23)
+#     select(tr2010_id, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_24)
 
 # # Merge tract flags to block groups
 # acs_bg_join <- merge_df(acs_bg, m_vars, "tr2010_id")
 # table(acs_bg_join$merge)
-# table(acs_bg_join$tc_flag_rent_23, useNA = "ifany")
+# table(acs_bg_join$tc_flag_rent_24, useNA = "ifany")
 
 # # Create missing rent flag
 # acs_bg_join <- acs_bg_join |>
 #     mutate(m_flag_rent = if_else(is.na(rentE), 1, 0)) |>
-#     select(tr2010_id, bg2020_id, rhuE, rentE, wt_renthu, rel_wt_rhu, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_23, m_flag_rent)
+#     select(tr2010_id, bg2020_id, rhuE, rentE, wt_renthu, rel_wt_rhu, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_24, m_flag_rent)
 # table(acs_bg_join$m_flag_rent)
 
 # # Check weighed median calculation
@@ -557,16 +557,16 @@ table(acs_16$m_flag_rent, acs_16$zero_flag_rhu) # 60% of tracts missing rent (42
 
 ## 3.3 Build structure-type, percentage, and CV measures
 
-### Decision: Same vacancy / non-single-family measures as the 2023 path
+### Decision: Same vacancy / non-single-family measures as the 2024 path
 
 `mf5E`, `nsfaE`, `pctrvacE`, and `pctsvacE` are built here with the same
-definitions used for the 2023 vintage (§2.6), so the two outputs line up. For the
+definitions used for the 2024 vintage (§2.6), so the two outputs line up. For the
 2016 tract data the source counts (`vac_forrentE`, `vac_forsaleE`, `ohuE`,
 `rhuE`) are already present on the tract table, so no extra aggregation is needed.
 
 ```{r structure-pct-cv-16}
 # Sum multifamily categories (mf5E = 5+ units; renamed from mfE so the cutoff is
-# explicit and consistent with the 2023 output)
+# explicit and consistent with the 2024 output)
 acs_16 <- acs_16 |>
     mutate(mf5E = mf_5_9E + mf_10_19E + mf_20_49E + mf_50E,
            smfE = sfd_attE + duplexE + quadplexE
@@ -584,7 +584,7 @@ acs_16 <- calc_pct_vars(acs_16)
 acs_16 <- calc_cv(acs_16)
 
 # Non-single-family-attached count and rental / for-sale vacancy rates
-# (defined as in the 2023 path, §2.6)
+# (defined as in the 2024 path, §2.6)
 acs_16 <- acs_16 |>
   mutate(
     nsfaE    = smfE + mf5E,
@@ -612,7 +612,7 @@ save_data(acs_16, data_dir, "acs_step2_16.feather")
 
 ```{r compare-medhhinc}
 summary(acs_16$med_hhincE)
-summary(acs_tr10_23$med_hhincE)
+summary(acs_tr10_24$med_hhincE)
 ```
 
 # 4. Validate outputs
@@ -623,7 +623,7 @@ every numeric column.
 
 ```{r reload-step2}
 acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step2_16.feather"))
-acs23_out <- arrow::read_feather(paste0(data_dir, "acs_step2_23.feather"))
+acs24_out <- arrow::read_feather(paste0(data_dir, "acs_step2_24.feather"))
 ```
 
 ## 4.1 Check key uniqueness and duplicates
@@ -635,9 +635,9 @@ cat("acs_step2_16:", nrow(acs16_out), "rows |",
     n_distinct(acs16_out$tr2010_id), "unique tr2010_id |",
     sum(duplicated(acs16_out$tr2010_id)), "duplicate ids\n")
 
-cat("acs_step2_23:", nrow(acs23_out), "rows |",
-    n_distinct(acs23_out$tr2010_id), "unique tr2010_id |",
-    sum(duplicated(acs23_out$tr2010_id)), "duplicate ids\n")
+cat("acs_step2_24:", nrow(acs24_out), "rows |",
+    n_distinct(acs24_out$tr2010_id), "unique tr2010_id |",
+    sum(duplicated(acs24_out$tr2010_id)), "duplicate ids\n")
 ```
 
 ## 4.2 Check missingness on critical variables
@@ -649,9 +649,9 @@ impose a threshold.
 ```{r validate-missingness-step2}
 cat("acs_step2_16 missing tr2010_id:", sum(is.na(acs16_out$tr2010_id)), "\n")
 cat("acs_step2_16 missing rentE:    ", sum(is.na(acs16_out$rentE)), "\n")
-cat("acs_step2_23 missing tr2010_id:", sum(is.na(acs23_out$tr2010_id)), "\n")
-cat("acs_step2_23 missing rentE:    ", sum(is.na(acs23_out$rentE)), "\n")
-cat("acs_step2_23 missing interp_rent:", sum(is.na(acs23_out$interp_rent)), "\n")
+cat("acs_step2_24 missing tr2010_id:", sum(is.na(acs24_out$tr2010_id)), "\n")
+cat("acs_step2_24 missing rentE:    ", sum(is.na(acs24_out$rentE)), "\n")
+cat("acs_step2_24 missing interp_rent:", sum(is.na(acs24_out$interp_rent)), "\n")
 ```
 
 ## 4.3 Check flag-variable encoding
@@ -667,10 +667,10 @@ for (f in flag_cols_16) {
       "| values:", paste(sort(unique(acs16_out[[f]])), collapse = ", "), "\n")
 }
 
-flag_cols_23 <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs23_out), value = TRUE)
-for (f in flag_cols_23) {
-  cat("acs_step2_23", f, "-> class:", class(acs23_out[[f]]),
-      "| values:", paste(sort(unique(acs23_out[[f]])), collapse = ", "), "\n")
+flag_cols_24 <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs24_out), value = TRUE)
+for (f in flag_cols_24) {
+  cat("acs_step2_24", f, "-> class:", class(acs24_out[[f]]),
+      "| values:", paste(sort(unique(acs24_out[[f]])), collapse = ", "), "\n")
 }
 ```
 
@@ -682,5 +682,5 @@ ranges).
 
 ```{r validate-numeric-step2}
 print_numeric_summary(acs16_out, "acs_step2_16")
-print_numeric_summary(acs23_out, "acs_step2_23")
+print_numeric_summary(acs24_out, "acs_step2_24")
 ```

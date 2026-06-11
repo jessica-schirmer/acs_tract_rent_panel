@@ -1,6 +1,6 @@
 # assemble_helpers.R -----------------------------------------------------
 # Helper functions for 02_assemble.Rmd (Step 2: assemble geographically
-# consistent 2010-tract measures from 2019-2023 block groups, and prepare the
+# consistent 2010-tract measures from 2020-2024 block groups, and prepare the
 # 2012-2016 tract measures).
 #
 # This file is intentionally SELF-CONTAINED: 02_assemble.Rmd sources only this

@@ -25,19 +25,19 @@ knitr::opts_chunk$set(
 **Inputs:**
 
 - `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region).
-- `../../../data/acs_step2_23.feather` — 2019–2023 ACS tract measures (SCAG region), aggregated to 2010 tracts.
+- `../../../data/acs_step2_24.feather` — 2020–2024 ACS tract measures (SCAG region), aggregated to 2010 tracts.
 
 **Outputs:**
 
-- `../../../data/acs_full.feather` — the ACS tract panel: 2016 and 2023 measures
-  (2016 dollars inflation-adjusted to 2023) side by side on `tr2010_id`, with
+- `../../../data/acs_full.feather` — the ACS tract panel: 2016 and 2024 measures
+  (2016 dollars inflation-adjusted to 2024) side by side on `tr2010_id`, with
   change measures (level `*POST` ratios and share/rate `*PPC` percentage-point
   differences) and their coefficients of variation.
 
 This notebook:
 
 1. Sets up the environment (packages, helper functions, data directory)
-2. Imports and prepares the 2019–2023 and 2012–2016 tract measures (rename, select, inflation-adjust)
+2. Imports and prepares the 2020–2024 and 2012–2016 tract measures (rename, select, inflation-adjust)
 3. Merges the two surveys and calculates change variables
 4. Validates the saved output
 
@@ -83,31 +83,31 @@ data_dir <- "../../../data/"
 
 # 2. Import and prepare survey measures
 
-## 2.1 Load and prepare 2019–2023 measures
+## 2.1 Load and prepare 2020–2024 measures
 
-Load the assembled 2023 tract measures, suffix their variables with `_23`, and
+Load the assembled 2024 tract measures, suffix their variables with `_24`, and
 keep the analytic variable set plus a few extra quality/derived columns
-(`pct_miss_rent`, `pct_miss_hval`, `tc_flag_rent_23`, `interp_rent`). The analytic
+(`pct_miss_rent`, `pct_miss_hval`, `tc_flag_rent_24`, `interp_rent`). The analytic
 set now also carries the renamed multifamily count `mf5E`, the non-single-family-
 attached count `nsfaE`, and the rental / for-sale vacancy rates
 `pctrvacE` / `pctsvacE` (added to `rename_vars()` so they get the year suffix).
 
-```{r prep-23}
+```{r prep-24}
 # # Load 2005-2009 ACS data
 # rent_09 <- load_data(data_dir, NULL, "acs_09_step2.feather")
 
-# Load 2019-2023 ACS data
-acs_23 <- load_data(data_dir, NULL, "acs_step2_23.feather")
-report_n(acs_23, "2023 tract measures loaded")
+# Load 2020-2024 ACS data
+acs_24 <- load_data(data_dir, NULL, "acs_step2_24.feather")
+report_n(acs_24, "2024 tract measures loaded")
 
 # Rename variables
-acs_23 <- rename_vars(acs_23, "23")
+acs_24 <- rename_vars(acs_24, "24")
 
 # Select variables
 # var_list <- c("pct_miss_rent", "pct_tc_rent")
-# var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_23", "interp_rent", "interp_rentCV", "interp_rentM")
-var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_23", "interp_rent")
-acs_23 <- select_vars(acs_23, "23", var_list)
+# var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent", "interp_rentCV", "interp_rentM")
+var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent")
+acs_24 <- select_vars(acs_24, "24", var_list)
 
 # Apply inflation adjustment
 # n/a
@@ -115,13 +115,17 @@ acs_23 <- select_vars(acs_23, "23", var_list)
 
 ## 2.2 Load and prepare 2012–2016 measures
 
-### Decision: Inflation-adjust 2016 dollars to 2023 dollars
+### Decision: Inflation-adjust 2016 dollars to 2024 dollars
 
 Dollar-denominated 2016 measures (median rent, lower-quartile contract rent,
 median household income, median house value — estimates and their margins of
-error) are multiplied by **1.27** to express them in 2023 dollars, so that
+error) are multiplied by **1.307** to express them in 2024 dollars, so that
 change variables in §3.2 compare *real* values across the two periods. The
 adjustment is applied only to the 2016 vintage (`infl_adj_vars(..., "16")`).
+
+Inflation adjustment uses CPI-U annual averages (BLS, CPI-U, U.S. city average,
+all items) to adjust 2016 dollars to 2024 dollars. Factor = 313.689 / 240.007 ≈
+1.307.
 
 ```{r prep-16}
 # Load 2012-2016 ACS data
@@ -146,7 +150,7 @@ summary(acs_16$rentE_16)
 
 # 3. Merge surveys and calculate change variables
 
-## 3.1 Merge 2016 and 2023 tract measures
+## 3.1 Merge 2016 and 2024 tract measures
 
 ### Decision: Keep all tracts (full join, not inner join)
 
@@ -159,24 +163,24 @@ missing or zero. There is therefore **no row-dropping filter** in this notebook.
 ```{r merge-surveys}
 # Merge post rent data
 n_16 <- nrow(acs_16)
-n_23 <- nrow(acs_23)
-acs_16_23 <- merge_df(acs_16, acs_23)
-table(acs_16_23$merge)
-cat(sprintf("Merged %s (2016) and %s (2023) tracts -> %s panel rows\n",
+n_24 <- nrow(acs_24)
+acs_16_24 <- merge_df(acs_16, acs_24)
+table(acs_16_24$merge)
+cat(sprintf("Merged %s (2016) and %s (2024) tracts -> %s panel rows\n",
             formatC(n_16, format = "d", big.mark = ","),
-            formatC(n_23, format = "d", big.mark = ","),
-            formatC(nrow(acs_16_23), format = "d", big.mark = ",")))
+            formatC(n_24, format = "d", big.mark = ","),
+            formatC(nrow(acs_16_24), format = "d", big.mark = ",")))
 
 # Keep all
-acs_16_23 <- acs_16_23 |>
+acs_16_24 <- acs_16_24 |>
   # dplyr::filter(merge=="both") |>
   select(-c(merge)) |>
   mutate(base_id=TRUE)
 
-acs_full <- acs_16_23
+acs_full <- acs_16_24
 
 # # Merge pre- baseline rent data
-# rent_full <- full_join(rent_16_23, rent_09,
+# rent_full <- full_join(rent_16_24, rent_09,
 #                   by = "tr2010_id") %>%
 #   mutate(
 #     merge = case_when(
@@ -202,11 +206,11 @@ acs_full <- acs_16_23
 ### Decision: Level changes are ratios; share / rate changes are percentage-point differences
 
 Dollar- and count-denominated change ("POST") variables are the ratio of the
-2023 value to the (inflation-adjusted) 2016 value, defined only where the 2016
+2024 value to the (inflation-adjusted) 2016 value, defined only where the 2016
 denominator is positive (otherwise `NA`).
 
 Share and rate change variables are instead **percentage-point differences**
-(`value_23 - value_16`, named `*PPC`): the renter-occupied share `pctrhuPPC`, the
+(`value_24 - value_16`, named `*PPC`): the renter-occupied share `pctrhuPPC`, the
 overall vacant share `pctvacPPC`, and the rental / for-sale vacancy rates
 `pctrvacPPC` / `pctsvacPPC`. A difference is the natural change for a rate, is
 defined wherever both periods are present (so it avoids the large zero-base `NA`
@@ -256,13 +260,13 @@ Quick reliability check: CV distributions for the level and change measures.
 ```{r summarize-cv}
 print("Summary Stats: CV, 2016 Rental housing units ")
 summary(acs_full$rhuCV_16)
-print("Summary Stats: CV, 2023 Rental housing units ")
-summary(acs_full$rhuCV_23)
+print("Summary Stats: CV, 2024 Rental housing units ")
+summary(acs_full$rhuCV_24)
 
 print("Summary Stats: CV, 2016 Median rent ")
 summary(acs_full$rentCV_16)
-print("Summary Stats: CV, 2023 Median rent ")
-summary(acs_full$rentCV_23)
+print("Summary Stats: CV, 2024 Median rent ")
+summary(acs_full$rentCV_24)
 
 print("Summary Stats: CV, Rent change")
 summary(acs_full$rentPOSTCV)
@@ -277,8 +281,8 @@ summary(acs_full$rhuPOSTCV)
 
 print("Summary Stats: CV, 2016 Median household income ")
 summary(acs_full$med_hhincCV_16)
-print("Summary Stats: CV, 2023 Median household income ")
-summary(acs_full$med_hhincCV_23)
+print("Summary Stats: CV, 2024 Median household income ")
+summary(acs_full$med_hhincCV_24)
 
 print("Summary Stats: CV, Median income change")
 summary(acs_full$med_hhincPOSTCV)
@@ -316,7 +320,7 @@ counts rather than impose a threshold.
 ```{r validate-missingness-panel}
 cat("acs_full missing tr2010_id:    ", sum(is.na(acs_out$tr2010_id)), "\n")
 cat("acs_full missing rentE_16:     ", sum(is.na(acs_out$rentE_16)), "\n")
-cat("acs_full missing rentE_23:     ", sum(is.na(acs_out$rentE_23)), "\n")
+cat("acs_full missing rentE_24:     ", sum(is.na(acs_out$rentE_24)), "\n")
 cat("acs_full missing rentPOST:     ", sum(is.na(acs_out$rentPOST)), "\n")
 cat("acs_full missing interp_rentPOST:", sum(is.na(acs_out$interp_rentPOST)), "\n")
 ```

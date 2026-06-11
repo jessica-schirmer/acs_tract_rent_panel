@@ -84,6 +84,6 @@ Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
 | `rent_id` | logical | Join flag, constant `TRUE` (marks rows sourced from an ACS rent table). |
 
 **Note on year-specific cutoffs:** `rhu_lrE` / `rhu_lr2E` use categories 1–17 /
-1–19 here; the 2023 file (`acs_step1_23.feather`) shifts these up one bin
+1–19 here; the 2024 file (`acs_step1_24.feather`) shifts these up one bin
 (1–18 / 1–20) to hold the real rent threshold roughly constant. See the decision
 blocks in `01_acs.Rmd` §3.2 and §4.2.

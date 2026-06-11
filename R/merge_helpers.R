@@ -1,5 +1,5 @@
 # merge_helpers.R --------------------------------------------------------
-# Helper functions for 03_merge.Rmd (Step 3: merge the 2012-2016 and 2019-2023
+# Helper functions for 03_merge.Rmd (Step 3: merge the 2012-2016 and 2020-2024
 # tract measures into a panel and compute change variables).
 #
 # This file is intentionally SELF-CONTAINED: 03_merge.Rmd sources only this
@@ -140,8 +140,9 @@ select_vars <- function(df, yr, var_list) {
 
 #' Apply inflation adjustment
 #'
-#' Scales the 2016 dollar-denominated variables to 2023 dollars (factor 1.27).
-#' Only applied when `yr == "16"`.
+#' Scales the 2016 dollar-denominated variables to 2024 dollars (factor 1.307,
+#' CPI-U annual averages, BLS, U.S. city average, all items: 313.689 (2024) /
+#' 240.007 (2016)). Only applied when `yr == "16"`.
 #'
 #' @param df Data frame
 #' @param yr year of survey
@@ -153,7 +154,7 @@ infl_adj_vars <- function(df, yr, var_list) {
         if (yr=="16"){
             var_name <- paste0(i, "_", yr)
             df <- df |>
-                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * 1.27)
+                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * 1.307)
 
     }
 
@@ -167,32 +168,32 @@ infl_adj_vars <- function(df, yr, var_list) {
 #' Calculate change variables
 #'
 #' Level (dollar/count) changes are 2023/2016 ratios (`*POST`); share and rate
-#' changes are percentage-point differences, `value_23 - value_16` (`*PPC`).
+#' changes are percentage-point differences, `value_24 - value_16` (`*PPC`).
 #'
 #' @param df
 #' @return dataframe with change variables (`*POST` ratios, `*PPC` differences)
 #'   and missing flags
 calc_change_vars <- function(df) {
   df |>
-    mutate(rentPOST = ifelse(rentE_16>0, rentE_23/rentE_16, NA),
+    mutate(rentPOST = ifelse(rentE_16>0, rentE_24/rentE_16, NA),
            interp_rentPOST = ifelse(rentE_16>0, interp_rent/rentE_16, NA),
-            lqcrentPOST = ifelse(lqcrentE_16>0, lqcrentE_23/lqcrentE_16, NA),
+            lqcrentPOST = ifelse(lqcrentE_16>0, lqcrentE_24/lqcrentE_16, NA),
             # rentPRE = ifelse(rentE_09>0, rentE_16/rentE_09,NA),
-            huPOST = ifelse(huE_16>0, huE_23/huE_16,NA),
-            rhuPOST = ifelse(rhuE_16>0, rhuE_23/rhuE_16,NA),
-            rhu_lrPOST = ifelse(rhu_lrE_16>0, rhu_lrE_23/rhu_lrE_16, NA),
-            rhu_lr2POST = ifelse(rhu_lr2E_16>0, rhu_lr2E_23/rhu_lr2E_16, NA),
-            # rhucashPOST = ifelse(rhucashE_16>0, rhucashE_23/rhucashE_16,NA),
-            med_hhincPOST = ifelse(med_hhincE_16>0, med_hhincE_23/med_hhincE_16,NA),
-            # Share / rate changes are percentage-point differences (value_23 - value_16),
+            huPOST = ifelse(huE_16>0, huE_24/huE_16,NA),
+            rhuPOST = ifelse(rhuE_16>0, rhuE_24/rhuE_16,NA),
+            rhu_lrPOST = ifelse(rhu_lrE_16>0, rhu_lrE_24/rhu_lrE_16, NA),
+            rhu_lr2POST = ifelse(rhu_lr2E_16>0, rhu_lr2E_24/rhu_lr2E_16, NA),
+            # rhucashPOST = ifelse(rhucashE_16>0, rhucashE_24/rhucashE_16,NA),
+            med_hhincPOST = ifelse(med_hhincE_16>0, med_hhincE_24/med_hhincE_16,NA),
+            # Share / rate changes are percentage-point differences (value_24 - value_16),
             # not ratios: defined wherever both periods are present (NA if either is
             # missing), with no zero-denominator guard. Distinct *PPC names flag the
             # percentage-point-change convention.
-            pctrhuPPC  = pctrhuE_23  - pctrhuE_16,
-            pctvacPPC  = pctvacE_23  - pctvacE_16,
-            pctrvacPPC = pctrvacE_23 - pctrvacE_16,
-            pctsvacPPC = pctsvacE_23 - pctsvacE_16,
-            popPOST = ifelse(popE_16>0, popE_23/popE_16, NA),
+            pctrhuPPC  = pctrhuE_24  - pctrhuE_16,
+            pctvacPPC  = pctvacE_24  - pctvacE_16,
+            pctrvacPPC = pctrvacE_24 - pctrvacE_16,
+            pctsvacPPC = pctsvacE_24 - pctsvacE_16,
+            popPOST = ifelse(popE_16>0, popE_24/popE_16, NA),
             ) |>
     mutate(m_flag_rentPOST = if_else(is.na(rentPOST), 1, 0),
            m_flag_rhuPOST = if_else(is.na(rhuPOST), 1, 0) )
@@ -217,7 +218,7 @@ calc_cv_change_vars <- function(df) {
             # ),
             moe_rentPOST = if_else(
                 rentE_16 != 0,
-                sqrt(pmax(0, (rentM_23^2) - (rentPOST^2) * (rentM_16^2))) / rentE_16,
+                sqrt(pmax(0, (rentM_24^2) - (rentPOST^2) * (rentM_16^2))) / rentE_16,
                 NA_real_
             ),
             # moe_interp_rentPOST = if_else(
@@ -227,12 +228,12 @@ calc_cv_change_vars <- function(df) {
             # ),
             moe_rhuPOST = if_else(
                 rhuE_16!= 0,
-                sqrt(pmax(0, (rhuM_23^2) - (rhuPOST^2) * (rhuM_16^2))) / rhuE_16,
+                sqrt(pmax(0, (rhuM_24^2) - (rhuPOST^2) * (rhuM_16^2))) / rhuE_16,
                 NA_real_
             ),
             moe_med_hhincPOST = if_else(
                 med_hhincE_16!= 0,
-                sqrt(pmax(0, (med_hhincM_23^2) - (med_hhincPOST^2) * (med_hhincM_16^2))) / med_hhincE_16,
+                sqrt(pmax(0, (med_hhincM_24^2) - (med_hhincPOST^2) * (med_hhincM_16^2))) / med_hhincE_16,
                 NA_real_
             ),
             rentPOSTCV =  (moe_rentPOST/1.645)/rentPOST,

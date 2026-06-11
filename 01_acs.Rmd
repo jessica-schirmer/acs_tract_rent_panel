@@ -25,7 +25,7 @@ knitr::opts_chunk$set(
 **Inputs:**
 
 - US Census Bureau ACS 5-year API (via `tidycensus`): 2012–2016 ACS at the
-  **tract** level and 2019–2023 ACS at the **block-group** level, California.
+  **tract** level and 2020–2024 ACS at the **block-group** level, California.
 - `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`
   — NHGIS geographic crosswalk, 2020 block groups → 2010 tracts (allocation weights).
 - `../../../data-raw-temp/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv`
@@ -34,8 +34,8 @@ knitr::opts_chunk$set(
 **Outputs:**
 
 - `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
-- `../../../data/acs_step1_23.feather` — 2019–2023 ACS estimates, one row per 2020 CA block group.
-- `../../../data/xwalk_bg23_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
+- `../../../data/acs_step1_24.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
+- `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
 - `../../../data/xwalk_tr00_tr10.feather` — 2000 tract → 2010 tract crosswalk (weights).
 
 This notebook:
@@ -43,13 +43,13 @@ This notebook:
 1. Sets up the environment (packages, helper functions, data paths)
 2. Defines the target ACS variables to extract
 3. Imports and prepares the 2012–2016 ACS tract data
-4. Imports and prepares the 2019–2023 ACS block-group data
+4. Imports and prepares the 2020–2024 ACS block-group data
 5. Imports and prepares the geographic crosswalks
 6. Validates the saved outputs
 
 This step only **imports and stores** source data; it performs no row-level
 filtering or sample restriction. Geographic harmonization (aggregating the
-2019–2023 block-group data to 2010 tracts using these crosswalks) happens in
+2020–2024 block-group data to 2010 tracts using these crosswalks) happens in
 `02_assemble.Rmd`.
 
 # 1. Set up environment
@@ -119,13 +119,13 @@ downstream transformation.
 
 ```{r load-variable-dictionaries}
 v16 <- load_variables(2016, "acs5")
-v23 <- load_variables(2023, "acs5")
+v24 <- load_variables(2024, "acs5")
 ```
 
 ## 2.2 Specify variables to extract
 
 `v16_save` maps short, analysis-friendly names to Census variable codes. The
-same set is reused for 2023 (`v23_save`) so the two vintages share an identical
+same set is reused for 2024 (`v24_save`) so the two vintages share an identical
 variable layout. Inline comments give the plain-language meaning of each code.
 
 This set includes vacancy-status detail from table B25004: `vac_forrent` (vacant
@@ -215,7 +215,7 @@ v16_save <- c(pop="B01003_001",      # 	TOTAL POPULATION
 
 
 
-v23_save <- v16_save
+v24_save <- v16_save
 ```
 
 # 3. Import and prepare 2012–2016 ACS tract data
@@ -251,7 +251,7 @@ contiguous gross-rent categories (table B25063). For **2016** we use categories
   inflation, so the dollar value of a given "low rent" threshold drifts upward
   over time.
 - To keep the *real* rent threshold roughly comparable across vintages, the
-  2019–2023 cutoffs are shifted up by one category (1–18 / 1–20; see Section 4.2).
+  2020–2024 cutoffs are shifted up by one category (1–18 / 1–20; see Section 4.2).
 
 ```{r derive-low-rent-16}
 acs_trt_16 <- acs_trt_16 |>
@@ -288,30 +288,30 @@ save_data(acs_trt_16, data_dir, "acs_step1_16.feather")
 rm(v16, v16_save)
 ```
 
-# 4. Import and prepare 2019–2023 ACS block-group data
+# 4. Import and prepare 2020–2024 ACS block-group data
 
-## 4.1 Download 2023 ACS block-group estimates
+## 4.1 Download 2024 ACS block-group estimates
 
-### Decision: Pull 2019–2023 at the block-group level
+### Decision: Pull 2020–2024 at the block-group level
 
-The 2019–2023 ACS is imported at the **block-group** level (not tract), because
+The 2020–2024 ACS is imported at the **block-group** level (not tract), because
 2020-vintage block groups can be allocated to 2010 tracts using the NHGIS
 crosswalk loaded in Section 5.1. Aggregation to 2010 tracts happens downstream in
 `02_assemble.Rmd`. Expected: one row per CA 2020-vintage block group (~25,000+).
 
 ```{r download-acs-bg-23}
-acs_bg_23 <- get_acs(geography = "block group",
+acs_bg_24 <- get_acs(geography = "block group",
                        state = "CA",
-                       variables = v23_save,
-                       year = 2023,
+                       variables = v24_save,
+                       year = 2024,
                        output = "wide",
                        survey = "acs5")
 
-report_n(acs_bg_23, "2023 ACS block groups imported")
+report_n(acs_bg_24, "2024 ACS block groups imported")
 
 # # Retained exploratory code: earlier pct/CV derivations, kept for reference.
 # # These rely on calc_cv()/calc_pct() helpers and are computed downstream instead.
-# acs_bg_23 <- acs_bg_23 |>
+# acs_bg_24 <- acs_bg_24 |>
 #   mutate(popCV = calc_cv(popE, popM),
 #          huCV = calc_cv(huE, huM),
 #          rentCV = calc_cv(rentE, rentM),
@@ -328,14 +328,14 @@ report_n(acs_bg_23, "2023 ACS block groups imported")
 
 ## 4.2 Derive low-rent housing-unit counts
 
-### Decision: Shift low-rent cutoffs up one category for 2019–2023
+### Decision: Shift low-rent cutoffs up one category for 2020–2024
 
-For **2023** we use gross-rent categories **1–18** (`rhu_lrE`) and **1–20**
+For **2024** we use gross-rent categories **1–18** (`rhu_lrE`) and **1–20**
 (`rhu_lr2E`) — one category higher than the 2016 cutoffs (Section 3.2) — to hold
 the real (inflation-adjusted) low-rent threshold roughly constant across vintages.
 
 ```{r derive-low-rent-23}
-acs_bg_23 <- acs_bg_23 |>
+acs_bg_24 <- acs_bg_24 |>
   mutate(
     rhu_lrE  = rent_cat_sum(1, 18),
     rhu_lr2E = rent_cat_sum(1, 20)
@@ -349,28 +349,28 @@ Same bellwether data-quality probe as Section 3.3, on the block-group data.
 ```{r check-missingness-23}
 vars <- c("popE", "rentE")
 
-out <- map_dfr(vars, ~summ_var(acs_bg_23, .x))
+out <- map_dfr(vars, ~summ_var(acs_bg_24, .x))
 out
 ```
 
 ## 4.4 Rename geographic ID and save
 
 Renames `GEOID` to `bg2020_id` (and tags the `rent_id` flag), then writes the
-output. **Output:** `acs_step1_23.feather` — 2019–2023 ACS estimates with one row
+output. **Output:** `acs_step1_24.feather` — 2020–2024 ACS estimates with one row
 per 2020 CA block group, consumed by `02_assemble.Rmd`.
 
 ```{r save-acs-bg-23}
-acs_bg_23 <- rename_id(acs_bg_23, bg2020_id, GEOID)
+acs_bg_24 <- rename_id(acs_bg_24, bg2020_id, GEOID)
 
-report_n(acs_bg_23, "2023 ACS block groups saved")
-save_data(acs_bg_23, data_dir, "acs_step1_23.feather")
+report_n(acs_bg_24, "2024 ACS block groups saved")
+save_data(acs_bg_24, data_dir, "acs_step1_24.feather")
 
-rm(v23, v23_save)
+rm(v24, v24_save)
 ```
 
 # 5. Import and prepare geographic crosswalks
 
-## 5.1 Crosswalk 2023 block groups to 2010 tracts
+## 5.1 Crosswalk 2024 block groups to 2010 tracts
 
 ### Decision: Use NHGIS weighted crosswalks for geographic harmonization
 
@@ -432,10 +432,10 @@ xwalk <- xwalk |>
          tr2010_id = tr2010ge) |>
   select(c(bg2020_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
 
-# Output: xwalk_bg23_tr10.feather — 2020 block group -> 2010 tract weights
+# Output: xwalk_bg24_tr10.feather — 2020 block group -> 2010 tract weights
 report_n(xwalk, "bg2020->tr2010 crosswalk saved")
 xwalk |>
-  arrow::write_feather(paste0(data_dir, "xwalk_bg23_tr10.feather"))
+  arrow::write_feather(paste0(data_dir, "xwalk_bg24_tr10.feather"))
 
 rm(xwalk)
 ```
@@ -511,8 +511,8 @@ Re-reading the written files confirms the save round-tripped correctly.
 
 ```{r reload-outputs}
 acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step1_16.feather"))
-acs23_out <- arrow::read_feather(paste0(data_dir, "acs_step1_23.feather"))
-xbg_out   <- arrow::read_feather(paste0(data_dir, "xwalk_bg23_tr10.feather"))
+acs24_out <- arrow::read_feather(paste0(data_dir, "acs_step1_24.feather"))
+xbg_out   <- arrow::read_feather(paste0(data_dir, "xwalk_bg24_tr10.feather"))
 xtr_out   <- arrow::read_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
 ```
 
@@ -527,11 +527,11 @@ cat("acs_step1_16: ", nrow(acs16_out), "rows |",
     n_distinct(acs16_out$tr2010_id), "unique tr2010_id |",
     sum(duplicated(acs16_out$tr2010_id)), "duplicate ids\n")
 
-cat("acs_step1_23: ", nrow(acs23_out), "rows |",
-    n_distinct(acs23_out$bg2020_id), "unique bg2020_id |",
-    sum(duplicated(acs23_out$bg2020_id)), "duplicate ids\n")
+cat("acs_step1_24: ", nrow(acs24_out), "rows |",
+    n_distinct(acs24_out$bg2020_id), "unique bg2020_id |",
+    sum(duplicated(acs24_out$bg2020_id)), "duplicate ids\n")
 
-cat("xwalk_bg23_tr10: ", nrow(xbg_out), "rows |",
+cat("xwalk_bg24_tr10: ", nrow(xbg_out), "rows |",
     n_distinct(xbg_out$bg2020_id, xbg_out$tr2010_id), "unique (bg, tract) pairs |",
     sum(duplicated(xbg_out[c("bg2020_id", "tr2010_id")])), "duplicate pairs\n")
 
@@ -549,10 +549,10 @@ than impose a threshold here.
 ```{r validate-missingness}
 cat("acs_step1_16 missing tr2010_id:", sum(is.na(acs16_out$tr2010_id)), "\n")
 cat("acs_step1_16 missing rentE:    ", sum(is.na(acs16_out$rentE)), "\n")
-cat("acs_step1_23 missing bg2020_id:", sum(is.na(acs23_out$bg2020_id)), "\n")
-cat("acs_step1_23 missing rentE:    ", sum(is.na(acs23_out$rentE)), "\n")
+cat("acs_step1_24 missing bg2020_id:", sum(is.na(acs24_out$bg2020_id)), "\n")
+cat("acs_step1_24 missing rentE:    ", sum(is.na(acs24_out$rentE)), "\n")
 
-cat("xwalk_bg23_tr10 missing keys:",
+cat("xwalk_bg24_tr10 missing keys:",
     sum(is.na(xbg_out$bg2020_id) | is.na(xbg_out$tr2010_id)), "\n")
 cat("xwalk_tr00_tr10 missing keys:",
     sum(is.na(xtr_out$tr2000_id) | is.na(xtr_out$tr2010_id)), "\n")
@@ -566,9 +566,9 @@ labels. Expected: class `logical` for each.
 ```{r validate-flags}
 cat("acs_step1_16 rent_id class:", class(acs16_out$rent_id),
     "| values:", paste(unique(acs16_out$rent_id), collapse = ", "), "\n")
-cat("acs_step1_23 rent_id class:", class(acs23_out$rent_id),
-    "| values:", paste(unique(acs23_out$rent_id), collapse = ", "), "\n")
-cat("xwalk_bg23_tr10 x_id class:", class(xbg_out$x_id),
+cat("acs_step1_24 rent_id class:", class(acs24_out$rent_id),
+    "| values:", paste(unique(acs24_out$rent_id), collapse = ", "), "\n")
+cat("xwalk_bg24_tr10 x_id class:", class(xbg_out$x_id),
     "| values:", paste(unique(xbg_out$x_id), collapse = ", "), "\n")
 cat("xwalk_tr00_tr10 x_id class:", class(xtr_out$x_id),
     "| values:", paste(unique(xtr_out$x_id), collapse = ", "), "\n")
@@ -582,7 +582,7 @@ plausible ACS ranges).
 
 ```{r validate-numeric-summaries}
 print_numeric_summary(acs16_out, "acs_step1_16")
-print_numeric_summary(acs23_out, "acs_step1_23")
-print_numeric_summary(xbg_out,   "xwalk_bg23_tr10")
+print_numeric_summary(acs24_out, "acs_step1_24")
+print_numeric_summary(xbg_out,   "xwalk_bg24_tr10")
 print_numeric_summary(xtr_out,   "xwalk_tr00_tr10")
 ```
