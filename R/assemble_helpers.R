@@ -217,6 +217,19 @@ calc_rel_wt <- function(df, id) {
 
 #' Calculate % missing / top-coded rent at the tract level
 #'
+#' Returns the weighted share of renter housing units per tract whose
+#' block-group rent is missing (`pct_m_rent`) or top-coded (`pct_tc_rent`),
+#' computed on the **uncensored** block-group rent. Both are true shares in
+#' `[0, 1]`: numerator is the weighted renter units in the qualifying block
+#' groups, denominator the tract's total weighted renter units.
+#'
+#' NOTE: the denominator summary is named `rhuE_tot` (not `rhuE`) deliberately.
+#' `summarise()` evaluates its expressions in order, so naming it `rhuE` would
+#' shadow the block-group `rhuE` column in the later numerator expressions,
+#' collapsing them to the tract total and turning each "share" into a sum of
+#' weights (values > 1). Keeping the names distinct preserves the intended
+#' per-block-group weighting.
+#'
 #' @param df
 #' @param id grouping geographic id (unquoted)
 #' @return dataframe with % missing / % top-coded rent calculations
@@ -225,7 +238,7 @@ calc_pct_tc_m <- function(df, id) {
     group_by({{id}}) |>
     summarise(
     #   huE     = sum(huE * wt_hu, na.rm = TRUE),
-      rhuE    = sum(rhuE * wt_renthu, na.rm = TRUE),
+      rhuE_tot    = sum(rhuE * wt_renthu, na.rm = TRUE),
       rhu_m_rent = sum(is.na(rentE) * rhuE * wt_renthu, na.rm = TRUE),
       rhu_tc_rent = sum((!is.na(rhuE) & rhuE!=0 & !is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
     #   hu_tc_hval = sum((!is.na(med_hvalE) & med_hvalE >= 2000000) * huE * wt_hu, na.rm = TRUE),
@@ -233,8 +246,8 @@ calc_pct_tc_m <- function(df, id) {
     )
 
   tr_df <- tr_df |>
-    mutate(pct_m_rent = if_else(rhuE > 0, rhu_m_rent / rhuE, NA_real_),
-            pct_tc_rent = if_else(rhuE > 0, rhu_tc_rent / rhuE, NA_real_),
+    mutate(pct_m_rent = if_else(rhuE_tot > 0, rhu_m_rent / rhuE_tot, NA_real_),
+            pct_tc_rent = if_else(rhuE_tot > 0, rhu_tc_rent / rhuE_tot, NA_real_),
 
          ) |>
     select({{id}}, pct_m_rent, pct_tc_rent)

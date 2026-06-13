@@ -38,7 +38,8 @@ annual averages (BLS, CPI-U, U.S. city average, all items): 313.689 (2024) /
 | column | source | description |
 |---|---|---|
 | `interp_rent` | 2024 | Interpolated median rent (2024 only; not suffixed). |
-| `pct_miss_rent`, `pct_miss_hval` | 2024 | Share of weighted units missing rent / value. |
+| `pct_miss_rent`, `pct_miss_hval` | 2024 | Share of weighted units missing rent / value. For rent this includes top-coded block groups (censored before aggregation); see `pct_tc_rent`. |
+| `pct_tc_rent` | 2024 | Share of weighted renter units whose rent is top-coded; the top-coded portion of `pct_miss_rent`. |
 | `tc_flag_rent_24` | 2024 | 1 if the tract had top-coded renter rent (0/1). |
 | `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | 2016 | Missing-value flags (0/1). |
 | `zero_flag_rhu` | 2016 | Zero renter-units flag (0/1). |

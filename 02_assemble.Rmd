@@ -30,7 +30,7 @@ knitr::opts_chunk$set(
 
 **Outputs:**
 
-- `../../../data/acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missingness, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
 
 This notebook:
@@ -171,6 +171,16 @@ each block group's *relative* contribution to its tract total — `rel_wt_*` —
 computed as the block group's weighted count over the tract's weighted total
 (separately by population, housing units, and renter housing units).
 
+### Decision: Retain the tract-level top-coded-rent share
+
+`calc_pct_tc_m()` computes, on the **uncensored** block-group rent, two tract-level
+shares of weighted renter units: the share that are top-coded (`pct_tc_rent`) and
+the share that are truly missing (`pct_m_rent`). We keep `pct_tc_rent` on the
+output — analogous to `pct_miss_rent` (§2.6) — so the top-coded portion of the
+missing-rent share is auditable downstream. It must be computed here, *before*
+censoring (§2.4): censoring sets top-coded `rentE` to `NA`, after which top-codes
+can no longer be distinguished from genuine non-response.
+
 ```{r relative-weights-and-tc}
 # Calc the relative weight for count variables
 acs_bg <- calc_rel_wt(acs_bg, tr2010_id)
@@ -185,7 +195,8 @@ check_tc_out
 # Create top-coded flag
 tc_vars <- tc_vars |>
     mutate (tc_flag_rent_24= if_else(!is.na(pct_tc_rent) & pct_tc_rent>0, 1, 0)) |>
-    select(tr2010_id, tc_flag_rent_24)
+    # Keep pct_tc_rent (top-coded-rent share, analogous to pct_miss_rent) alongside the flag
+    select(tr2010_id, pct_tc_rent, tc_flag_rent_24)
 
 table(tc_vars$tc_flag_rent_24)
 ```
@@ -312,6 +323,16 @@ Both rates are `NA` where the denominator is non-positive. Neither rate carries 
 margin-of-error / CV column, matching the existing `pctvacE` overall-vacancy
 share.
 
+### Note: `pct_miss_rent` counts top-coded rent as missing
+
+Top-coded `rentE` was censored to `NA` in §2.4 *before* this aggregation, so
+`calc_missing_vars()` (which counts block groups where `rentE` is `NA`) treats both
+genuinely missing and top-coded block groups as "missing." `pct_miss_rent` is
+therefore the share of weighted renter units that are missing **or** top-coded,
+and it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` (truly missing
+plus top-coded, both computed pre-censoring in §2.3). The retained `pct_tc_rent`
+isolates the top-coded portion.
+
 ```{r derive-measures-24}
 # Calculate interpolated rent
 acs_interp_rent <- calc_interp_rent(acs_tr10_24)
@@ -399,7 +420,7 @@ out
 
 # Check % missing
 
-check_vars <- c("pct_miss_rent", "rentE", "tc_flag_rent_24")
+check_vars <- c("pct_miss_rent", "pct_tc_rent", "rentE", "tc_flag_rent_24")
 
 out <- map_dfr(check_vars, ~summ_var(acs_tr10_24_tc, .x))
 out

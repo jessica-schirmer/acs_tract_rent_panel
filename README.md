@@ -60,7 +60,7 @@ Inputs:
 - `../../../data/acs_step1_16.feather` — 2012-2016 ACS estimates, one row per 2010 CA tract.
 
 Outputs:
-- `../../../data/acs_step2_24.feather` — 2020-2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missingness, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_24.feather` — 2020-2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_16.feather` — 2012-2016 ACS tract measures (SCAG region), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
 
 Schema:
@@ -69,7 +69,7 @@ Schema:
 
 Steps:
 1. Set up environment (packages, helper functions from `R/assemble_helpers.R`, data directory, SCAG target counties)
-2. Assemble 2020-2024 ACS tract measures (merge crosswalk, restrict to SCAG, censor top-codes, weight-aggregate block groups to 2010 tracts, derive interpolated rent / missingness / share / vacancy-rate / CV measures, save)
+2. Assemble 2020-2024 ACS tract measures (merge crosswalk, restrict to SCAG, censor top-codes, weight-aggregate block groups to 2010 tracts, derive interpolated rent / missing- and top-coded-rent shares / share / vacancy-rate / CV measures, save)
 3. Prepare 2012-2016 ACS tract measures (restrict to SCAG, flag and censor top-coded/missing/zero values, build share, vacancy-rate, and CV measures, save)
 4. Validate outputs (key uniqueness, missingness, flag encoding, numeric distributions)
 

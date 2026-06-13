@@ -51,7 +51,8 @@ following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 | `pctsvacE` | numeric | For-sale vacancy rate: `vac_forsaleE / (ohuE + vac_forsaleE)`; `NA` if denominator ≤ 0. |
 | `rhu_miss_rent` | numeric | Weighted renter units in block groups missing rent (aggregated). |
 | `hu_miss_hval` | numeric | Weighted housing units in block groups missing median value. |
-| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). |
+| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups; it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent`. |
+| `pct_tc_rent` | numeric | Share of weighted renter units in the tract whose rent is top-coded (`rentE >= 3500`), computed on the **uncensored** block-group rent in §2.3; the top-coded portion of `pct_miss_rent`. `NA` where tract `rhuE = 0`. |
 | `pct_miss_hval` | numeric | `hu_miss_hval / huE` (share of units missing median value). |
 | `pctrhuE`, `pctvacE`, `pctblkE`, `pcthspE`, `pctaaE`, `pctsfdE` | numeric | Share measures (see `acs_step2_16.md` for definitions). |
 | `pctrhuM`, `pctblkM`, `pcthspM` | numeric | Derived share MOEs. |

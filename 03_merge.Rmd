@@ -87,10 +87,12 @@ data_dir <- "../../../data/"
 
 Load the assembled 2024 tract measures, suffix their variables with `_24`, and
 keep the analytic variable set plus a few extra quality/derived columns
-(`pct_miss_rent`, `pct_miss_hval`, `tc_flag_rent_24`, `interp_rent`). The analytic
-set now also carries the renamed multifamily count `mf5E`, the non-single-family-
-attached count `nsfaE`, and the rental / for-sale vacancy rates
-`pctrvacE` / `pctsvacE` (added to `rename_vars()` so they get the year suffix).
+(`pct_miss_rent`, `pct_tc_rent`, `pct_miss_hval`, `tc_flag_rent_24`, `interp_rent`).
+`pct_tc_rent` is the top-coded portion of `pct_miss_rent` (see §2.3/§2.6 of
+`02_assemble.Rmd`). The analytic set now also carries the renamed multifamily count
+`mf5E`, the non-single-family-attached count `nsfaE`, and the rental / for-sale
+vacancy rates `pctrvacE` / `pctsvacE` (added to `rename_vars()` so they get the
+year suffix).
 
 ```{r prep-24}
 # # Load 2005-2009 ACS data
@@ -106,7 +108,7 @@ acs_24 <- rename_vars(acs_24, "24")
 # Select variables
 # var_list <- c("pct_miss_rent", "pct_tc_rent")
 # var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent", "interp_rentCV", "interp_rentM")
-var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent")
+var_list <- c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent")
 acs_24 <- select_vars(acs_24, "24", var_list)
 
 # Apply inflation adjustment
