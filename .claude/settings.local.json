@@ -27,7 +27,10 @@
       "Bash(Rscript -e 'rmarkdown::render\\(\"03_merge.Rmd\", output_file=file.path\\(tempdir\\(\\),\"03_merge_verify.html\"\\), quiet=TRUE\\)')",
       "Bash(git mv *)",
       "Bash(sed -n '54,74p' README.md)",
-      "Bash(sed -n '77,94p' README.md)"
+      "Bash(sed -n '77,94p' README.md)",
+      "Bash(Rscript *)",
+      "Bash(git -C /Users/jschirmer/research/ADU_Rent/scripts/cleaning/acs_tract diff --stat)",
+      "Bash(git -C /Users/jschirmer/research/ADU_Rent/scripts/cleaning/acs_tract diff -- 02_assemble.Rmd 03_merge.Rmd R/assemble_helpers.R)"
     ]
   }
 }
