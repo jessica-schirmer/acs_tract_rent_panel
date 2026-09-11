@@ -112,12 +112,17 @@ Analyst validation of the extension:
   in stage 2 to that directory for repeatable comparisons. The default reads
   existing `data_dir` outputs into memory before saving; after a run those files
   become the new outputs. Missing references explicitly leave parity unverified.
+  
 - Inspect county counts for both vintages and the final panel: all 14 target
   counties must be populated, including the Bay Area, with no unintended
   destination counties. Stage 3 inherits the county set validated by stage 2.
 - Crosswalk pairs and tract keys must be unique at their documented grains;
-  selected allocations and tract-level joins must all match without row
-  multiplication. Full source weights sum to one within `1e-6`; retained weights
+  retained allocations and tract-level joins must all match without row
+  multiplication. Unmatched crosswalk links are reported with their IDs/weights
+  and excluded only when all four weights are finite and exactly zero; matched
+  zero-weight links remain. Missing sources with any positive or missing/invalid
+  weight still fail validation. Exclusions must preserve destination tract
+  coverage. Full source weights sum to one within `1e-6`; retained weights
   can sum below one and must remain identical to their original fractions.
   Assertion failures stop notebook execution.
 - `socal_parity_16` and `socal_parity_24` compare every output column, reporting

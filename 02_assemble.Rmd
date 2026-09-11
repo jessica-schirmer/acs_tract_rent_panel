@@ -29,7 +29,7 @@ knitr::opts_chunk$set(
 - `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
 - `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
 - Optional prior `acs_step2_16.feather` and `acs_step2_24.feather` in
-  `parity_reference_dir` (§1.3) — schema and Southern California parity references.
+  `../../../data/parity_reference` (§1.3) — schema and Southern California parity references.
 
 **Outputs:**
 
@@ -100,7 +100,7 @@ bay_area_counties <- c(
 target_counties <- union(unname(southern_california_counties), unname(bay_area_counties))
 
 # Point to a preserved prior-output directory for repeatable analyst parity runs.
-parity_reference_dir <- data_dir
+parity_reference_dir <- "../../../data/parity_reference"
 ```
 
 ## 1.4 Read prior outputs for parity checks
@@ -151,14 +151,29 @@ report_n(xwalk, "bg2020->tr2010 crosswalk loaded")
 Keep every crosswalk row whose **destination** is in `target_counties`, including
 sources outside those counties. The inspection documents cross-county allocations
 that a source-county filter would lose. Join these rows to the statewide ACS
-cache using their source IDs; every selected crosswalk row must match exactly
-one ACS block group. Non-target destinations are excluded before aggregation.
+cache using their source IDs; every retained crosswalk row must match exactly
+one ACS block group after the zero-weight exception below. Non-target
+destinations are excluded before aggregation.
 
 The original NHGIS weights describe fractions of each source allocated across
 all destinations. Their full source sums must be within `1e-6` of one (allowing
 crosswalk rounding). Retained fractions may sum to less than one when other
 destinations lie outside the sample. **Do not renormalize them.** Relative MOE
 weights in §2.3 retain their existing, separate definition.
+
+### Decision: Exclude unmatched links only when all allocation weights are zero
+
+The crosswalk includes a link from Nevada block group `320030057033` to
+San Bernardino tract `06071010300` with all four weights exactly zero. That
+source is absent from the California ACS cache, but the link contributes no
+population, households, housing units, or renter units.
+
+Report unmatched IDs and weights, then exclude only unmatched links whose four
+weights are finite and exactly zero. Matched zero-weight links remain. Any
+unmatched positive weight, however small, or missing/invalid weight still fails
+validation. Remove the excluded pairs from both the join and its crosswalk
+reference so the unchanged-weight check in §2.3 compares the same allocations.
+Destination tract coverage must remain unchanged; no weights are renormalized.
 
 ```{r merge-and-restrict}
 assert_unique_key(acs_bg_24, "bg2020_id", "Statewide 2024 ACS")
@@ -203,14 +218,31 @@ acs_sources <- semi_join(acs_bg_24, source_ids, by = "bg2020_id")
 report_drop(acs_sources, nrow(acs_bg_24), "ACS sources with no target destination")
 xwalk_join <- merge_df(xwalk_target, acs_sources, "bg2020_id")
 table(xwalk_join$merge)
+stopifnot("Crosswalk join must not multiply allocation pairs" =
+            nrow(xwalk_join) == nrow(xwalk_target))
 
 xwalk_join_filt <- xwalk_join |>
   filter(merge == "left_only")
-print(select(xwalk_join_filt, bg2020_id, tr2010_id), n = Inf)
-stopifnot("Every target allocation must match one ACS source" =
+print(select(xwalk_join_filt, bg2020_id, tr2010_id, all_of(weight_cols)),
+      n = Inf, width = Inf)
+zero_weight_unmatched <- xwalk_join_filt |>
+  filter(if_all(all_of(weight_cols), ~ is.finite(.x) & .x == 0)) |>
+  select(bg2020_id, tr2010_id, all_of(weight_cols))
+
+n_before <- nrow(xwalk_target)
+xwalk_target <- anti_join(xwalk_target, zero_weight_unmatched,
+                          by = c("bg2020_id", "tr2010_id"))
+report_drop(xwalk_target, n_before, "unmatched zero-weight allocations from the reference")
+n_before <- nrow(xwalk_join)
+xwalk_join <- anti_join(xwalk_join, zero_weight_unmatched,
+                        by = c("bg2020_id", "tr2010_id"))
+report_drop(xwalk_join, n_before, "unmatched zero-weight allocations from the join")
+stopifnot("Every retained target allocation must match one ACS source" =
             all(xwalk_join$merge == "both"),
-          "Crosswalk join must not multiply allocation pairs" =
-            nrow(xwalk_join) == nrow(xwalk_target))
+          "Retained join and crosswalk must have the same row count" =
+            nrow(xwalk_join) == nrow(xwalk_target),
+          "Excluding zero-weight links must preserve target tract coverage" =
+            setequal(xwalk_target$tr2010_id, target_tract_ids_24))
 assert_unique_key(xwalk_join, c("bg2020_id", "tr2010_id"), "Matched allocation pairs")
 
 n_before <- nrow(xwalk_join)
