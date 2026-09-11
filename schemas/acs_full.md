@@ -2,8 +2,9 @@
 
 **Produced by:** `03_merge.Rmd` (Step 3) · **Source:** `acs_step2_16.feather` + `acs_step2_24.feather`
 
-**Grain:** one row per 2010-vintage tract in the SCAG region (the union of tracts
-present in either survey; the merge keeps all tracts).
+**Grain:** one row per 2010-vintage tract in the five Southern California plus
+nine Bay Area counties configured in [02_assemble.Rmd](../02_assemble.Rmd) §1.3
+(the union of tracts present in either survey; the full join keeps all tracts).
 **Key:** `tr2010_id` (unique, non-missing).
 
 This is the analysis panel: 2012–2016 and 2020–2024 tract measures side by side,
@@ -85,3 +86,7 @@ periods are present (`NA` only if a period is missing).
 | `base_id` | logical | Constant `TRUE` (set after the merge). |
 | `post_id` | logical | `TRUE` if the tract is present in the 2024 survey, else `NA`. |
 | `rent_id`, `rhu_id` | logical | Upstream join tags carried from the step-2 inputs. |
+
+One-period-only membership is audited in `03_merge.Rmd` against the original
+2016/2024 input keys, independently of `base_id`. The audit stays in notebook
+diagnostics and adds no output columns.

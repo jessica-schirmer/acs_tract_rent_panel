@@ -13,6 +13,7 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
+  error = FALSE,
   warning = FALSE,
   message = FALSE,
   fig.width = 10,
@@ -24,8 +25,9 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region).
-- `../../../data/acs_step2_24.feather` — 2020–2024 ACS tract measures (SCAG region), aggregated to 2010 tracts.
+- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area).
+- `../../../data/acs_step2_24.feather` — 2020–2024 ACS tract measures (Southern California + Bay Area), aggregated to 2010 tracts.
+- Existing `../../../data/acs_full.feather`, if present — column/type reference read before saving.
 
 **Outputs:**
 
@@ -36,14 +38,16 @@ knitr::opts_chunk$set(
 
 This notebook:
 
-1. Sets up the environment (packages, helper functions, data directory)
-2. Imports and prepares the 2020–2024 and 2012–2016 tract measures (rename, select, inflation-adjust)
-3. Merges the two surveys and calculates change variables
-4. Validates the saved output
+1. Set up environment
+2. Import and prepare survey measures
+3. Merge surveys and calculate change variables
+4. Validate outputs
 
 This step only **merges** existing tract measures and derives change variables;
-both inputs are already restricted to the SCAG region (in `02_assemble.Rmd`), so
-no further sample restriction happens here.
+both inputs already use the 14 destination counties configured and validated in
+`02_assemble.Rmd`, so no further sample restriction happens here. This notebook
+inherits county coverage from the 2016 input and checks that the 2024 input and
+full panel agree. County definitions remain centralized in stage 2.
 
 # 1. Set up environment
 
@@ -69,9 +73,11 @@ This stage's helpers — feather I/O, the survey `merge_df()`, variable
 renaming/selection, inflation adjustment, and the change-variable functions —
 live in `R/merge_helpers.R`. That file is self-contained for this notebook (its
 `merge_df()` differs from the one used by `02_assemble.Rmd`).
+Shared geographic, key, and schema diagnostics live in `R/geography_qa.R`.
 
 ```{r load-helpers}
 source(here::here("R", "merge_helpers.R"))
+source(here::here("R", "geography_qa.R"))
 ```
 
 ## 1.3 Set data directory
@@ -79,6 +85,8 @@ source(here::here("R", "merge_helpers.R"))
 ```{r set-paths}
 # Trailing slash is intentional: save_data() builds paths with paste0().
 data_dir <- "../../../data/"
+prior_panel_path <- file.path(data_dir, "acs_full.feather")
+prior_panel <- if (file.exists(prior_panel_path)) arrow::read_feather(prior_panel_path) else NULL
 ```
 
 # 2. Import and prepare survey measures
@@ -101,6 +109,8 @@ year suffix).
 # Load 2020-2024 ACS data
 acs_24 <- load_data(data_dir, NULL, "acs_step2_24.feather")
 report_n(acs_24, "2024 tract measures loaded")
+assert_unique_key(acs_24, "tr2010_id", "2024 panel input")
+input_keys_24 <- acs_24$tr2010_id
 
 # Rename variables
 acs_24 <- rename_vars(acs_24, "24")
@@ -133,6 +143,12 @@ all items) to adjust 2016 dollars to 2024 dollars. Factor = 313.689 / 240.007 �
 # Load 2012-2016 ACS data
 acs_16 <- load_data(data_dir, NULL, "acs_step2_16.feather")
 report_n(acs_16, "2016 tract measures loaded")
+assert_unique_key(acs_16, "tr2010_id", "2016 panel input")
+input_keys_16 <- acs_16$tr2010_id
+panel_counties <- sort(unique(substr(input_keys_16, 3, 5)))
+stopifnot("Run stage 2 with all 14 configured counties before merging" = length(panel_counties) == 14L)
+report_tract_counties(acs_16, panel_counties, "2016 input counties (validated in stage 2)")
+report_tract_counties(acs_24, panel_counties, "2024 input counties")
 
 # Rename variables
 acs_16 <- rename_vars(acs_16, "16")
@@ -162,12 +178,21 @@ out. Tracts present in only one period keep `NA` for the other period's measures
 change variables (§3.2) are guarded so they are `NA` when a base value is
 missing or zero. There is therefore **no row-dropping filter** in this notebook.
 
+Membership is audited against `input_keys_16` and `input_keys_24`, captured on
+import. The expected panel key set is their union, with one row per tract.
+`panel_membership` reports every one-period-only tract and county-level counts.
+The output's existing constant-`TRUE` `base_id` is preserved as part of its
+schema; it is not used to infer presence in the earlier survey.
+
 ```{r merge-surveys}
 # Merge post rent data
 n_16 <- nrow(acs_16)
 n_24 <- nrow(acs_24)
+assert_tract_keys(acs_16, input_keys_16, "Prepared 2016 input")
+assert_tract_keys(acs_24, input_keys_24, "Prepared 2024 input")
 acs_16_24 <- merge_df(acs_16, acs_24)
 table(acs_16_24$merge)
+panel_membership <- audit_panel_keys(acs_16_24, input_keys_16, input_keys_24)
 cat(sprintf("Merged %s (2016) and %s (2024) tracts -> %s panel rows\n",
             formatC(n_16, format = "d", big.mark = ","),
             formatC(n_24, format = "d", big.mark = ","),
@@ -249,8 +274,16 @@ analysis stages.
 
 ```{r save-panel}
 report_n(acs_full, "ACS tract panel to save")
+audit_panel_keys(acs_full, input_keys_16, input_keys_24)
+report_tract_counties(acs_full, panel_counties, "Final panel destination counties")
+if (!is.null(prior_panel)) {
+  assert_same_schema(acs_full, prior_panel, "Panel schema versus prior output")
+} else {
+  cat("Prior panel schema comparison not checked: no existing acs_full.feather.\n")
+}
 
 # Save file
+cat("Writing/replacing", file.path(data_dir, "acs_full.feather"), "\n")
 acs_full %>%
   arrow::write_feather(paste0(data_dir, "acs_full.feather"))
 ```
@@ -311,6 +344,9 @@ Expected: the panel is unique on `tr2010_id`.
 cat("acs_full:", nrow(acs_out), "rows |",
     n_distinct(acs_out$tr2010_id), "unique tr2010_id |",
     sum(duplicated(acs_out$tr2010_id)), "duplicate ids\n")
+saved_panel_membership <- audit_panel_keys(acs_out, input_keys_16, input_keys_24)
+report_tract_counties(acs_out, panel_counties, "Saved panel destination counties")
+assert_same_schema(acs_out, acs_full, "Saved panel schema")
 ```
 
 ## 4.2 Check missingness on critical variables
@@ -331,7 +367,8 @@ cat("acs_full missing interp_rentPOST:", sum(is.na(acs_out$interp_rentPOST)), "\
 
 The data-quality / change flags (`m_flag_*`, `zero_flag_*`, `tc_flag_*`) should
 be 0/1 integers, not string labels. The `base_id` / `post_id` columns are
-join indicators (logical) and are reported for transparency.
+join indicators (logical) and are reported for transparency. `base_id` is
+constant `TRUE`; the input-key audit in §4.1 determines survey membership.
 
 ```{r validate-flags-panel}
 flag_cols <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs_out), value = TRUE)

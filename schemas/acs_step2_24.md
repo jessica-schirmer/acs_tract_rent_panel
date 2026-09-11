@@ -2,10 +2,17 @@
 
 **Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_24.feather` + `xwalk_bg24_tr10.feather`
 
-**Grain:** one row per 2010-vintage tract **in the five SCAG-region counties**
-(Los Angeles 037, Orange 059, Riverside 065, San Bernardino 071, Ventura 111),
-built by weight-aggregating 2020 block groups to 2010 tracts.
+**Grain:** one row per 2010-vintage California tract **in the five Southern
+California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
+§1.3 (`target_counties`, shared by both vintages), built by weight-aggregating
+2020 block groups to 2010 tracts.
 **Key:** `tr2010_id` (unique, non-missing).
+
+Selection is by destination tract county. All source block groups contributing
+through the crosswalk are retained, including sources outside the target
+counties. The original allocation fractions are preserved; excluding non-target
+destinations does not renormalize them. This expands geographic coverage without
+adding or changing output columns.
 
 ## Aggregation method
 

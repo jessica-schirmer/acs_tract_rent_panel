@@ -13,6 +13,7 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
+  error = FALSE,
   warning = FALSE,
   message = FALSE,
   fig.width = 10,
@@ -27,22 +28,25 @@ knitr::opts_chunk$set(
 - `../../../data/acs_step1_24.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
 - `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
 - `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
+- Optional prior `acs_step2_16.feather` and `acs_step2_24.feather` in
+  `parity_reference_dir` (§1.3) — schema and Southern California parity references.
 
 **Outputs:**
 
-- `../../../data/acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010 tracts (SCAG region), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
-- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010 tracts (Southern California + Bay Area), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
 
 This notebook:
 
-1. Sets up the environment (packages, helper functions, data directory, target counties)
-2. Assembles 2020–2024 ACS tract measures by weight-aggregating block groups to 2010 tracts
-3. Prepares the 2012–2016 ACS tract measures
-4. Validates the saved outputs
+1. Set up environment
+2. Assemble 2020–2024 ACS tract measures
+3. Prepare 2012–2016 ACS tract measures
+4. Validate outputs
 
-Both vintages are restricted to the five SCAG-region counties used in this study
-(Los Angeles `037`, Orange `059`, Riverside `065`, San Bernardino `071`,
-Ventura `111`). The geographic crosswalk and weights come from `01_acs.Rmd`.
+Both vintages use the same 14 destination counties: the five Southern California
+counties and nine Bay Area counties named in §1.3. The geographic crosswalk and
+weights come from `01_acs.Rmd`. Sources outside the target counties are retained
+where they allocate to a target 2010 tract; allocation weights are unchanged.
 
 # 1. Set up environment
 
@@ -70,9 +74,11 @@ This stage's helpers — feather I/O, the merge/filter helpers, the weighting an
 aggregation functions, flagging functions, and diagnostic helpers — live in
 `R/assemble_helpers.R`. That file is self-contained for this notebook (it carries
 its own `summ_var()`, distinct from the one used by `01_acs.Rmd`).
+Shared geographic, key, schema, and parity diagnostics live in `R/geography_qa.R`.
 
 ```{r load-helpers}
 source(here::here("R", "assemble_helpers.R"))
+source(here::here("R", "geography_qa.R"))
 ```
 
 ## 1.3 Set data directory and target counties
@@ -81,9 +87,44 @@ source(here::here("R", "assemble_helpers.R"))
 # Trailing slash is intentional: save_data() builds paths with paste0().
 data_dir <- "../../../data/"
 
-# SCAG-region county FIPS codes (within CA, state code "06"):
-# 037 Los Angeles, 059 Orange, 065 Riverside, 071 San Bernardino, 111 Ventura.
-scag_counties <- c("037", "059", "111", "065", "071")
+# County FIPS codes within California (state code "06").
+southern_california_counties <- c(
+  "Los Angeles" = "037", "Orange" = "059", "Riverside" = "065",
+  "San Bernardino" = "071", "Ventura" = "111"
+)
+bay_area_counties <- c(
+  "Alameda" = "001", "Contra Costa" = "013", "Marin" = "041", "Napa" = "055",
+  "San Francisco" = "075", "San Mateo" = "081", "Santa Clara" = "085",
+  "Solano" = "095", "Sonoma" = "097"
+)
+target_counties <- union(unname(southern_california_counties), unname(bay_area_counties))
+
+# Point to a preserved prior-output directory for repeatable analyst parity runs.
+parity_reference_dir <- data_dir
+```
+
+## 1.4 Read prior outputs for parity checks
+
+Prior outputs are read before either output is saved. By default these are the
+existing files in `data_dir`; use a preserved snapshot in `parity_reference_dir`
+for repeated comparisons against the pre-extension results. A missing reference
+is reported as **parity not checked**, never as a pass. Reference and candidate
+must use the same statewide inputs and measurement code. Differences use a
+numeric tolerance of `1e-10 * max(1, abs(prior), abs(candidate))`; column names,
+order, and types must match exactly. No diagnostic columns enter the Feathers.
+
+```{r load-parity-references}
+prior_outputs <- lapply(c("16", "24"), function(yr) {
+  path <- file.path(parity_reference_dir, paste0("acs_step2_", yr, ".feather"))
+  if (file.exists(path)) {
+    cat("Reading parity reference before saving:", path, "\n")
+    arrow::read_feather(path)
+  } else {
+    cat("PARITY NOT CHECKED for", yr, ": reference absent at", path, "\n")
+    NULL
+  }
+})
+names(prior_outputs) <- c("16", "24")
 ```
 
 # 2. Assemble 2020–2024 ACS tract measures
@@ -103,46 +144,91 @@ xwalk <- load_data(data_dir, NULL, "xwalk_bg24_tr10.feather")
 report_n(xwalk, "bg2020->tr2010 crosswalk loaded")
 ```
 
-## 2.2 Merge crosswalk with block-group ACS and restrict to the CA SCAG region
+## 2.2 Select destination tracts and merge all contributing block groups
 
-### Decision: Sample restriction to the CA SCAG region
+### Decision: Define the sample by destination 2010 tracts
 
-We keep only block groups that (a) match a California crosswalk record and
-(b) fall in one of the five SCAG-region counties. Crosswalk rows that fail to
-match an ACS block group are non-California geographies (the merge is left-keyed
-on the crosswalk), so they are dropped.
+Keep every crosswalk row whose **destination** is in `target_counties`, including
+sources outside those counties. The inspection documents cross-county allocations
+that a source-county filter would lose. Join these rows to the statewide ACS
+cache using their source IDs; every selected crosswalk row must match exactly
+one ACS block group. Non-target destinations are excluded before aggregation.
 
-**Rationale:**
-
-- The analysis covers the SCAG region only; out-of-region tracts are not used.
-- Restricting here, before aggregation, keeps the tract weights internally
-  consistent (each tract's block-group weights sum within the retained sample).
+The original NHGIS weights describe fractions of each source allocated across
+all destinations. Their full source sums must be within `1e-6` of one (allowing
+crosswalk rounding). Retained fractions may sum to less than one when other
+destinations lie outside the sample. **Do not renormalize them.** Relative MOE
+weights in §2.3 retain their existing, separate definition.
 
 ```{r merge-and-restrict}
-# Merge xwalk and acs
-xwalk_join <- merge_df(xwalk, acs_bg_24,  "bg2020_id")
+assert_unique_key(acs_bg_24, "bg2020_id", "Statewide 2024 ACS")
+assert_unique_key(xwalk, c("bg2020_id", "tr2010_id"), "Crosswalk allocation pairs")
+xwalk_target <- select_target_counties(xwalk, tr2010_id, target_counties)
+report_drop(xwalk_target, nrow(xwalk), "allocations to non-target destination tracts")
+target_tract_ids_24 <- unique(xwalk_target$tr2010_id)
+source_ids <- distinct(xwalk_target, bg2020_id)
+
+# Retain all destinations for these sources only to audit original weight sums.
+xwalk_sources <- semi_join(xwalk, source_ids, by = "bg2020_id")
+report_drop(xwalk_sources, nrow(xwalk), "sources with no target destination")
+weight_cols <- c("wt_pop", "wt_hh", "wt_hu", "wt_renthu")
+stopifnot("Crosswalk weights must be finite fractions" = all(vapply(
+  xwalk_sources[weight_cols], function(w) all(is.finite(w) & w >= 0 & w <= 1), logical(1)
+)))
+source_weight_qa <- bind_rows(
+  mutate(xwalk_sources, allocation = "full"),
+  mutate(xwalk_target, allocation = "retained")
+) |>
+  group_by(bg2020_id, allocation) |>
+  summarise(across(all_of(weight_cols), sum), .groups = "drop") |>
+  pivot_longer(all_of(weight_cols), names_to = "weight", values_to = "fraction") |>
+  pivot_wider(names_from = allocation, values_from = fraction)
+source_weight_qa |>
+  group_by(weight) |>
+  summarise(sources = n(), min_full = min(full), max_full = max(full),
+            min_retained = min(retained), max_retained = max(retained),
+            partially_retained = sum(retained < full - 1e-6), .groups = "drop") |>
+  print(n = Inf, width = Inf)
+stopifnot("Full source weights must sum to one" = all(abs(source_weight_qa$full - 1) <= 1e-6),
+          "Retained weights cannot exceed original weights" =
+            all(source_weight_qa$retained <= source_weight_qa$full + 1e-6))
+
+# Coverage diagnostic only: this does not select the allocation sample.
+sources_without_xwalk <- select_target_counties(acs_bg_24, bg2020_id, target_counties) |>
+  anti_join(distinct(xwalk, bg2020_id), by = "bg2020_id")
+report_n(sources_without_xwalk, "Target-county ACS sources missing from the crosswalk (expected 0)")
+stopifnot(nrow(sources_without_xwalk) == 0L)
+
+acs_sources <- semi_join(acs_bg_24, source_ids, by = "bg2020_id")
+report_drop(acs_sources, nrow(acs_bg_24), "ACS sources with no target destination")
+xwalk_join <- merge_df(xwalk_target, acs_sources, "bg2020_id")
 table(xwalk_join$merge)
 
-## Check obs that failed to merge
-xwalk_join <- xwalk_join |>
-    mutate(state=substr(bg2020_id, 0,2))
-table(xwalk_join$state)
-
 xwalk_join_filt <- xwalk_join |>
-    filter(merge=="left_id")
-table(xwalk_join_filt$state)
+  filter(merge == "left_only")
+print(select(xwalk_join_filt, bg2020_id, tr2010_id), n = Inf)
+stopifnot("Every target allocation must match one ACS source" =
+            all(xwalk_join$merge == "both"),
+          "Crosswalk join must not multiply allocation pairs" =
+            nrow(xwalk_join) == nrow(xwalk_target))
+assert_unique_key(xwalk_join, c("bg2020_id", "tr2010_id"), "Matched allocation pairs")
 
-## Tracts that failed to merge are not CA tract, so dropping
 n_before <- nrow(xwalk_join)
 acs_bg <- xwalk_join |>
-  dplyr::filter(merge=="both") |>
+  dplyr::filter(merge == "both") |>
   select(-c(merge))
-report_drop(acs_bg, n_before, "crosswalk rows without a matching CA block group")
+report_drop(acs_bg, n_before, "unmatched target allocations (expected 0)")
 
-## Keep only tracts in the SCAG region
-n_before <- nrow(acs_bg)
-acs_bg <- select_target_counties(acs_bg, bg2020_id, scag_counties)
-report_drop(acs_bg, n_before, "block groups outside SCAG counties")
+# Record newly included sources for the Southern California parity audit.
+socal_boundary_contributions <- acs_bg |>
+  select_target_counties(tr2010_id, southern_california_counties) |>
+  filter(substr(bg2020_id, 1, 2) != "06" |
+           !substr(bg2020_id, 3, 5) %in% southern_california_counties) |>
+  transmute(tr2010_id, bg2020_id, across(all_of(weight_cols)),
+            allocated_pop = popE * wt_pop, allocated_hh = hhE * wt_hh,
+            allocated_hu = huE * wt_hu, allocated_rhu = rhuE * wt_renthu)
+print(socal_boundary_contributions, n = Inf, width = Inf)
+socal_boundary_ids <- unique(socal_boundary_contributions$tr2010_id)
 
 # Check missing data + margin of error
 check_moe_vars <- c("rhuE", "rentE")
@@ -155,10 +241,8 @@ check_tc_vars <- c("rentE")
 
 check_tc_out <- map_dfr(check_tc_vars, ~check_tc(acs_bg, .x))
 check_tc_out
-# 18% (2508) block groups missing rent
-# 7.5% (811) block groups with rent are top-coded
 
-rm(xwalk, xwalk_join, xwalk_join_filt, acs_bg_24)
+rm(xwalk, xwalk_sources, xwalk_join, xwalk_join_filt, acs_bg_24, acs_sources)
 ```
 
 ## 2.3 Compute relative weights and top-code diagnostics
@@ -185,8 +269,30 @@ can no longer be distinguished from genuine non-response.
 # Calc the relative weight for count variables
 acs_bg <- calc_rel_wt(acs_bg, tr2010_id)
 
+# Allocation pairs and raw fractions must remain identical after selection/join.
+allocation_columns <- c("bg2020_id", "tr2010_id", weight_cols)
+stopifnot("Original allocation weights must be preserved exactly" = identical(
+  acs_bg |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id),
+  xwalk_target |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id)
+))
+
 # Calculate top-coded vars
 tc_vars <- calc_pct_tc_m(acs_bg, tr2010_id)
+assert_tract_keys(tc_vars, target_tract_ids_24, "2024 rent shares")
+rent_shares_24 <- tc_vars
+
+# County shares use allocated renter units and uncensored source rent.
+rent_allocation_qa_24 <- acs_bg |>
+  group_by(county = substr(tr2010_id, 3, 5)) |>
+  summarise(
+    source_block_groups = n_distinct(bg2020_id),
+    allocated_rhu = sum(rhuE * wt_renthu, na.rm = TRUE),
+    missing_rhu = sum(is.na(rentE) * rhuE * wt_renthu, na.rm = TRUE),
+    topcoded_rhu = sum((!is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(missing_share = if_else(allocated_rhu > 0, missing_rhu / allocated_rhu, NA_real_),
+         topcoded_share = if_else(allocated_rhu > 0, topcoded_rhu / allocated_rhu, NA_real_))
 
 check_tc_vars <- c("pct_m_rent", "pct_tc_rent")
 check_tc_out <- map_dfr(check_tc_vars, ~summ_var(tc_vars, .x))
@@ -253,6 +359,17 @@ acs_tr10_24 <- calc_agg_vars(acs_bg, tr2010_id)
 cat(sprintf("Aggregated %s block-group rows to %s tract rows\n",
             formatC(n_bg, format = "d", big.mark = ","),
             formatC(nrow(acs_tr10_24), format = "d", big.mark = ",")))
+assert_tract_keys(acs_tr10_24, target_tract_ids_24, "2024 aggregated tracts")
+allocated_counts <- acs_bg |>
+  group_by(tr2010_id) |>
+  summarise(popE = sum(popE * wt_pop, na.rm = TRUE),
+            hhE = sum(hhE * wt_hh, na.rm = TRUE),
+            huE = sum(huE * wt_hu, na.rm = TRUE),
+            rhuE = sum(rhuE * wt_renthu, na.rm = TRUE), .groups = "drop")
+stopifnot("Tract counts must conserve their source contributions" = isTRUE(all.equal(
+  acs_tr10_24 |> select(all_of(names(allocated_counts))) |> arrange(tr2010_id),
+  allocated_counts |> arrange(tr2010_id), tolerance = 1e-10
+)))
 ```
 
 ### Decision: Rename the 5+ multifamily count to `mf5E`
@@ -292,8 +409,10 @@ vac_owner_agg <- acs_bg |>
   )
 
 # Join onto the aggregated tract table (expect every tract to match: all "both")
+assert_tract_keys(vac_owner_agg, target_tract_ids_24, "2024 supplemental counts")
 acs_tr10_24 <- merge_df(acs_tr10_24, vac_owner_agg, "tr2010_id")
 table(acs_tr10_24$merge)
+assert_complete_tract_join(acs_tr10_24, target_tract_ids_24, "Supplemental count join")
 ```
 
 ## 2.6 Derive interpolated rent, missingness, percentage, and CV measures
@@ -336,6 +455,7 @@ isolates the top-coded portion.
 ```{r derive-measures-24}
 # Calculate interpolated rent
 acs_interp_rent <- calc_interp_rent(acs_tr10_24)
+assert_tract_keys(acs_interp_rent, target_tract_ids_24, "2024 interpolated rent")
 
 # Calculate % missing vars
 acs_tr10_24 <- calc_missing_vars(acs_tr10_24)
@@ -365,11 +485,13 @@ acs_tr10_24 <- acs_tr10_24 |>
 # Merge top-coded flag
 acs_tr10_24_tc <- merge_df(acs_tr10_24, tc_vars, "tr2010_id")
 table(acs_tr10_24_tc$merge)
+assert_complete_tract_join(acs_tr10_24_tc, target_tract_ids_24, "Top-code flag join")
 table(acs_tr10_24_tc$tc_flag_rent_24, useNA = "ifany")
 
 # Merge interpolated rent
 acs_tr10_24_interp <- merge_df(acs_tr10_24_tc, acs_interp_rent, "tr2010_id")
 table(acs_tr10_24_interp$merge)
+assert_complete_tract_join(acs_tr10_24_interp, target_tract_ids_24, "Interpolated rent join")
 summary(acs_tr10_24_interp$interp_rent, useNA = "ifany")
 summary(acs_tr10_24_interp$rentE, useNA = "ifany")
 cor(acs_tr10_24_interp$interp_rent, acs_tr10_24_interp$rentE, use = "complete.obs")
@@ -379,12 +501,29 @@ cor(acs_tr10_24_interp$interp_rent, acs_tr10_24_interp$rentE, use = "complete.ob
 ## 2.8 Save 2020–2024 tract output
 
 **Output:** `acs_step2_24.feather` — 2020–2024 ACS measures aggregated to 2010
-tracts (SCAG region), consumed by `03_merge.Rmd`.
+tracts (Southern California + Bay Area), consumed by `03_merge.Rmd`.
+
+Before writing, assert county containment/coverage and compare every output
+column to the prior Southern California records. `socal_parity_24` reports cell
+differences and added/removed keys separately for unaffected and boundary tracts.
+The boundary group is defined by `socal_boundary_contributions` (§2.2): incoming
+sources omitted by the old source-county filter. Its differences require review
+alongside those source weights/counts; other Southern California differences fail
+the assertion. Boundary exposure alone does not excuse unrelated input changes.
+
+```{r acceptance-24}
+report_tract_counties(acs_tr10_24_interp, target_counties, "2024 destination counties")
+socal_parity_24 <- compare_socal_parity(
+  acs_tr10_24_interp, prior_outputs[["24"]], southern_california_counties,
+  socal_boundary_ids
+)
+```
 
 ```{r save-24}
 report_n(acs_tr10_24_interp, "2024 tract measures to save")
 
 # # Save file
+cat("Writing/replacing", file.path(data_dir, "acs_step2_24.feather"), "\n")
 save_data(acs_tr10_24_interp, data_dir, "acs_step2_24.feather")
 
 
@@ -507,17 +646,25 @@ median rent. Retained for provenance; intentionally left commented out.
 
 # 3. Prepare 2012–2016 ACS tract measures
 
-## 3.1 Load and restrict to the CA SCAG region
+## 3.1 Load and restrict to the target counties
 
 ```{r load-restrict-16}
 # Load 2016 ACS tract data
 acs_16 <- load_data(data_dir, NULL, "acs_step1_16.feather")
 report_n(acs_16, "2016 ACS tracts loaded")
+assert_unique_key(acs_16, "tr2010_id", "Statewide 2016 ACS")
 
-## Keep only tracts in the SCAG region
+## Use the same destination county set as the 2024 allocation.
 n_before <- nrow(acs_16)
-acs_16 <- select_target_counties(acs_16, tr2010_id, scag_counties)
-report_drop(acs_16, n_before, "tracts outside SCAG counties")
+acs_16 <- select_target_counties(acs_16, tr2010_id, target_counties)
+report_drop(acs_16, n_before, "tracts outside the target counties")
+target_tract_ids_16 <- acs_16$tr2010_id
+rent_raw_qa_16 <- acs_16 |>
+  group_by(county = substr(tr2010_id, 3, 5)) |>
+  summarise(tracts = n(), raw_missing_rent = sum(is.na(rentE)),
+            topcoded_rent = sum(rentE >= 3500, na.rm = TRUE),
+            raw_missing_share = mean(is.na(rentE)),
+            topcoded_share = sum(rentE >= 3500, na.rm = TRUE) / n(), .groups = "drop")
 
 # Check % missing
 
@@ -621,13 +768,25 @@ map_dfr(c("pctrvacE", "pctsvacE", "nsfaE", "mf5E"), ~summ_var(acs_16, .x))
 
 ## 3.4 Save 2012–2016 tract output
 
-**Output:** `acs_step2_16.feather` — 2012–2016 ACS tract measures (SCAG region),
+**Output:** `acs_step2_16.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area),
 consumed by `03_merge.Rmd`.
+
+All previously included Southern California 2016 records must retain parity;
+this vintage has no allocation-boundary exception.
+
+```{r acceptance-16}
+assert_tract_keys(acs_16, target_tract_ids_16, "2016 assembled tracts")
+report_tract_counties(acs_16, target_counties, "2016 destination counties")
+socal_parity_16 <- compare_socal_parity(
+  acs_16, prior_outputs[["16"]], southern_california_counties
+)
+```
 
 ```{r save-16}
 report_n(acs_16, "2016 tract measures to save")
 
 # # Save file
+cat("Writing/replacing", file.path(data_dir, "acs_step2_16.feather"), "\n")
 save_data(acs_16, data_dir, "acs_step2_16.feather")
 ```
 
@@ -659,6 +818,10 @@ cat("acs_step2_16:", nrow(acs16_out), "rows |",
 cat("acs_step2_24:", nrow(acs24_out), "rows |",
     n_distinct(acs24_out$tr2010_id), "unique tr2010_id |",
     sum(duplicated(acs24_out$tr2010_id)), "duplicate ids\n")
+assert_tract_keys(acs16_out, target_tract_ids_16, "Saved 2016 tract keys")
+assert_tract_keys(acs24_out, target_tract_ids_24, "Saved 2024 tract keys")
+assert_same_schema(acs16_out, acs_16, "Saved 2016 schema")
+assert_same_schema(acs24_out, acs_tr10_24_interp, "Saved 2024 schema")
 ```
 
 ## 4.2 Check missingness on critical variables
@@ -704,4 +867,41 @@ ranges).
 ```{r validate-numeric-step2}
 print_numeric_summary(acs16_out, "acs_step2_16")
 print_numeric_summary(acs24_out, "acs_step2_24")
+```
+
+## 4.5 Check county coverage and missing/top-coded rent
+
+Both vintages must contain every configured county and no other destination
+county. The 2016 raw diagnostic counts tracts; the 2024 raw diagnostic counts
+allocated renter units, so sources split across destinations are apportioned
+with their original weights. Final missing-rent counts include censored
+top-codes. Review county differences without imposing an empirical missingness
+threshold. The existing income-censoring and dollar-MOE behavior is preserved;
+the inspection's two research ambiguities remain separate decisions.
+
+```{r validate-county-rent-step2}
+report_tract_counties(acs16_out, target_counties, "Saved 2016 counties")
+report_tract_counties(acs24_out, target_counties, "Saved 2024 counties")
+print(rent_raw_qa_16, n = Inf, width = Inf)
+print(rent_allocation_qa_24, n = Inf, width = Inf)
+bind_rows(
+  acs16_out |> transmute(tr2010_id, rentE, vintage = "2016"),
+  acs24_out |> transmute(tr2010_id, rentE, vintage = "2024")
+) |>
+  group_by(vintage, county = substr(tr2010_id, 3, 5)) |>
+  summarise(tracts = n(), missing_rent = sum(is.na(rentE)),
+            missing_share = mean(is.na(rentE)), .groups = "drop") |>
+  print(n = Inf)
+
+rent_share_qa <- acs24_out |>
+  select(tr2010_id, pct_miss_rent) |>
+  left_join(rent_shares_24, by = "tr2010_id")
+stopifnot("Missing-rent shares must decompose into raw missing plus top-coded" = isTRUE(all.equal(
+  rent_share_qa$pct_miss_rent, rent_share_qa$pct_m_rent + rent_share_qa$pct_tc_rent,
+  tolerance = 1e-10
+)))
+for (column in c("pct_miss_rent", "pct_m_rent", "pct_tc_rent")) {
+  shares <- rent_share_qa[[column]]
+  stopifnot(all(is.na(shares) | (is.finite(shares) & shares >= -1e-10 & shares <= 1 + 1e-10)))
+}
 ```

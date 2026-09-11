@@ -2,12 +2,12 @@
 
 **Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_16.feather`
 
-**Grain:** one row per 2010-vintage California tract **in the five SCAG-region
-counties** (Los Angeles 037, Orange 059, Riverside 065, San Bernardino 071,
-Ventura 111).
+**Grain:** one row per 2010-vintage California tract **in the five Southern
+California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
+§1.3 (`target_counties`, shared by both vintages).
 **Key:** `tr2010_id` (unique, non-missing).
 
-This file is the 2012–2016 tract table restricted to the SCAG region, with
+This file is the 2012–2016 tract table restricted to those 14 counties, with
 top-code/missing/zero flags, structure-type aggregates, and share/CV measures
 added.
 
