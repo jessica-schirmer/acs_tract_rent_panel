@@ -198,6 +198,10 @@ Tract counts and relationship counts have different grains. Report both, with
 consistent percentages based on all source 2020 tracts. The zero-land count
 below is a count of relationships where either tract's land total is zero.
 
+The count summaries explicitly use `dplyr::count()` because `matrixStats`,
+loaded by other pipeline notebooks, provides a different `count()` that can
+mask it in a shared R session.
+
 ```{r summarize-classification}
 tract_summary <- tract_crosswalk |>
   summarise(
@@ -205,7 +209,8 @@ tract_summary <- tract_crosswalk |>
     pct_consistent = 100 * mean(geo_consistent == 1),
     n_tracts_with_zero_land_relationship = sum(zero_land_area == 1)
   )
-classification_counts <- tract_crosswalk |> count(relationship_class, name = "n_2020_tracts")
+classification_counts <- tract_crosswalk |>
+  dplyr::count(relationship_class, name = "n_2020_tracts")
 relationship_summary <- tract_relationships |>
   summarise(
     n_relationships = n(), n_2010_tracts = n_distinct(tr2010_id),
@@ -215,7 +220,7 @@ relationship_summary <- tract_relationships |>
   )
 consistent_geoid_counts <- tract_crosswalk |>
   filter(geo_consistent == 1) |>
-  count(same_geoid, name = "n_consistent_tracts")
+  dplyr::count(same_geoid, name = "n_consistent_tracts")
 consistent_changed_geoids <- tract_crosswalk |>
   filter(geo_consistent == 1, same_geoid == 0) |>
   select(tr2020_id, tr2010_id, arealand_2020, arealand_2010, arealand_part)

@@ -1,9 +1,10 @@
 # Run from the repository root: Rscript --vanilla tests/test_tract_change.R
-# Synthetic relationships and a temporary Feather round trip only.
+# Synthetic relationships, the notebook diagnostic chunk, and a temporary Feather round trip.
 suppressPackageStartupMessages({
   library(here)
   library(dplyr)
   library(arrow)
+  library(matrixStats)
 })
 source(here::here("R", "helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -77,6 +78,37 @@ reordered <- quiet(build_tract_crosswalk(quiet(characterize_tract_relationships(
 ))))
 stopifnot(identical(reordered, crosswalk))
 cat("Passed: classifications, mixed multiplicity, explicit changed-GEOID keys, exact overlap, zero land, cross-state links, large areas, and order independence.\n")
+
+# Exercise the actual diagnostic chunk with the package order used by other notebooks.
+local({
+  notebook_lines <- readLines(here::here("03_tract_change.Rmd"), warn = FALSE)
+  start <- which(notebook_lines == "```{r summarize-classification}")
+  stopifnot(length(start) == 1L)
+  end <- which(seq_along(notebook_lines) > start & notebook_lines == "```")[1]
+  stopifnot(!is.na(end), end > start + 1L)
+  diagnostic_code <- parse(text = notebook_lines[seq.int(start + 1L, end - 1L)])
+  diagnostic_env <- new.env(parent = environment())
+  diagnostic_env$tract_crosswalk <- crosswalk
+  diagnostic_env$tract_relationships <- relationships
+  stopifnot(identical(get("count", envir = diagnostic_env), matrixStats::count))
+  expect_error(eval(quote(count(tract_crosswalk, relationship_class,
+                                name = "n_2020_tracts")), envir = diagnostic_env),
+               "Argument 'x' is not a vector: list")
+  quiet(eval(diagnostic_code, envir = diagnostic_env))
+  expected_counts <- table(expected$relationship_class)
+  stopifnot(
+    identical(diagnostic_env$classification_counts, tibble(
+      relationship_class = names(expected_counts),
+      n_2020_tracts = as.integer(expected_counts)
+    )),
+    identical(diagnostic_env$consistent_geoid_counts, tibble(
+      same_geoid = c(0, 1), n_consistent_tracts = c(1L, 2L)
+    )),
+    identical(diagnostic_env$tract_crosswalk, crosswalk),
+    identical(diagnostic_env$tract_relationships, relationships)
+  )
+})
+cat("Passed: actual notebook diagnostic counts with matrixStats masking count.\n")
 
 # Reject structural input errors instead of repairing the relationship universe.
 expect_error(characterize_tract_relationships(source_pairs[0, ]), "nonempty table")
