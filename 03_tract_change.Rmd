@@ -1,0 +1,332 @@
+---
+title: "ACS Step 3 — Identify geographically consistent 2010–2020 tracts"
+author: "Jessica Schirmer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = TRUE, message = TRUE)
+```
+
+## Notebook Overview
+
+**Inputs:**
+
+- `../../../data-raw-temp/census/tab20_tract20_tract10_st06.txt` — the U.S.
+  Census Bureau's UTF-8, pipe-delimited 2020-to-2010 California tract relationship
+  file. Each row describes a geographic intersection; the raw file is read-only.
+
+**Outputs:**
+
+- `../../../data/xwalk_tr20_tr10.feather` — one row per California 2020 tract,
+  with consistency/classification diagnostics and a 2010 key wherever uniquely
+  defined. See [the output schema](schemas/xwalk_tr20_tr10.md).
+- Pair-level `tract_relationships` and QA tables remain in notebook memory.
+
+**Steps:**
+
+1. Set up environment
+2. Read and validate source intersections
+3. Characterize tract relationships
+4. Construct the tract-level crosswalk
+5. Review geographic diagnostics
+6. Save and validate the output
+
+For later ACS comparison, select `geo_consistent == 1`, join native-2020 2024
+tract measures on `tr2020_id`, then 2016 measures on the explicit `tr2010_id`.
+This notebook does not join ACS data, allocate changed tracts, or impose the
+Step 2 county sample. The existing `04_merge.Rmd` panel does not yet use this
+crosswalk. The historical `tract_change.feather` has a different contract and
+is preserved.
+
+# 1. Set up environment
+
+## 1.1 Load packages and helpers
+
+Use the pipeline's existing packages. Source validation, relationship
+characterization, tract reduction, and output checks live in
+`R/tract_change_helpers.R`; shared reporting and key/schema assertions use the
+existing helpers.
+
+```{r load-packages-and-helpers}
+library(here)
+library(dplyr)
+library(readr)
+library(arrow)
+library(knitr)
+
+source(here::here("R", "helpers.R"))
+source(here::here("R", "geography_qa.R"))
+source(here::here("R", "tract_change_helpers.R"))
+```
+
+## 1.2 Configure paths and saving
+
+Saving refuses an existing destination by default. An analyst explicitly
+enabling `overwrite_output` authorizes replacement of this crosswalk only;
+the notebook announces any replacement.
+
+```{r set-paths}
+source_path <- here::here("..", "..", "..", "data-raw-temp", "census",
+                          "tab20_tract20_tract10_st06.txt")
+output_path <- here::here("..", "..", "..", "data", "xwalk_tr20_tr10.feather")
+overwrite_output <- FALSE
+```
+
+# 2. Read and validate source intersections
+
+## 2.1 Import land areas and geographic keys
+
+### Decision: Preserve the complete source relationship universe
+
+Read only the two GEOIDs and three land-area fields. Preserve all intersections,
+including rows with zero intersection land and 2010 partners outside California.
+No county, state-of-2010, or positive-land filter precedes partner counting.
+Both GEOIDs must be 11-digit character strings; only the 2020 ID must start
+with `06`. Non-California 2010 IDs are valid source partners, not malformed IDs.
+
+Land areas are whole square meters and can exceed 32-bit integer capacity.
+Use doubles and require nonnegative, finite, integer-valued inputs below `2^53`
+so exact area comparisons are preserved. Missing/malformed fields, duplicate
+pairs, inconsistent repeated tract totals, and intersections exceeding a tract
+total stop execution rather than being repaired or discarded. Other source
+fields, including water areas, are not imported or used in diagnostics.
+
+```{r read-relationships}
+stopifnot("Missing Census relationship file" = file.exists(source_path))
+source_md5 <- unname(tools::md5sum(source_path))
+source_provenance <- tibble(
+  source_file = source_path,
+  source_bytes = file.info(source_path)$size,
+  source_md5 = source_md5
+)
+print(source_provenance, width = Inf)
+
+source_relationships <- read_delim(
+  source_path, delim = "|", locale = locale(encoding = "UTF-8"),
+  col_types = cols_only(
+    GEOID_TRACT_20 = col_character(), AREALAND_TRACT_20 = col_double(),
+    GEOID_TRACT_10 = col_character(), AREALAND_TRACT_10 = col_double(),
+    AREALAND_PART = col_double()
+  ),
+  show_col_types = FALSE, progress = FALSE
+)
+stopifnot("Relationship-file parse problems" = nrow(problems(source_relationships)) == 0L)
+source_relationships <- source_relationships |>
+  transmute(
+    tr2020_id = GEOID_TRACT_20, tr2010_id = GEOID_TRACT_10,
+    arealand_2020 = AREALAND_TRACT_20, arealand_2010 = AREALAND_TRACT_10,
+    arealand_part = AREALAND_PART
+  )
+report_n(source_relationships, "Complete source intersections imported (no filtering)")
+assert_tract_relationship_source(source_relationships)
+```
+
+# 3. Characterize tract relationships
+
+## 3.1 Count partners and apply the analyst's land-consistency rule
+
+### Decision: Require one-to-one, positive-land, exact overlap in both directions
+
+A pair is geographically consistent only when all six conditions hold:
+
+1. `n_2010_partners == 1`;
+2. `n_2020_partners == 1`;
+3. `arealand_2020 > 0`;
+4. `arealand_2010 > 0`;
+5. `arealand_part == arealand_2020`; and
+6. `arealand_part == arealand_2010`.
+
+Partner counts are distinct-ID counts from the complete source. There is no
+near-match threshold. `same_geoid` is diagnostic only: equal IDs cannot rescue
+changed land boundaries, and different IDs do not disqualify a consistent pair.
+Flags use numeric double 0/1 values, matching existing data-quality flags.
+
+Calculate each share as intersection land divided by that vintage's tract land.
+A zero denominator produces `NA`; a positive denominator remains eligible for
+its share calculation even when the other tract has zero land. Either zero
+tract total sets `zero_land_area = 1` and precludes consistency. A zero-valued
+intersection between two positive-land tracts is still a counted relationship.
+
+```{r characterize-relationships}
+tract_relationships <- characterize_tract_relationships(source_relationships)
+report_n(tract_relationships, "Characterized pairs (all source rows preserved)",
+         nrow(source_relationships))
+stopifnot("Characterization changed source rows or values" = identical(
+  select(tract_relationships, all_of(names(source_relationships))), source_relationships
+))
+```
+
+# 4. Construct the tract-level crosswalk
+
+## 4.1 Retain unique links and classify each 2020 tract
+
+### Decision: Preserve unique keys without selecting a dominant partner
+
+Every source 2020 tract receives one output row and retains its 2020 land total.
+When exactly one 2010 partner exists, retain that partner's ID, reverse count,
+`same_geoid`, land totals/intersection, and defined shares, including on changed
+tracts. Otherwise all pair-specific fields are `NA`. No dominant partner is
+selected. The unique-link join must preserve the complete 2020 key set without
+row multiplication. Full pair diagnostics remain in `tract_relationships`.
+
+### Decision: Any reverse multiplicity makes a multi-partner tract many-to-many
+
+The analyst selected this rule for mixed pair-level classes. A 2020 tract with
+multiple 2010 partners is `many_to_many` if **any** partner has multiple 2020
+partners; otherwise it is `merge`. Retain `max_n_2020_partners` to audit this
+distinction. With a single 2010 partner, reverse multiplicity is `split`;
+otherwise use `consistent` or `one_to_one_changed` according to the six-condition
+rule. At tract level, `zero_land_area` marks **any** zero-land-area relationship.
+
+```{r build-crosswalk}
+tract_crosswalk <- build_tract_crosswalk(tract_relationships)
+assert_tract_crosswalk(tract_crosswalk, tract_relationships)
+```
+
+# 5. Review geographic diagnostics
+
+## 5.1 Summarize tracts and relationships
+
+Tract counts and relationship counts have different grains. Report both, with
+consistent percentages based on all source 2020 tracts. The zero-land count
+below is a count of relationships where either tract's land total is zero.
+
+```{r summarize-classification}
+tract_summary <- tract_crosswalk |>
+  summarise(
+    n_2020_tracts = n(), n_consistent = sum(geo_consistent == 1),
+    pct_consistent = 100 * mean(geo_consistent == 1),
+    n_tracts_with_zero_land_relationship = sum(zero_land_area == 1)
+  )
+classification_counts <- tract_crosswalk |> count(relationship_class, name = "n_2020_tracts")
+relationship_summary <- tract_relationships |>
+  summarise(
+    n_relationships = n(), n_2010_tracts = n_distinct(tr2010_id),
+    n_zero_land_relationships = sum(zero_land_area == 1),
+    n_zero_land_intersections = sum(arealand_part == 0),
+    n_non_california_2010_relationships = sum(!startsWith(tr2010_id, "06"))
+  )
+consistent_geoid_counts <- tract_crosswalk |>
+  filter(geo_consistent == 1) |>
+  count(same_geoid, name = "n_consistent_tracts")
+consistent_changed_geoids <- tract_crosswalk |>
+  filter(geo_consistent == 1, same_geoid == 0) |>
+  select(tr2020_id, tr2010_id, arealand_2020, arealand_2010, arealand_part)
+mixed_relationship_tracts <- tract_relationships |>
+  group_by(tr2020_id) |>
+  summarise(n_pair_classes = n_distinct(relationship_class), .groups = "drop") |>
+  filter(n_pair_classes > 1L)
+print(tract_summary, width = Inf)
+print(classification_counts, n = Inf)
+print(relationship_summary, width = Inf)
+print(consistent_geoid_counts)
+print(consistent_changed_geoids, n = Inf)
+report_n(mixed_relationship_tracts, "Mixed pair-class tracts assigned many_to_many")
+stopifnot("Class counts do not cover every 2020 tract" =
+            sum(classification_counts$n_2020_tracts) == nrow(tract_crosswalk))
+```
+
+## 5.2 Inspect overlap shares on changed relationships
+
+Summarize the complete pair table so multi-partner relationships remain visible.
+For each share, retain non-consistent relationships with that share's own
+positive denominator. Empty groups report `NA` summaries, never infinities.
+
+```{r summarize-overlap}
+nonconsistent_share_summary <- bind_rows(lapply(c("2020", "2010"), function(vintage) {
+  area <- tract_relationships[[paste0("arealand_", vintage)]]
+  keep <- tract_relationships$geo_consistent == 0 & area > 0
+  values <- tract_relationships[[paste0("share_", vintage, "_land")]][keep]
+  stopifnot("Invalid pair overlap share" = all(is.finite(values) & values >= 0 & values <= 1))
+  quantiles <- if (length(values)) {
+    unname(quantile(values, probs = c(0, 0.25, 0.5, 0.75, 1)))
+  } else rep(NA_real_, 5L)
+  tibble(share = paste0("share_", vintage, "_land"), n_relationships = length(values),
+         mean = if (length(values)) mean(values) else NA_real_,
+         min = quantiles[1], p25 = quantiles[2], median = quantiles[3],
+         p75 = quantiles[4], max = quantiles[5])
+}))
+print(nonconsistent_share_summary, width = Inf)
+```
+
+## 5.3 Report source coverage and land-area reconciliation
+
+### Decision: Report incomplete 2010 coverage without changing relationships
+
+The California file includes 2020 California destinations and some 2010
+partners outside California. Reverse counts describe this file's universe.
+Report source land sums by vintage; incomplete 2010 coverage is diagnostic and
+does not trigger renormalization, filtering, national-file retrieval, or an
+alternative consistency rule. Full land coverage of 2020 tracts is expected;
+any 2020 mismatch or sum exceeding a tract total stops execution for review.
+
+```{r source-coverage-diagnostics}
+non_california_2010_relationships <- tract_relationships |>
+  filter(!startsWith(tr2010_id, "06")) |>
+  select(tr2020_id, tr2010_id, arealand_2010, arealand_part)
+print(non_california_2010_relationships, n = Inf)
+land_reconciliation <- bind_rows(lapply(c("2020", "2010"), function(vintage) {
+  tract_relationships |>
+    group_by(tract_id = .data[[paste0("tr", vintage, "_id")]]) |>
+    summarise(tract_land = first(.data[[paste0("arealand_", vintage)]]),
+              intersection_land = sum(arealand_part), .groups = "drop") |>
+    mutate(vintage = vintage, difference = intersection_land - tract_land)
+}))
+land_reconciliation_counts <- land_reconciliation |>
+  group_by(vintage) |>
+  summarise(n_tracts = n(), n_incomplete = sum(difference < 0),
+            n_excess = sum(difference > 0), .groups = "drop")
+land_reconciliation_differences <- land_reconciliation |> filter(difference != 0)
+print(land_reconciliation_counts)
+print(land_reconciliation_differences, n = Inf)
+if (any(land_reconciliation$vintage == "2010" & land_reconciliation$difference < 0)) {
+  cat("REVIEW: 2010 land totals are not fully represented in this California source;",
+      "relationships and exact classification are retained.\n")
+}
+stopifnot("Intersection sums exceed tract land totals" = all(land_reconciliation$difference <= 0),
+          "Incomplete 2020 source land coverage" =
+            all(land_reconciliation$difference[land_reconciliation$vintage == "2020"] == 0))
+```
+
+# 6. Save and validate the output
+
+## 6.1 Validate and save the new crosswalk
+
+The output retains every source 2020 key, and consistent rows have unique,
+nonmissing 2010 keys and exactly unit shares. Recheck these assertions before
+writing, and ensure the source has not changed during execution.
+
+```{r save-crosswalk}
+assert_tract_crosswalk(tract_crosswalk, tract_relationships)
+stopifnot("Raw source changed during execution" =
+            identical(unname(tools::md5sum(source_path)), source_md5))
+save_tract_crosswalk(tract_crosswalk, output_path, overwrite = overwrite_output)
+report_n(tract_crosswalk, "Tract crosswalk saved", n_distinct(source_relationships$tr2020_id))
+```
+
+## 6.2 Reload and validate keys, missingness, types, and ranges
+
+Pair-specific missingness is intentional for multi-partner tracts; zero
+denominators also produce missing shares. Required tract-level fields cannot be
+missing. Verify saved column order, storage types, and every value, then repeat
+key, membership, classification, and exact-consistency checks. Numeric summaries
+include counts, flags, shares, and land areas; no empirical row count is hardcoded.
+
+```{r validate-saved-crosswalk}
+saved_crosswalk <- arrow::read_feather(output_path)
+report_n(saved_crosswalk, "Tract crosswalk reloaded", nrow(tract_crosswalk))
+assert_same_schema(saved_crosswalk, tract_crosswalk, "Saved tract crosswalk")
+stopifnot("Feather round trip changed values or row order" = identical(saved_crosswalk, tract_crosswalk))
+assert_tract_crosswalk(saved_crosswalk, tract_relationships)
+output_missingness <- saved_crosswalk |>
+  summarise(across(everything(), ~ sum(is.na(.x))))
+print(output_missingness, width = Inf)
+print_numeric_summary(saved_crosswalk, "Saved tract crosswalk")
+```

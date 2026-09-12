@@ -38,7 +38,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
    |---|---|
    | [01_acs.Rmd](../01_acs.Rmd), using [R/helpers.R](../R/helpers.R) | Downloads statewide 2012–2016 tract and 2020–2024 block-group ACS estimates/MOEs; derives low-rent counts; imports NHGIS crosswalks. Writes `acs_step1_16.feather`, `acs_step1_24.feather`, and two crosswalk Feathers. |
    | [02_assemble.Rmd](../02_assemble.Rmd), using [R/assemble_helpers.R](../R/assemble_helpers.R) | Selects counties, allocates 2024 block groups to 2010 tracts, censors rent, aggregates measures, and calculates interpolated rent, shares, vacancy rates, flags, and uncertainty. Writes both `acs_step2_*` files. |
-   | [03_merge.Rmd](../03_merge.Rmd), using [R/merge_helpers.R](../R/merge_helpers.R) | Selects and suffixes measures, multiplies 2016 dollar estimates/MOEs by 1.307, full-joins surveys, and calculates change measures. Writes `acs_full.feather`. |
+   | [04_merge.Rmd](../04_merge.Rmd), using [R/merge_helpers.R](../R/merge_helpers.R) | Selects and suffixes measures, multiplies 2016 dollar estimates/MOEs by 1.307, full-joins surveys, and calculates change measures. Writes `acs_full.feather`. |
 
    Outputs meet downstream stages through shared `ADU_Rent/data/` filenames.
    Current consumers include `tract_rent_acs`, `tract_rent_renthub`, and
@@ -60,7 +60,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
    prefix `06` and county positions 3–5. There is no separate geographic
    configuration file or individual-tract exception logic.
 
-   Stage 3 inherits the selected geography. Its transformations assume
+   Stage 4 inherits the selected geography. Its transformations assume
    `tr2010_id`; documentation and schemas describe SCAG coverage. No
    county-specific estimation formulas appear in this cleaning stage.
 
@@ -102,7 +102,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
    low-rent cutoffs, inflation convention, and output column contract. Keep
    the final full-join behavior and audit one-period-only tracts using input
    keys; `base_id` is overwritten with `TRUE` in
-   [03_merge.Rmd](../03_merge.Rmd), §3.1.
+   [04_merge.Rmd](../04_merge.Rmd), §3.1.
 
    Downstream expansion remains separate work:
    [RentHub preparation](../../../analysis/tract_rent_renthub/00_prep_tract_data.Rmd)

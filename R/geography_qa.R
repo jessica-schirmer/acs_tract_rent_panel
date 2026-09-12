@@ -1,4 +1,4 @@
-# Geographic and key diagnostics shared by 02_assemble.Rmd and 03_merge.Rmd.
+# Geographic and key diagnostics shared by 02_assemble.Rmd, 03_tract_change.Rmd, and 04_merge.Rmd.
 # Uses the notebooks' existing dplyr/tidyr packages; does not modify outputs.
 
 assert_unique_key <- function(df, key, label) {

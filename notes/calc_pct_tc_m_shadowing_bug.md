@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-12
 **Fixed in commit:** `1a7ac1a` ("Carry corrected pct_tc_rent share into acs_full; fix calc_pct_tc_m shadowing bug")
-**Files:** `R/assemble_helpers.R` (`calc_pct_tc_m()`), surfaced while adding `pct_tc_rent` to `02_assemble.Rmd` / `03_merge.Rmd`.
+**Files:** `R/assemble_helpers.R` (`calc_pct_tc_m()`), surfaced while adding `pct_tc_rent` to `02_assemble.Rmd` / `04_merge.Rmd`.
 
 ## Summary
 

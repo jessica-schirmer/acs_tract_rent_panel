@@ -4,6 +4,10 @@
 ## Overview
 This repository prepares 2012-2016 ACS tract measures, 2020-2024 block-group measures aggregated to 2010 tracts, and a separate 2020-2024 tract-source product on native 2020 tracts.
 
+Step 3 separately identifies geographically consistent 2010–2020 tract pairs
+from Census geographic intersections for all California 2020 tracts. Its
+crosswalk supports later comparison of the two native tract-source products.
+
 Assembly covers five Southern California counties plus the nine Bay Area counties.
 The named `southern_california_counties` and `bay_area_counties` sets and their
 union, `target_counties`, are centralized in `02_assemble.Rmd` §1.3. All three
@@ -14,12 +18,15 @@ target counties, with the original NHGIS fractions (no renormalization).
 
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
 02_assemble.Rmd - aggregate 2020-2024 block groups to 2010 tracts; prepare 2016 and 2024 tract-source measures separately; construct rental inventory with explicit missingness, data flags, and uncertainty measures for all three products
-03_merge.Rmd - import 2024 ACS measures aggregated to 2010 tracts and merge w/ 2016 ACS measures; calculate change variables; save ACS tract panel
+03_tract_change.Rmd - characterize statewide 2010–2020 tract intersections and save a 2020-tract crosswalk identifying exact geographic consistency
+04_merge.Rmd - import 2024 ACS measures aggregated to 2010 tracts and merge w/ 2016 ACS measures; calculate change variables; save ACS tract panel
 
 
 
 # Source / Inputs
 Census API
+
+Local NHGIS crosswalks and the Census 2020-to-2010 tract relationship file.
 
 
 # Processing Plan
@@ -120,7 +127,7 @@ Inventory is validated independently before saving and after reloading even
 when absent from a reference. Save/reload schema checks remain strict for every
 column. Preserve all reference snapshots; a missing reference remains **parity
 not checked**. The removed source measures have no direct downstream calculation
-references. Step 3 keeps its existing selection and panel contract, so `rhuPOST`
+references. Step 4 keeps its existing selection and panel contract, so `rhuPOST`
 remains occupied-renter change.
 
 
@@ -202,10 +209,64 @@ independently of reference availability. Shared QA helpers retain
 `key = "tr2010_id"` as their default.
 
 
-## Step 3: Create ACS panel, calculate change variables
-Script: `03_merge.Rmd`
+## Step 3: Identify geographically consistent 2010–2020 tracts
+Script: `03_tract_change.Rmd`
 
-**Deferred filename update:** This notebook is unchanged and still reads the
+Inputs:
+- `../../../data-raw-temp/census/tab20_tract20_tract10_st06.txt` — U.S. Census
+  Bureau UTF-8, pipe-delimited geographic intersections between 2020 and 2010
+  census tracts. The source is read-only.
+
+Outputs:
+- `../../../data/xwalk_tr20_tr10.feather` — one row per California 2020 tract
+  (`tr2020_id`), with a uniquely linked `tr2010_id` where available and
+  consistency, relationship, zero-land, partner-count, share, and land-area QA.
+- Full relationship-level diagnostics remain in the notebook.
+
+Schema:
+- [2020-to-2010 tract crosswalk](schemas/xwalk_tr20_tr10.md).
+
+Steps:
+1. Set up environment (existing packages and shared/stage-specific helpers, `here::here()` paths, explicit overwrite control)
+2. Read and validate source intersections (character GEOIDs, exact integer-valued land areas stored as doubles, unique pairs, consistent repeated totals)
+3. Characterize tract relationships (distinct partner counts from the complete file, denominator-safe shares, exact consistency and diagnostic flags)
+4. Construct the tract-level crosswalk (retain every 2020 key; attach only unique 2010 links; classify mixed relationships with the analyst-selected rule)
+5. Review geographic diagnostics (tract and relationship counts, same/different consistent GEOIDs, changed-pair share distributions, source coverage and land reconciliation)
+6. Save and validate the output (guarded save, source fingerprint, complete membership, keys, types, values, flags, missingness, and ranges after reload)
+
+**Exact geographic consistency** requires both partner counts to equal one,
+both tract land areas to be positive, and intersection land area to equal each
+tract's total land area exactly. There is no near-match threshold. Zero-land-area
+pairs are excluded even when all areas equal zero. `same_geoid` is diagnostic
+only; equal IDs cannot establish consistency and different IDs are permitted.
+No water-area, population, housing, or allocation measures are used.
+
+All source relationships contribute to partner counts, including zero-land
+intersections and links to 2010 tracts outside California. Tract classes are
+`consistent`, `one_to_one_changed`, `split`, `merge`, and `many_to_many`. For
+multiple 2010 partners, **any** reverse multiplicity makes the tract
+`many_to_many`, including mixed pair-level classes; `max_n_2020_partners` records
+that distinction. Otherwise such a tract is `merge`. The 2010 key and all
+pair-specific output fields are `NA` for multiple partners; no dominant partner
+is selected. The tract zero-land flag covers any associated zero-land-area pair.
+
+For later ACS comparison, select `geo_consistent == 1`, join the native-2020
+2024 product using `tr2020_id`, then the 2016 product using `tr2010_id`. This
+stage does not merge ACS measures or impose Step 2's county selection. Step 4
+does not yet consume this crosswalk. The differently structured historical
+`tract_change.feather` is preserved.
+
+Targeted validation uses `Rscript --vanilla tests/test_tract_change.R` for
+synthetic relationships and temporary Feather round trips. The new notebook's
+small local-source calculations can also run directly without executing other
+stages. Its diagnostics report incomplete 2010 land coverage without changing
+the source universe or consistency rule. Saving refuses an existing destination
+unless the analyst explicitly enables `overwrite_output`; replacement is announced.
+
+## Step 4: Create ACS panel, calculate change variables
+Script: `04_merge.Rmd`
+
+**Deferred filename update:** Renumbering preserves this notebook's logic; it still reads the
 legacy input names below. Before using newly generated Step 2 outputs, update
 its 2016 input to `acs_step2_2016_tract.feather` and its 2024 input to
 `acs_step2_2024_block_group_aggregated.feather`. Existing legacy files may be
@@ -232,7 +293,7 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
 
 - The earlier geographic extension alone used cached statewide inputs. With
   the revised stage-1 contract, generate the new inputs first, then validate
-  stage 2 with the source-specific parity rules above. Stage 3 also needs the
+  stage 2 with the source-specific parity rules above. Stage 4 also needs the
   deferred input-filename update before panel validation. Focused checks run with
   `Rscript tests/test_rental_inventory.R` and `Rscript tests/test_income_censoring.R`.
   They exercise synthetic inventory, both tract keys, configured county coverage,
@@ -245,7 +306,7 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   replace those snapshots. Missing references explicitly leave parity unverified.
 - Inspect county counts separately for all three Step 2 products and the final panel: all 14 target
   counties must be populated, including the Bay Area, with no unintended
-  destination counties. Stage 3 inherits the county set validated by stage 2.
+  destination counties. Stage 4 inherits the county set validated by stage 2.
 
 - Crosswalk pairs and tract keys must be unique at their documented grains;
   retained allocations and tract-level joins must all match without row

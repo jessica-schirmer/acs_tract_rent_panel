@@ -1,8 +1,8 @@
 # merge_helpers.R --------------------------------------------------------
-# Helper functions for 03_merge.Rmd (Step 3: merge the 2012-2016 and 2020-2024
+# Helper functions for 04_merge.Rmd (Step 4: merge the 2012-2016 and 2020-2024
 # tract measures into a panel and compute change variables).
 #
-# This file is intentionally SELF-CONTAINED: 03_merge.Rmd sources only this
+# This file is intentionally SELF-CONTAINED: 04_merge.Rmd sources only this
 # file. It therefore carries its own copies of a few small generic/diagnostic
 # helpers (load_data, save_data, report_n, print_numeric_summary, fmt_num) and
 # its own `merge_df()` — which joins two surveys on tr2010_id using base_id /

@@ -1,8 +1,8 @@
 # Schema: `acs_full.feather`
 
-**Produced by:** `03_merge.Rmd` (Step 3) · **Source:** `acs_step2_16.feather` + `acs_step2_24.feather`
+**Produced by:** `04_merge.Rmd` (Step 4) · **Source:** `acs_step2_16.feather` + `acs_step2_24.feather`
 
-These remain Step 3's current input filenames. Step 2 now writes
+These remain Step 4's current input filenames. Step 2 now writes
 `acs_step2_2016_tract.feather` and `acs_step2_2024_block_group_aggregated.feather`;
 the consumer filename update is deferred and legacy files are not refreshed.
 The separate `acs_step2_2024_tract.feather` product uses native 2020 tracts and
@@ -93,6 +93,6 @@ periods are present (`NA` only if a period is missing).
 | `post_id` | logical | `TRUE` if the tract is present in the 2024 survey, else `NA`. |
 | `rent_id`, `rhu_id` | logical | Upstream join tags carried from the step-2 inputs. |
 
-One-period-only membership is audited in `03_merge.Rmd` against the original
+One-period-only membership is audited in `04_merge.Rmd` against the original
 2016/2024 input keys, independently of `base_id`. The audit stays in notebook
 diagnostics and adds no output columns.
