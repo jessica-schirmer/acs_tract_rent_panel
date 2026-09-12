@@ -8,8 +8,8 @@ California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_a
 **Key:** `tr2010_id` (unique, non-missing).
 
 This file is the 2012–2016 tract table restricted to those 14 counties, with
-top-code/missing/zero flags, structure-type aggregates, and share/CV measures
-added.
+top-code/missing/zero flags, structure-type aggregates, rental inventory, and
+share/CV measures added.
 
 ## Base columns
 
@@ -23,9 +23,43 @@ The revised input removes `rentmv1yr`, `rentmv5yr`, `rentyrblt`,
 `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, and `rentyrblt_90_99`
 (each estimate/MOE pair), and adds `vac_rentedE/M` (B25004_003, rented, not
 occupied). These pass-through changes also apply to this output; the three
-bedroom-rent pairs remain. Existing strict schema parity against older
-snapshots will fail. Parity compatibility is a follow-up, and the checks are
-preserved; see the [stage-1 migration](../README.md#stage-1-input-migration).
+bedroom-rent pairs remain. `compare_socal_parity(schema_migration = "2016")`
+permits only these seven pair removals and the additions `vac_rentedE`,
+`vac_rentedM`, and `rhu_inventoryE` against older snapshots. Actual differences
+are reported in `schema_changes`; shared columns retain strict order, type,
+and value checks, with the existing income-correction rules. The default
+`schema_migration = NULL` and save/reload schema checks remain strict.
+See the [stage-1 migration](../README.md#stage-1-input-migration).
+
+## Added rental inventory
+
+| column | type | description |
+|---|---|---|
+| `rhu_inventoryE` | numeric | Renter-occupied units plus vacant for rent plus rented, not occupied: `rhuE + vac_forrentE + vac_rentedE`. |
+
+The source estimates are B25003_003, B25004_002, and B25004_003, respectively.
+Each unique 2010 tract is its own source with unit weight. **Any `NA` or `NaN`
+in a required estimate makes inventory `NA`**; no partial subtotal or zero
+substitution is allowed. Missing rent, income, or source MOEs do not affect
+inventory completeness. Required estimate/MOE columns must be numeric, and
+observed contributing estimates must be finite and nonnegative.
+
+The [2024 counterpart](acs_step2_24.md#rental-inventory) allocates each of the
+same components with `wt_renthu`. A retained link contributes only when
+`wt_renthu > 0`; zero-weight links contribute zero and do not affect completeness.
+A target without positive-weight contributors has zero components and inventory,
+`n_contributing = 0`, and `inventory_incomplete = FALSE`. Every 2016 target has
+one contributor because its unit weight is positive.
+
+Component totals (`inventory_rhuE`, `inventory_vac_forrentE`,
+`inventory_vac_rentedE`), missing-component counts, and `inventory_incomplete`
+remain in notebook diagnostics. Only the key and `rhu_inventoryE` are joined
+one-to-one onto the output, preserving its other columns and rows. Pre-save and
+reload checks in §4.6 validate keyed missingness and reconcile complete-target
+totals separately from incomplete targets, including when inventory is absent
+from a reference. No inventory MOE/CV is added. `rhuE` and all existing rent
+denominators remain occupied-renter measures. Step 3 keeps its existing selection;
+`rhuPOST` remains occupied-renter change.
 
 ## Added structure-type aggregates
 

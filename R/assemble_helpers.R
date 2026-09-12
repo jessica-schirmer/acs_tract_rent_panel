@@ -195,6 +195,145 @@ flag_tc_vars <- function(df, var_list) {
 
 # ---- Weighting / aggregation -------------------------------------------------
 
+#' Aggregate rental inventory with explicit component completeness
+#'
+#' @param df Source tract rows, or retained block-group allocation rows
+#' @param id Target tract GEOID column (unquoted; 11-digit character IDs)
+#' @param weight_col Allocation-weight column name, or NULL for unique tract rows
+#' @return One diagnostic row per target; only rhu_inventoryE enters Step 2 outputs.
+#'   Missing estimates on positive-weight links propagate to inventory. Missing
+#'   MOEs do not. Zero-weight links never affect completeness or component totals.
+calc_rental_inventory <- function(df, id, weight_col = NULL) {
+  id_name <- rlang::as_name(rlang::ensym(id))
+  components <- c("rhuE", "vac_forrentE", "vac_rentedE")
+  source_columns <- c(components, sub("E$", "M", components))
+  if (!is.null(weight_col) &&
+      (!is.character(weight_col) || length(weight_col) != 1L || is.na(weight_col))) {
+    stop("Inventory weight_col must be NULL or one column name")
+  }
+  required <- c(id_name, source_columns, weight_col,
+                if (!is.null(weight_col)) "bg2020_id")
+  if (!is.data.frame(df) || anyDuplicated(names(df)) ||
+      !all(required %in% names(df))) {
+    stop("Inventory requires target/source keys and estimate/MOE columns: ",
+         paste(required, collapse = ", "))
+  }
+  if (!all(vapply(df[source_columns], function(x) is.numeric(x) && !is.complex(x), logical(1)))) {
+    stop("Inventory source estimate/MOE columns must be numeric")
+  }
+  valid_geoids <- function(x, digits) {
+    is.character(x) && !anyNA(x) && all(grepl(paste0("^[0-9]{", digits, "}$"), x))
+  }
+  if (!valid_geoids(df[[id_name]], 11)) stop("Inventory requires 11-digit tract GEOIDs")
+  if (is.null(weight_col)) {
+    if (anyDuplicated(df[[id_name]])) stop("Unweighted inventory requires unique tract keys")
+    weights <- rep(1, nrow(df))
+  } else {
+    if (!valid_geoids(df$bg2020_id, 12) ||
+        anyDuplicated(df[c("bg2020_id", id_name)])) {
+      stop("Inventory requires 12-digit source GEOIDs and unique allocation pairs")
+    }
+    weights <- df[[weight_col]]
+  }
+  if (!is.numeric(weights) || is.complex(weights) ||
+      !all(is.finite(weights) & weights >= 0 & weights <= 1)) {
+    stop("Inventory allocation weights must be finite fractions in [0, 1]")
+  }
+  contributes <- weights > 0
+  for (column in components) {
+    observed <- df[[column]][contributes & !is.na(df[[column]])]
+    if (!all(is.finite(observed) & observed >= 0)) {
+      stop("Observed contributing inventory estimates must be finite and nonnegative: ", column)
+    }
+  }
+
+  df |>
+    ungroup() |>
+    mutate(.inventory_weight = weights, .inventory_contributes = contributes) |>
+    group_by({{ id }}) |>
+    summarise(
+      n_contributing = sum(.inventory_contributes),
+      across(all_of(components), ~ sum(is.na(.x[.inventory_contributes])),
+             .names = "n_missing_{.col}"),
+      across(all_of(components),
+             ~ sum(.x[.inventory_contributes] * .inventory_weight[.inventory_contributes]),
+             .names = "inventory_{.col}"),
+      inventory_incomplete = n_missing_rhuE > 0 | n_missing_vac_forrentE > 0 |
+        n_missing_vac_rentedE > 0,
+      rhu_inventoryE = if (inventory_incomplete) {
+        NA_real_
+      } else {
+        inventory_rhuE + inventory_vac_forrentE + inventory_vac_rentedE
+      },
+      .groups = "drop"
+    )
+}
+
+# Validate the production inventory against its separate, keyed diagnostics.
+assert_rental_inventory <- function(df, diagnostics, label, tolerance = 1e-10) {
+  for (table in list(df, diagnostics)) {
+    stopifnot("Inventory validation requires unique, nonmissing tract keys" =
+                "tr2010_id" %in% names(table) && is.character(table$tr2010_id) &&
+                !anyNA(table$tr2010_id) && all(grepl("^[0-9]{11}$", table$tr2010_id)) &&
+                !anyDuplicated(table$tr2010_id))
+  }
+  stopifnot("Inventory diagnostic and output key sets must agree" =
+              setequal(df$tr2010_id, diagnostics$tr2010_id) && nrow(df) == nrow(diagnostics))
+  diagnostics <- diagnostics[match(df$tr2010_id, diagnostics$tr2010_id), ]
+  incomplete <- diagnostics$inventory_incomplete
+  components <- diagnostics[c("inventory_rhuE", "inventory_vac_forrentE", "inventory_vac_rentedE")]
+  missing_counts <- diagnostics[c("n_missing_rhuE", "n_missing_vac_forrentE", "n_missing_vac_rentedE")]
+  stopifnot("Inventory output and diagnostic values must be numeric" =
+              is.numeric(df$rhu_inventoryE) && is.numeric(diagnostics$rhu_inventoryE) &&
+              all(vapply(components, is.numeric, logical(1))),
+            "Inventory completeness must agree with missing-component counts" =
+              is.logical(incomplete) && !anyNA(incomplete) &&
+              identical(incomplete, rowSums(missing_counts) > 0),
+            "Inventory missingness must match its keyed completeness diagnostic" =
+              identical(is.na(df$rhu_inventoryE), incomplete) &&
+              identical(is.na(diagnostics$rhu_inventoryE), incomplete))
+  complete <- !incomplete
+  expected <- rowSums(components[complete, ])
+  actual <- df$rhu_inventoryE[complete]
+  stopifnot("Complete inventory components must be finite and nonnegative" =
+              all(is.finite(as.matrix(components[complete, ])) & as.matrix(components[complete, ]) >= 0),
+            "Complete inventory must equal the sum of its three components" =
+              all(is.finite(actual) & actual >= 0 & is.finite(expected)) &&
+              all(abs(actual - expected) <= tolerance * pmax(1, abs(actual), abs(expected))),
+            "Output inventory must agree with the diagnostic estimate" = isTRUE(all.equal(
+              df$rhu_inventoryE, diagnostics$rhu_inventoryE, tolerance = tolerance
+            )))
+  no_contributors <- diagnostics$n_contributing == 0
+  stopifnot("Zero-contributor targets must have complete zero inventories" =
+              all(!incomplete[no_contributors]) &&
+              all(as.matrix(components[no_contributors, ]) == 0) &&
+              all(df$rhu_inventoryE[no_contributors] == 0))
+  cat(label, ":", sum(complete), "complete |", sum(incomplete),
+      "incomplete |", sum(no_contributors), "zero-contributor targets\n")
+  invisible(TRUE)
+}
+
+# Source-first inventory uses row-level sums before allocating to complete targets.
+# Target-first inventory uses the separately aggregated component diagnostics.
+reconcile_rental_inventory <- function(df, diagnostics, id, weight_col = NULL) {
+  id_name <- rlang::as_name(rlang::ensym(id))
+  weights <- if (is.null(weight_col)) rep(1, nrow(df)) else df[[weight_col]]
+  complete_ids <- diagnostics[[id_name]][!diagnostics$inventory_incomplete]
+  retained <- weights > 0 & df[[id_name]] %in% complete_ids
+  source_first <- sum((df$rhuE[retained] + df$vac_forrentE[retained] +
+                         df$vac_rentedE[retained]) * weights[retained])
+  target_first <- sum(diagnostics$rhu_inventoryE[!diagnostics$inventory_incomplete])
+  stopifnot("Complete-target inventory must reconcile without dropping missing values" =
+              is.finite(source_first) && is.finite(target_first) &&
+              abs(source_first - target_first) <= 1e-10 * max(1, abs(source_first), abs(target_first)))
+  tibble(complete_targets = length(complete_ids),
+         incomplete_targets = sum(diagnostics$inventory_incomplete),
+         zero_contributor_targets = sum(diagnostics$n_contributing == 0),
+         source_first = source_first, target_first = target_first,
+         difference = target_first - source_first)
+}
+
+
 #' Calculate relative weight
 #'
 #' @param df

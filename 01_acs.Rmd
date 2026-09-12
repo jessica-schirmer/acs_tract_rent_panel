@@ -63,8 +63,12 @@ filtering or sample restriction. Geographic harmonization (aggregating the
 `02_assemble.Rmd`, which continues to use the block-group input. The new 2024
 tract input is available for later assembly. Generate the newly named inputs
 from this notebook; old caches do not implement the revised variable contract.
-Existing data files are retained. Stage-2 parity compatibility with the revised
-2016 pass-through schema remains a follow-up; see [README.md](README.md).
+Existing data files are retained. Stage 2 now adds rental inventory from the
+three required estimates with explicit missingness propagation, using `wt_renthu`
+for all 2024 components. Its narrow vintage-specific schema migration permits
+the agreed additions/removals against older parity references while retaining
+strict checks on shared columns; see [README.md](README.md). This notebook's
+extraction and storage contracts remain unchanged.
 
 # 1. Set up environment
 

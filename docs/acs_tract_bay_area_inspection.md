@@ -17,7 +17,17 @@ inputs and outputs as they existed on its date. Current stage 1 writes
 of the two historical ACS filenames, and adds `acs_step1_2024_tract.feather`.
 The variable contract also changed; old caches are retained and cannot
 substitute for newly generated inputs. Stage 2 continues to use block groups.
-See the [migration and parity follow-up](../README.md#stage-1-input-migration).
+See the [migration and parity compatibility](../README.md#stage-1-input-migration).
+
+**Subsequent Step 2 inventory implementation (2026-09-12):** Assembly now adds
+`rhu_inventoryE` to both outputs, propagating missing required estimates on
+positive-weight contributors. All three 2024 inventory components use
+`wt_renthu`; existing occupied counts and vacancy rates retain their calculations.
+Only the agreed vintage-specific schema additions/removals are permitted against
+older parity references, with shared-column checks preserved. New diagnostics
+check completeness and reconcile complete-target totals. Synthetic validation
+passed; canonical regeneration and empirical review remain analyst-run. The
+inspection below retains its original filenames and findings.
 
 1. **Current pipeline structure**
 

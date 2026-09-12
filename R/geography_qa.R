@@ -63,14 +63,51 @@ assert_same_schema <- function(current, previous, label) {
 # legacy_med_hhincE, corrected_med_hhincE, legacy_med_hhincCV, and
 # corrected_med_hhincCV columns computed from uncensored inputs/reference MOEs.
 # Only income cells matching both expectations qualify for the correction.
+# Optional schema_migration is "2016" or "2024" for the Step 2 migration only.
+# Its fixed allowlist applies to additions/removals; shared columns stay strict.
 compare_socal_parity <- function(current, previous, socal_counties,
                                  boundary_ids = character(), tolerance = 1e-10,
-                                 expected_income = NULL) {
+                                 expected_income = NULL, schema_migration = NULL) {
   if (is.null(previous)) {
     cat("PARITY NOT CHECKED: no prior output; supply parity_reference_dir.\n")
     return(invisible(NULL))
   }
-  assert_same_schema(current, previous, "Southern California parity")
+  added <- setdiff(names(current), names(previous))
+  removed <- setdiff(names(previous), names(current))
+  schema_changes <- tibble(change = c(rep("added", length(added)), rep("removed", length(removed))),
+                           variable = c(added, removed))
+  if (is.null(schema_migration)) {
+    assert_same_schema(current, previous, "Southern California parity")
+  } else {
+    if (!is.character(schema_migration) || length(schema_migration) != 1L ||
+        is.na(schema_migration) || !schema_migration %in% c("2016", "2024")) {
+      stop("schema_migration must be NULL, '2016', or '2024'")
+    }
+    removed_measures <- c("rentmv1yr", "rentmv5yr", "rentyrblt", "rentyrblt_14_16",
+                          "rentyrblt_10_13", "rentyrblt_00_09", "rentyrblt_90_99")
+    allowed_added <- c("rhu_inventoryE", if (schema_migration == "2016") c("vac_rentedE", "vac_rentedM"))
+    allowed_removed <- if (schema_migration == "2016") {
+      c(paste0(removed_measures, "E"), paste0(removed_measures, "M"))
+    } else character()
+    print(schema_changes, n = Inf)
+    if (anyDuplicated(names(current)) || anyDuplicated(names(previous)) ||
+        !all(added %in% allowed_added) || !all(removed %in% allowed_removed)) {
+      stop("Southern California parity: unapproved schema additions/removals")
+    }
+    for (measure in removed_measures) {
+      pair <- paste0(measure, c("E", "M"))
+      if (any(pair %in% removed) && !all(pair %in% removed)) {
+        stop("Southern California parity: schema removals must be estimate/MOE pairs")
+      }
+    }
+    if (!all(vapply(current[added], is.numeric, logical(1)))) {
+      stop("Southern California parity: added estimates/MOEs must be numeric")
+    }
+    assert_same_schema(current[, !names(current) %in% added, drop = FALSE],
+                       previous[, !names(previous) %in% removed, drop = FALSE],
+                       "Southern California parity shared columns")
+  }
+  shared_columns <- intersect(names(current), names(previous))
   assert_unique_key(previous, "tr2010_id", "Prior output")
   assert_unique_key(current, "tr2010_id", "Candidate output")
   income_columns <- c("med_hhincE", "med_hhincCV")
@@ -115,7 +152,7 @@ compare_socal_parity <- function(current, previous, socal_counties,
   before <- before[match(shared_ids, before$tr2010_id), , drop = FALSE]
   after <- after[match(shared_ids, after$tr2010_id), , drop = FALSE]
   expected_index <- match(shared_ids, expected_income$tr2010_id)
-  differences <- lapply(setdiff(names(after), "tr2010_id"), function(column) {
+  differences <- lapply(setdiff(shared_columns, "tr2010_id"), function(column) {
     old <- before[[column]]
     new <- after[[column]]
     changed <- which(!values_match(old, new))
@@ -154,7 +191,7 @@ compare_socal_parity <- function(current, previous, socal_counties,
     stop("Southern California parity failed for unaffected tracts; inspect differences above")
   }
   invisible(list(summary = summary, tracts = tract_audit, differences = differences,
-                 difference_summary = difference_summary))
+                 difference_summary = difference_summary, schema_changes = schema_changes))
 }
 
 # Reconstruct membership from the original input keys, even after base_id is TRUE.

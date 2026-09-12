@@ -7,7 +7,9 @@ independently of missing or top-coded rent. Production outputs have not been
 written. The assembly parity checks now verify this approved correction against
 the preserved references. Cached-input assembly and complete Southern California
 difference-table validation passed; downstream panel/sample acceptance remains
-analyst-run.
+analyst-run. Step 2 now also implements rental inventory and the narrow schema
+migration described below; the dated cached-input findings in this note remain
+historical and do not validate regenerated inventory outputs.
 
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),
@@ -148,12 +150,27 @@ The complete `differences` table retains every changed cell and classifies it as
 Verified corrections remain marked changed in the tract audit. They do not
 alter geographic boundary IDs. The existing boundary-review behavior is
 preserved, while unexplained changes and added/removed keys in geographically
-unaffected tracts still fail. Schema and key checks remain strict.
+unaffected tracts still fail. Key checks remain strict. With the later Step 2
+inventory change, parity now compares every **shared** column, retaining strict
+order, type, and value checks, plus these fixed optional schema migrations:
+
+- `schema_migration = "2016"` permits additions `vac_rentedE`, `vac_rentedM`,
+  and `rhu_inventoryE`, and removal of estimate/MOE pairs for `rentmv1yr`,
+  `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`,
+  `rentyrblt_00_09`, and `rentyrblt_90_99`.
+- `schema_migration = "2024"` permits only the `rhu_inventoryE` addition.
+
+Actual additions/removals appear in `schema_changes`; unlisted changes fail.
+`schema_migration = NULL` remains strict. These options do not relax the income
+expectations or geographic classifications. Inventory is independently checked
+against its three source components before saving and after reloading, including
+when absent from a reference. Save/reload schema comparisons remain strict.
 
 References load from the configured `../../../data/parity_reference` before
 saving candidates to `../../../data/`. Preserve those snapshots. Missing
 references explicitly remain **PARITY NOT CHECKED**; no expectation or pass is
-fabricated. Expectations and diagnostics never enter production output schemas.
+fabricated. Income expectations and parity diagnostics never enter production
+output schemas.
 
 ## Targeted validation
 
@@ -262,10 +279,12 @@ accepted.
 3. Compare the income/CV and income-change columns listed above, including
    missing-to-available transitions and numeric differences by county. Verify
    that 2016 inflation adjustment and the downstream formulas are unchanged.
-4. Confirm identical output keys, row counts, columns/types, geography, weights,
-   and all non-income-related values, including rent measures and existing
+4. Confirm identical output keys, row counts, shared columns/types, geography,
+   weights, and all shared non-income-related values, including rent measures and existing
    income MOEs. Review any downstream sample changes due to income availability
-   or CV thresholds before accepting revised analytical results.
+   or CV thresholds before accepting revised analytical results. Inspect
+   `schema_changes` for only the listed migration and independently validate
+   inventory completeness and complete-target reconciliation in Step 2 §4.6.
 5. Inspect every `socal_parity_16$differences` and `socal_parity_24$differences`
    row. Every geographically unaffected difference must be a
    `verified_income_correction`; investigate anything else before accepting

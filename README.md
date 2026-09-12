@@ -12,7 +12,7 @@ block groups contributing to those 2010 tracts, including sources outside the
 target counties, with the original NHGIS fractions (no renormalization).
 
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
-02_assemble.Rmd - import ACS data; merge 2020-2024 data with 2010 tract crosswalk and aggregate 2020-2024 block group variables to 2010 tracts; import missind data flags and uncertainty measures
+02_assemble.Rmd - import ACS data; aggregate 2020-2024 block groups to 2010 tracts; construct rental inventory with explicit missingness for both vintages; derive data flags and uncertainty measures
 03_merge.Rmd - import 2024 ACS measures aggregated to 2010 tracts and merge w/ 2016 ACS measures; calculate change variables; save ACS tract panel
 
 
@@ -103,16 +103,24 @@ keys are unique and non-missing; flags are logical, non-missing, constant
 Crosswalk weights must be finite and in [0, 1]. No empirical ACS row count or
 missingness threshold is imposed.
 
-**Stage-2 parity compatibility remains a follow-up.** Its 2016 pass-through
-output loses seven estimate/MOE pairs (`rentmv1yr`, `rentmv5yr`, `rentyrblt`,
-`rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99`) and
-gains `vac_rentedE/M`. Existing snapshots will fail strict schema comparison,
-so the current parity checks cannot validate that regenerated output against
-older snapshots. Preserve the checks and reference snapshots for the follow-up;
-a missing reference means parity is unverified. The removed measures have no
-direct downstream calculation references. Stage-2 executable changes in this
-implementation are limited to the two input filenames; rental-inventory
-calculations, geographic harmonization, and censoring are unchanged.
+**Stage-2 parity compatibility is implemented through a narrow allowlist.**
+`compare_socal_parity()` stays strict by default (`schema_migration = NULL`).
+The notebook opts into a fixed migration for each vintage:
+
+| Vintage / `schema_migration` | Permitted additions relative to older references | Permitted removals |
+|---|---|---|
+| 2016 / `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99` |
+| 2024 / `"2024"` | `rhu_inventoryE` | None |
+
+Actual additions/removals appear in `schema_changes`; unlisted differences fail.
+Shared columns retain strict order, storage type/class, and value checks,
+including the existing income-correction and geographic classifications.
+Inventory is validated independently before saving and after reloading even
+when absent from a reference. Save/reload schema checks remain strict for every
+column. Preserve all reference snapshots; a missing reference remains **parity
+not checked**. The removed source measures have no direct downstream calculation
+references. Step 3 keeps its existing selection and panel contract, so `rhuPOST`
+remains occupied-renter change.
 
 
 ## Step 2: Assemble geographically consistent tract measures for later years
@@ -127,8 +135,8 @@ Inputs:
   `../../../data/parity_reference`.
 
 Outputs:
-- `../../../data/acs_step2_24.feather` — 2020-2024 ACS measures aggregated to 2010 tracts (Southern California + Bay Area), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
-- `../../../data/acs_step2_16.feather` — 2012-2016 ACS tract measures (Southern California + Bay Area), with top-code/missing/zero flags, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_24.feather` — 2020-2024 ACS measures aggregated to 2010 tracts (Southern California + Bay Area), adding only `rhu_inventoryE` to the existing interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_16.feather` — 2012-2016 ACS tract measures (Southern California + Bay Area), with `rhu_inventoryE`, revised Step 1 pass-through columns including `vac_rentedE/M`, top-code/missing/zero flags, share, vacancy-rate, and CV measures.
 
 Schema:
 - `schemas/acs_step2_16.md`
@@ -136,9 +144,32 @@ Schema:
 
 Steps:
 1. Set up environment (packages, `R/assemble_helpers.R` and shared `R/geography_qa.R`, data directory, named target counties, prior-output parity references)
-2. Assemble 2020-2024 ACS tract measures (select destination crosswalk rows, join all contributing sources, check allocation weights, capture legacy/corrected income expectations before censoring, aggregate and derive measures, check Southern California parity, save)
-3. Prepare 2012-2016 ACS tract measures (select the same target counties, capture income expectations before flagging/censoring, build share, vacancy-rate, and CV measures, check parity, save)
-4. Validate outputs (key uniqueness, county coverage, missing/top-coded rent by county, flag encoding, numeric distributions)
+2. Assemble 2020-2024 ACS tract measures (select destination crosswalk rows, join all contributing sources, check allocation weights, capture legacy/corrected income expectations before censoring, aggregate existing measures and separate inventory components, validate inventory and Southern California parity, save)
+3. Prepare 2012-2016 ACS tract measures (select the same target counties, capture income expectations before flagging/censoring, build share, vacancy-rate, CV, and direct inventory measures, validate inventory and parity, save)
+4. Validate outputs (key uniqueness, county coverage, missing/top-coded rent by county, flag encoding, numeric distributions, inventory completeness and complete-target reconciliation in §4.6)
+
+Rental inventory combines renter-occupied units (`rhuE`, B25003_003), vacant
+for rent (`vac_forrentE`, B25004_002), and rented, not occupied (`vac_rentedE`,
+B25004_003). The 2016 calculation adds the three unique tract estimates directly.
+For 2024, `calc_rental_inventory()` separately sums **each** source component
+with **`wt_renthu`** on the retained `acs_bg` allocation rows. A contributing
+source is a link with **`wt_renthu > 0`**. Any contributing `NA` or `NaN` in any
+required estimate makes inventory `NA`; sums do not remove missing values or
+substitute zero. Zero-weight links have no effect on completeness. A target
+without positive-weight contributors has zero components and inventory, with
+an explicit zero-contributor diagnostic. Missing rent, income, or MOEs do not
+affect inventory completeness.
+
+Only `tr2010_id` and `rhu_inventoryE` are joined one-to-one from the diagnostic
+table onto each production table, with identical key sets and preserved rows
+and unrelated columns. The separate `inventory_rhuE`, `inventory_vac_forrentE`,
+`inventory_vac_rentedE`, contributing/missing counts, and `inventory_incomplete`
+stay in the notebook. Existing 2024 `vac_forrentE` continues to use **`wt_hu`**
+for vacancy rates; inventory's diagnostic vacancy components use **`wt_renthu`**.
+Occupied-renter counts and rent denominators, cash/low-rent/bin measures,
+censoring, income, other weights, flags, MOEs, and CVs keep their calculations.
+No inventory MOE/CV is added. The separate 2024 tract file and 2000-to-2010
+tract crosswalk remain outside Step 2's input contract.
 
 
 ## Step 3: Create ACS panel, calculate change variables
@@ -161,13 +192,15 @@ Steps:
 3. Merge the two surveys (full join on tr2010_id, keep all tracts) and calculate change variables — level ratios (`*POST`) for dollar/count measures and percentage-point differences (`*PPC`) for share/rate measures (renter-occupied share, vacancy rates) — plus CVs, then save the panel
 4. Validate output (key union and one-period-only membership from original input keys, county coverage, missingness, flag encoding, numeric distributions)
 
-Analyst validation of assembly and the panel (after stage-1 migration and the parity follow-up):
+Analyst validation of assembly and the panel (after regenerating the revised stage-1 inputs):
 
 - The earlier geographic extension alone used cached statewide inputs. With
-  the revised stage-1 contract, generate the new inputs first and resolve the
-  parity compatibility follow-up above before validating stages 2 and 3.
-  Focused income validation runs with `Rscript tests/test_income_censoring.R`;
-  it exercises income expectations and the parity helper using synthetic inputs.
+  the revised stage-1 contract, generate the new inputs first, then validate
+  stages 2 and 3 with the narrow parity migration above. Focused checks run with
+  `Rscript tests/test_rental_inventory.R` and `Rscript tests/test_income_censoring.R`.
+  They exercise synthetic inventory, notebook integration, income expectations,
+  strict/narrow parity, and temporary Feather round trips. Full notebook execution,
+  canonical output regeneration, and empirical inventory review remain analyst-run.
 - Before running, preserve the prior step-2 outputs and set `parity_reference_dir`
   in stage 2 to that directory for repeatable comparisons. It is configured as
   `../../../data/parity_reference`; saving candidates in `data_dir` does not
@@ -186,7 +219,7 @@ Analyst validation of assembly and the panel (after stage-1 migration and the pa
   can sum below one and must remain identical to their original fractions.
   Assertion failures stop notebook execution.
   [Note: conditions met when 02_assemble.Rmd runs without error.]
-- `socal_parity_16` and `socal_parity_24` compare every output column, reporting
+- `socal_parity_16` and `socal_parity_24` compare every shared output column, reporting
   changed values and added/removed keys. Each changed cell is classified as
   `verified_income_correction`, `boundary_review`, or `unexpected`, with counts
   in `difference_summary` and the complete values in `differences`. For
@@ -194,18 +227,31 @@ Analyst validation of assembly and the panel (after stage-1 migration and the pa
   matching both the expected legacy reference and corrected candidate may pass.
   Expectations use uncensored source incomes and the existing household weights
   (2024); both CV expectations use the reference income MOE and existing formula.
-  Candidate MOEs, all other columns, and tract membership remain subject to
+  Candidate MOEs, all other shared columns, and tract membership remain subject to
   ordinary parity. The existing tolerance is unchanged, and the helper remains
-  strict when `expected_income = NULL`. Review boundary differences with
+  strict on shared values when `expected_income = NULL`; schema differences
+  require the explicit allowlist above. Review boundary differences with
   `socal_boundary_contributions`, which identifies newly included sources and
   their weights/allocated counts. Use unchanged inputs for a valid comparison.
 - Review raw and post-censoring rent missingness/top-codes by county. No empirical
   missingness threshold is imposed; unexplained county anomalies require review.
+- Inspect `inventory_missing_sources_16/24` for source/target IDs and missing
+  components, and `inventory_county_qa_16/24` for incomplete and zero-contributor
+  target counts. Required source estimate/MOE columns must be numeric; weights
+  and observed contributing estimates must be finite and nonnegative, with
+  weights in [0, 1]. Output `is.na(rhu_inventoryE)` must agree exactly with the
+  keyed completeness diagnostic. Complete inventory must equal its three component
+  totals. Inspect `inventory_reconciliation_16/24`: source-first and target-first
+  totals must agree over **complete targets only**, without renormalizing weights.
+  Incomplete targets remain separately reported. §4.6 repeats inventory checks
+  after reloading and verifies all saved values, original allocation pairs/weights,
+  and occupied-count reconciliation.
 - Inspect `panel_membership`/`saved_panel_membership` for one-period-only tracts;
   these use original input keys, independently of the output's constant `base_id`.
-  Column names/order/types are checked against prior files when available and
-  across saving/reloading. Stage-2 and panel filenames remain unchanged; the
-  2016 pass-through schema changes as described in the migration above.
+  Shared column names/order/types are checked against prior Step 2 files when
+  available, with only the allowed migration; panel and save/reload schema
+  checks remain strict. Stage-2 and panel filenames remain unchanged; the
+  Step 2 schema additions/removals are described in the migration above.
 
 Income is retained independently of missing or top-coded rent, following the
 analyst decision; see the [income correction and acceptance checks](notes/income_censoring.md).

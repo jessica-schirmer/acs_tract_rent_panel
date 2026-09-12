@@ -11,8 +11,8 @@ California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_a
 Selection is by destination tract county. All source block groups contributing
 through the crosswalk are retained, including sources outside the target
 counties. The original allocation fractions are preserved; excluding non-target
-destinations does not renormalize them. This expands geographic coverage without
-adding or changing output columns.
+destinations does not renormalize them. These retained fractions also apply to
+the new `rhu_inventoryE` measure.
 
 ## Aggregation method
 
@@ -37,6 +37,59 @@ following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 `calc_agg_vars()`, then joined onto the tract table:
 `vac_forrentE`, `vac_forsaleE`, `ohuE`, `smfE` (small multifamily:
 `sfd_attE + duplexE + quadplexE`).
+
+## Rental inventory
+
+| column | type | description |
+|---|---|---|
+| `rhu_inventoryE` | numeric | Sum of three independently renter-weighted components: renter-occupied (`rhuE`, B25003_003), vacant for rent (`vac_forrentE`, B25004_002), and rented, not occupied (`vac_rentedE`, B25004_003). |
+
+`calc_rental_inventory()` works on retained source allocation rows, before
+collapsing them to tracts. **Every component uses `wt_renthu`**:
+
+```r
+sum(source_component[wt_renthu > 0] * wt_renthu[wt_renthu > 0])
+```
+
+A contributing source is a retained allocation with `wt_renthu > 0`. Weights
+must be finite fractions in [0, 1]; retained fractions are not renormalized.
+Source estimate/MOE columns must be numeric. Observed contributing estimates
+must be finite and nonnegative. **Any contributing `NA` or `NaN` in any of the
+three estimates makes `rhu_inventoryE = NA_real_`.** Component sums retain
+`sum()`'s default `na.rm = FALSE`; no partial inventory or missing-to-zero
+substitution is allowed. Missing rent, income, or MOEs have no effect on
+completeness. Zero-weight links contribute zero and do not affect completeness,
+including when their estimates are missing. Targets with no positive-weight
+contributors have zero component totals and inventory, `n_contributing = 0`,
+and `inventory_incomplete = FALSE`.
+
+The notebook retains `inventory_rhuE`, `inventory_vac_forrentE`,
+`inventory_vac_rentedE`, contributing-source/missing-component counts, and
+`inventory_incomplete` in diagnostics. Only `tr2010_id` and `rhu_inventoryE`
+are joined one-to-one onto the production table; **inventory is the only added
+2024 output column**. Neither the diagnostic components/flags nor an inventory
+MOE/CV enters this output.
+
+The existing `vac_forrentE` above uses **`wt_hu`** for `pctrvacE`; the separate
+`inventory_vac_forrentE` diagnostic uses **`wt_renthu`** for inventory. Existing
+vacancy rates, occupied `rhuE`, cash/low-rent/bin counts, rent/income calculations,
+weights, MOEs, CVs, and flags retain their calculations. Inventory is never
+derived from the existing vacancy-rate input or used as a rent denominator.
+
+Before saving and after reloading (§4.6), keyed output missingness must equal
+`inventory_incomplete`. Every complete target must have finite, nonnegative
+inventory equal to its three component totals. Source-first and target-first
+totals reconcile over **complete targets only**, with incomplete targets
+reported separately by county/vintage and no redistribution of retained weights.
+These checks apply independently when a reference lacks inventory or is absent.
+
+`compare_socal_parity(schema_migration = "2024")` permits only the addition
+`rhu_inventoryE`, reported in `schema_changes`, with no removals. Shared columns
+retain strict order, type, and value checks, including existing income and
+geographic rules. The default `schema_migration = NULL` and save/reload schema
+checks remain strict. Missing references remain **parity not checked**.
+Step 3 keeps its current selection and panel contract; `rhuPOST` still measures
+occupied-renter change.
 
 ## Aggregated medians/means (weighted means)
 

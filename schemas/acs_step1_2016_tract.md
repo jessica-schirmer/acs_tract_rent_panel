@@ -92,7 +92,10 @@ only the [block-group output](acs_step1_2024_block_group.md) excludes them.
 shift these up one bin (1–18 / 1–20) to hold the real rent threshold roughly
 constant. See `01_acs.Rmd` §§3.2, 4.2, and 5.2.
 
-**Downstream:** Stage 2 passes through this revised schema. Older parity
-snapshots are incompatible with its removed measure pairs and added
-`vac_rentedE/M`; see the [migration and parity follow-up](../README.md#stage-1-input-migration).
+**Downstream:** Stage 2 passes through this revised schema and adds
+`rhu_inventoryE = rhuE + vac_forrentE + vac_rentedE`, propagating any missing
+required estimate. Its explicit `schema_migration = "2016"` parity mode permits
+only the seven removed measure pairs and additions `vac_rentedE/M` and
+`rhu_inventoryE` against older snapshots; shared columns remain strictly checked.
+See the [migration and parity compatibility](../README.md#stage-1-input-migration).
 Generate this file from the revised stage 1; retain the old cache as historical data.
