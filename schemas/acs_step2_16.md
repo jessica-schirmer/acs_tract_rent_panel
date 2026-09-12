@@ -57,7 +57,10 @@ removal). See the §2.4 / §3.2 decision blocks in the notebook.
 | `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_rhucash`, `m_flag_med_hval` | 1 if the estimate is missing (`NA`). |
 | `zero_flag_rhu`, `zero_flag_rhucash`, `zero_flag_med_hval` | 1 if the estimate is zero. |
 
-**Known quirk (carried unchanged from source logic):** `censor_tc_vars()` censors
-`med_hhincE` using the condition `rentE >= 2000000`, which never fires — so
-`med_hhincE` is effectively not censored in this stage. Flagged for awareness; not
-modified.
+**Income retention:** `censor_tc_vars()` leaves `med_hhincE` unchanged, preserving
+its source values and missingness regardless of missing or top-coded `rentE` or
+`lqcrentE`. No income-value threshold is applied. `med_hhincCV` uses the retained
+income estimate in its existing formula. This corrects the previous unintended
+loss of available income wherever `rentE` was missing or top-coded. See the
+[income-censoring decision and validation](../notes/income_censoring.md) for the
+analyst rule, regression checks, and output acceptance checks.

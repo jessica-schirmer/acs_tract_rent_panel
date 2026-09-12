@@ -66,7 +66,8 @@ Inputs:
 - `../../../data/xwalk_bg24_tr10.feather` — 2020 block group to 2010 tract allocation weights.
 - `../../../data/acs_step1_16.feather` — 2012-2016 ACS estimates, one row per 2010 CA tract.
 - Optional prior step-2 Feathers in `parity_reference_dir` — schema and Southern
-  California parity references, read before saving.
+  California parity references, read before saving. The configured directory is
+  `../../../data/parity_reference`.
 
 Outputs:
 - `../../../data/acs_step2_24.feather` — 2020-2024 ACS measures aggregated to 2010 tracts (Southern California + Bay Area), with interpolated rent, missing- and top-coded-rent shares, share, vacancy-rate, and CV measures.
@@ -78,8 +79,8 @@ Schema:
 
 Steps:
 1. Set up environment (packages, `R/assemble_helpers.R` and shared `R/geography_qa.R`, data directory, named target counties, prior-output parity references)
-2. Assemble 2020-2024 ACS tract measures (select destination crosswalk rows, join all contributing sources, check allocation weights, censor top-codes, aggregate and derive measures, check Southern California parity, save)
-3. Prepare 2012-2016 ACS tract measures (select the same target counties, flag/censor values, build share, vacancy-rate, and CV measures, check parity, save)
+2. Assemble 2020-2024 ACS tract measures (select destination crosswalk rows, join all contributing sources, check allocation weights, capture legacy/corrected income expectations before censoring, aggregate and derive measures, check Southern California parity, save)
+3. Prepare 2012-2016 ACS tract measures (select the same target counties, capture income expectations before flagging/censoring, build share, vacancy-rate, and CV measures, check parity, save)
 4. Validate outputs (key uniqueness, county coverage, missing/top-coded rent by county, flag encoding, numeric distributions)
 
 
@@ -106,16 +107,17 @@ Steps:
 Analyst validation of the extension:
 
 - Run stage 2 from the cached statewide ACS and crosswalk Feathers, then stage 3.
-  A fresh stage-1 download is not needed for this geographic change. Codex
-  validation uses syntax checks and synthetic data only, without production writes.
+  A fresh stage-1 download is not needed for this geographic change. Focused
+  validation runs with `Rscript tests/test_income_censoring.R`; it exercises the
+  notebook's income expectations and the parity helper using synthetic inputs.
 - Before running, preserve the prior step-2 outputs and set `parity_reference_dir`
-  in stage 2 to that directory for repeatable comparisons. The default reads
-  existing `data_dir` outputs into memory before saving; after a run those files
-  become the new outputs. Missing references explicitly leave parity unverified.
-  
+  in stage 2 to that directory for repeatable comparisons. It is configured as
+  `../../../data/parity_reference`; saving candidates in `data_dir` does not
+  replace those snapshots. Missing references explicitly leave parity unverified.
 - Inspect county counts for both vintages and the final panel: all 14 target
   counties must be populated, including the Bay Area, with no unintended
   destination counties. Stage 3 inherits the county set validated by stage 2.
+
 - Crosswalk pairs and tract keys must be unique at their documented grains;
   retained allocations and tract-level joins must all match without row
   multiplication. Unmatched crosswalk links are reported with their IDs/weights
@@ -125,9 +127,18 @@ Analyst validation of the extension:
   coverage. Full source weights sum to one within `1e-6`; retained weights
   can sum below one and must remain identical to their original fractions.
   Assertion failures stop notebook execution.
+  [Note: conditions met when 02_assemble.Rmd runs without error.]
 - `socal_parity_16` and `socal_parity_24` compare every output column, reporting
-  changed values and added/removed keys. Unaffected Southern California records
-  must agree within numeric tolerance. Review boundary-group differences with
+  changed values and added/removed keys. Each changed cell is classified as
+  `verified_income_correction`, `boundary_review`, or `unexpected`, with counts
+  in `difference_summary` and the complete values in `differences`. For
+  geographically unaffected tracts, only changed `med_hhincE`/`med_hhincCV` cells
+  matching both the expected legacy reference and corrected candidate may pass.
+  Expectations use uncensored source incomes and the existing household weights
+  (2024); both CV expectations use the reference income MOE and existing formula.
+  Candidate MOEs, all other columns, and tract membership remain subject to
+  ordinary parity. The existing tolerance is unchanged, and the helper remains
+  strict when `expected_income = NULL`. Review boundary differences with
   `socal_boundary_contributions`, which identifies newly included sources and
   their weights/allocated counts. Use unchanged inputs for a valid comparison.
 - Review raw and post-censoring rent missingness/top-codes by county. No empirical
@@ -137,7 +148,9 @@ Analyst validation of the extension:
   Column names/order/types are checked against prior files when available and
   across saving/reloading. Feather filenames and schemas remain unchanged.
 
-The inspection's income-censoring and dollar-MOE discrepancies remain separate
-research decisions; their executable behavior is unchanged. This cleaning-stage
+Income is retained independently of missing or top-coded rent, following the
+analyst decision; see the [income correction and acceptance checks](notes/income_censoring.md).
+The inspection's dollar-MOE discrepancy remains a separate research decision;
+its executable behavior is unchanged. This cleaning-stage
 expansion does not expand downstream analysis filters or supporting data. See
 the stage's interface in [the shared pipeline document](../../PIPELINE.md).

@@ -59,8 +59,13 @@ assert_same_schema <- function(current, previous, label) {
 
 # Boundary IDs identify destination tracts receiving sources excluded by the old
 # Southern California source filter. Differences there require analyst review.
+# Optional expected_income is uniquely keyed by tr2010_id, with numeric
+# legacy_med_hhincE, corrected_med_hhincE, legacy_med_hhincCV, and
+# corrected_med_hhincCV columns computed from uncensored inputs/reference MOEs.
+# Only income cells matching both expectations qualify for the correction.
 compare_socal_parity <- function(current, previous, socal_counties,
-                                 boundary_ids = character(), tolerance = 1e-10) {
+                                 boundary_ids = character(), tolerance = 1e-10,
+                                 expected_income = NULL) {
   if (is.null(previous)) {
     cat("PARITY NOT CHECKED: no prior output; supply parity_reference_dir.\n")
     return(invisible(NULL))
@@ -68,6 +73,27 @@ compare_socal_parity <- function(current, previous, socal_counties,
   assert_same_schema(current, previous, "Southern California parity")
   assert_unique_key(previous, "tr2010_id", "Prior output")
   assert_unique_key(current, "tr2010_id", "Candidate output")
+  income_columns <- c("med_hhincE", "med_hhincCV")
+  if (!is.null(expected_income)) {
+    expected_columns <- c(paste0("legacy_", income_columns),
+                          paste0("corrected_", income_columns))
+    if (!is.data.frame(expected_income) ||
+        !all(c("tr2010_id", expected_columns) %in% names(expected_income)) ||
+        anyDuplicated(names(expected_income)) ||
+        !all(vapply(expected_income[expected_columns], is.numeric, logical(1)))) {
+      stop("Income expectations require tr2010_id and numeric legacy/corrected income and CV columns")
+    }
+    assert_unique_key(expected_income, "tr2010_id", "Income expectations")
+  }
+  values_match <- function(old, new) {
+    same <- (is.na(old) & is.na(new)) | (!is.na(old) & !is.na(new) & old == new)
+    if (is.numeric(old)) {
+      finite <- is.finite(old) & is.finite(new)
+      same[finite] <- abs(old[finite] - new[finite]) <=
+        tolerance * pmax(1, abs(old[finite]), abs(new[finite]))
+    }
+    same
+  }
   select_socal <- function(df) {
     df |>
       filter(substr(tr2010_id, 1, 2) == "06",
@@ -88,20 +114,27 @@ compare_socal_parity <- function(current, previous, socal_counties,
   shared_ids <- tract_audit$tr2010_id[tract_audit$membership == "both"]
   before <- before[match(shared_ids, before$tr2010_id), , drop = FALSE]
   after <- after[match(shared_ids, after$tr2010_id), , drop = FALSE]
+  expected_index <- match(shared_ids, expected_income$tr2010_id)
   differences <- lapply(setdiff(names(after), "tr2010_id"), function(column) {
     old <- before[[column]]
     new <- after[[column]]
-    same <- (is.na(old) & is.na(new)) | (!is.na(old) & !is.na(new) & old == new)
-    if (is.numeric(old)) {
-      finite <- is.finite(old) & is.finite(new)
-      same[finite] <- abs(old[finite] - new[finite]) <=
-        tolerance * pmax(1, abs(old[finite]), abs(new[finite]))
+    changed <- which(!values_match(old, new))
+    verified_income <- rep(FALSE, length(changed))
+    if (!is.null(expected_income) && column %in% income_columns) {
+      expected_rows <- expected_index[changed]
+      verified_income <- !is.na(expected_rows) &
+        values_match(old[changed], expected_income[[paste0("legacy_", column)]][expected_rows]) &
+        values_match(new[changed], expected_income[[paste0("corrected_", column)]][expected_rows])
     }
-    changed <- which(!same)
     tibble(
       tr2010_id = shared_ids[changed], variable = rep(column, length(changed)),
       prior = as.character(old[changed]), candidate = as.character(new[changed]),
-      difference = if (is.numeric(old)) new[changed] - old[changed] else rep(NA_real_, length(changed))
+      difference = if (is.numeric(old)) new[changed] - old[changed] else rep(NA_real_, length(changed)),
+      classification = case_when(
+        verified_income ~ "verified_income_correction",
+        shared_ids[changed] %in% boundary_ids ~ "boundary_review",
+        TRUE ~ "unexpected"
+      )
     )
   }) |>
     bind_rows() |>
@@ -110,13 +143,18 @@ compare_socal_parity <- function(current, previous, socal_counties,
     mutate(changed = membership != "both" | tr2010_id %in% differences$tr2010_id)
   summary <- tract_audit |>
     dplyr::count(allocation, membership, changed, name = "tracts")
+  difference_summary <- differences |>
+    dplyr::count(allocation, classification, variable, name = "cells")
   print(summary, n = Inf)
+  print(difference_summary, n = Inf, width = Inf)
   print(filter(tract_audit, membership != "both"), n = Inf)
   print(differences, n = Inf, width = Inf)
-  if (any(tract_audit$allocation == "unaffected" & tract_audit$changed)) {
+  if (any(tract_audit$allocation == "unaffected" & tract_audit$membership != "both") ||
+      any(differences$classification == "unexpected")) {
     stop("Southern California parity failed for unaffected tracts; inspect differences above")
   }
-  invisible(list(summary = summary, tracts = tract_audit, differences = differences))
+  invisible(list(summary = summary, tracts = tract_audit, differences = differences,
+                 difference_summary = difference_summary))
 }
 
 # Reconstruct membership from the original input keys, even after base_id is TRUE.

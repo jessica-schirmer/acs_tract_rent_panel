@@ -256,15 +256,16 @@ calc_pct_tc_m <- function(df, id) {
 }
 
 
-#' Censor top-coded
+#' Censor top-coded rent
+#'
+#' Income and other input columns pass through unchanged.
 #'
 #' @param df
 #' @return dataframe with censored top-coded variables
 censor_tc_vars <- function(df) {
   df |>
     mutate(rentE=ifelse(rentE>=3500,NA, rentE),
-           lqcrentE=ifelse(lqcrentE>=3500,NA, lqcrentE),
-           med_hhincE=ifelse(rentE>=2000000,NA, med_hhincE)
+           lqcrentE=ifelse(lqcrentE>=3500,NA, lqcrentE)
     )
 
 }

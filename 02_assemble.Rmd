@@ -105,13 +105,26 @@ parity_reference_dir <- "../../../data/parity_reference"
 
 ## 1.4 Read prior outputs for parity checks
 
-Prior outputs are read before either output is saved. By default these are the
-existing files in `data_dir`; use a preserved snapshot in `parity_reference_dir`
-for repeated comparisons against the pre-extension results. A missing reference
-is reported as **parity not checked**, never as a pass. Reference and candidate
-must use the same statewide inputs and measurement code. Differences use a
+Prior outputs are read from `parity_reference_dir`, configured as
+`../../../data/parity_reference`, before either output is saved. Preserve these
+snapshots for repeated comparisons; saving candidates in `data_dir` does not
+replace them. A missing reference is reported as **parity not checked**, never
+as a pass. Reference and candidate must use the same statewide inputs and
+measurement code, apart from the approved income correction below. Differences use a
 numeric tolerance of `1e-10 * max(1, abs(prior), abs(candidate))`; column names,
 order, and types must match exactly. No diagnostic columns enter the Feathers.
+
+### Decision: Verify the approved income correction against preserved references
+
+The geographic parity check still compares every output column. Only a changed
+`med_hhincE` or `med_hhincCV` cell whose reference **and** candidate values match
+the legacy and corrected expectations qualifies as `verified_income_correction`.
+Expectations use inputs before censoring (§2.4 and §3.2), with the former
+missing/top-coded-rent income exclusion applied only to the legacy estimate.
+Both expected CVs use the reference `med_hhincM` and the existing
+`(med_hhincM / 1.645) / med_hhincE` formula. Candidate MOEs remain subject to
+ordinary parity. Missing values and numeric tolerance follow the same comparison
+rule as all other columns. Without expectations, the helper remains strict.
 
 ```{r load-parity-references}
 prior_outputs <- lapply(c("16", "24"), function(yr) {
@@ -348,6 +361,46 @@ $3,500. Top-coded values are not true medians, so we set rent and `lqcrent`
 values `>= 3500` to `NA` before aggregating. A tract-level top-code flag
 (`tc_flag_rent_24`, built in §2.3) records where this occurred.
 
+### Decision: Retain income independently of rent censoring
+
+The analyst specified that missing or top-coded rent must not make otherwise
+available median household income missing. `censor_tc_vars()` therefore leaves
+`med_hhincE` unchanged, preserving its source values and missingness. No separate
+income threshold is introduced. In §2.5 the existing household-weighted mean
+uses all available income contributions with the same allocation weights,
+including contributions whose rent is missing or censored. This corrects the
+previous helper's unintended exclusion of those incomes and can change both
+tract income estimates and their CVs. See the
+[income-censoring decision and validation](notes/income_censoring.md).
+
+Before censoring, calculate both income expectations with the existing
+`hhE * wt_hh` household allocation weights. The reference-MOE join must be
+many-to-one and preserve every destination tract; these diagnostics stay
+separate from the production table. Missing references leave expectations unset.
+
+```{r income-expectations-24}
+expected_income_24 <- NULL
+if (!is.null(prior_outputs[["24"]])) {
+  expected_income_24 <- acs_bg |>
+    mutate(legacy_med_hhincE = if_else(is.na(rentE) | rentE >= 3500,
+                                      NA_real_, med_hhincE)) |>
+    group_by(tr2010_id) |>
+    summarise(
+      legacy_med_hhincE = weightedMean(legacy_med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
+      corrected_med_hhincE = weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    left_join(select(prior_outputs[["24"]], tr2010_id, med_hhincM),
+              by = "tr2010_id", relationship = "many-to-one") |>
+    transmute(
+      tr2010_id, legacy_med_hhincE, corrected_med_hhincE,
+      legacy_med_hhincCV = (med_hhincM / 1.645) / legacy_med_hhincE,
+      corrected_med_hhincCV = (med_hhincM / 1.645) / corrected_med_hhincE
+    )
+  assert_tract_keys(expected_income_24, target_tract_ids_24, "2024 income expectations")
+}
+```
+
 ```{r censor-and-structure}
 # Censor top-coded
 summary(acs_bg$rentE)
@@ -538,16 +591,21 @@ tracts (Southern California + Bay Area), consumed by `03_merge.Rmd`.
 Before writing, assert county containment/coverage and compare every output
 column to the prior Southern California records. `socal_parity_24` reports cell
 differences and added/removed keys separately for unaffected and boundary tracts.
+Each changed cell is classified as `verified_income_correction`,
+`boundary_review`, or `unexpected`, with counts in `difference_summary` and all
+values retained in `differences`. Every geographically unaffected difference
+must be a verified income correction; other cell or membership changes fail.
 The boundary group is defined by `socal_boundary_contributions` (§2.2): incoming
 sources omitted by the old source-county filter. Its differences require review
-alongside those source weights/counts; other Southern California differences fail
-the assertion. Boundary exposure alone does not excuse unrelated input changes.
+alongside those source weights/counts. Income corrections do not change that
+geographic classification. Boundary exposure alone does not excuse unrelated
+input changes.
 
 ```{r acceptance-24}
 report_tract_counties(acs_tr10_24_interp, target_counties, "2024 destination counties")
 socal_parity_24 <- compare_socal_parity(
   acs_tr10_24_interp, prior_outputs[["24"]], southern_california_counties,
-  socal_boundary_ids
+  socal_boundary_ids, expected_income = expected_income_24
 )
 ```
 
@@ -721,6 +779,37 @@ Top-coded rent is then censored to `NA` (as in §2.4). The missing-rent rate is
 interpreted alongside `zero_flag_rhu`: tracts with no rental housing units are
 not truly "missing" rent.
 
+The income-retention decision in §2.4 applies directly to each 2016 tract:
+`med_hhincE` retains its source value or missingness regardless of rent censoring.
+There is no intervening income aggregation for this vintage. `med_hhincCV` uses
+the retained income estimate in its existing formula; see the
+[income-censoring decision and validation](notes/income_censoring.md).
+
+Capture the source income before censoring for the corrected expectation, and
+apply the former rent exclusion only to the legacy expectation. As in §2.4,
+the reference-MOE join must preserve one row per destination tract. These
+expectations validate income and CV changes without altering output columns.
+
+```{r income-expectations-16}
+expected_income_16 <- NULL
+if (!is.null(prior_outputs[["16"]])) {
+  expected_income_16 <- acs_16 |>
+    transmute(
+      tr2010_id,
+      legacy_med_hhincE = if_else(is.na(rentE) | rentE >= 3500, NA_real_, med_hhincE),
+      corrected_med_hhincE = med_hhincE
+    ) |>
+    left_join(select(prior_outputs[["16"]], tr2010_id, med_hhincM),
+              by = "tr2010_id", relationship = "many-to-one") |>
+    transmute(
+      tr2010_id, legacy_med_hhincE, corrected_med_hhincE,
+      legacy_med_hhincCV = (med_hhincM / 1.645) / legacy_med_hhincE,
+      corrected_med_hhincCV = (med_hhincM / 1.645) / corrected_med_hhincE
+    )
+  assert_tract_keys(expected_income_16, target_tract_ids_16, "2016 income expectations")
+}
+```
+
 ```{r flag-censor-16}
 # Flag top-coded values
 tc_vars <- c("rentE", "lqcrentE", "med_hvalE")
@@ -803,14 +892,18 @@ map_dfr(c("pctrvacE", "pctsvacE", "nsfaE", "mf5E"), ~summ_var(acs_16, .x))
 **Output:** `acs_step2_16.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area),
 consumed by `03_merge.Rmd`.
 
-All previously included Southern California 2016 records must retain parity;
-this vintage has no allocation-boundary exception.
+All previously included Southern California 2016 records must retain parity
+except individually verified income/CV corrections from §3.2. The complete
+differences remain visible in `socal_parity_16`, using the same classifications
+as §2.8. Unexplained income changes, other column changes, and membership changes
+fail; this vintage has no allocation-boundary exception.
 
 ```{r acceptance-16}
 assert_tract_keys(acs_16, target_tract_ids_16, "2016 assembled tracts")
 report_tract_counties(acs_16, target_counties, "2016 destination counties")
 socal_parity_16 <- compare_socal_parity(
-  acs_16, prior_outputs[["16"]], southern_california_counties
+  acs_16, prior_outputs[["16"]], southern_california_counties,
+  expected_income = expected_income_16
 )
 ```
 
@@ -908,8 +1001,11 @@ county. The 2016 raw diagnostic counts tracts; the 2024 raw diagnostic counts
 allocated renter units, so sources split across destinations are apportioned
 with their original weights. Final missing-rent counts include censored
 top-codes. Review county differences without imposing an empirical missingness
-threshold. The existing income-censoring and dollar-MOE behavior is preserved;
-the inspection's two research ambiguities remain separate decisions.
+threshold. Income is retained independently of rent censoring; compare restored
+income values and downstream measures using the
+[income acceptance checks](notes/income_censoring.md#analyst-run-acceptance-checks).
+The existing dollar-MOE behavior is preserved; its research ambiguity remains a
+separate decision.
 
 ```{r validate-county-rent-step2}
 report_tract_counties(acs16_out, target_counties, "Saved 2016 counties")

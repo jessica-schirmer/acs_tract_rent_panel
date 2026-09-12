@@ -42,6 +42,17 @@ following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 
 `rentE`, `lqcrentE`, `med_hhincE`, `med_hvalE`.
 
+**Income retention:** `censor_tc_vars()` leaves block-group `med_hhincE` unchanged
+regardless of missing or top-coded rent, preserving source values and missingness
+without adding an income threshold. Income is then aggregated with the unchanged
+`weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`. Available income
+contributions whose rent is missing or censored are retained; missing source
+income is excluded, and an aggregate with all source incomes missing remains
+missing. Removing the previous rent-dependent income exclusion can change both
+tract income values and missingness. `med_hhincCV` uses the resulting income
+estimate in its existing formula. See the
+[income-censoring decision and validation](../notes/income_censoring.md).
+
 ## Aggregated margins of error (root-sum-of-squares)
 
 `rentM`, `lqcrentM`, `med_hhincM`, `med_hvalM`, `rhuM`, `rhu_baseM`, `tot_vacM`,
