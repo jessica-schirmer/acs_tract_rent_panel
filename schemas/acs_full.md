@@ -2,6 +2,12 @@
 
 **Produced by:** `03_merge.Rmd` (Step 3) · **Source:** `acs_step2_16.feather` + `acs_step2_24.feather`
 
+These remain Step 3's current input filenames. Step 2 now writes
+`acs_step2_2016_tract.feather` and `acs_step2_2024_block_group_aggregated.feather`;
+the consumer filename update is deferred and legacy files are not refreshed.
+The separate `acs_step2_2024_tract.feather` product uses native 2020 tracts and
+does not enter this panel. See the [output migration](../README.md#stage-2-output-naming-and-references).
+
 **Grain:** one row per 2010-vintage tract in the five Southern California plus
 nine Bay Area counties configured in [02_assemble.Rmd](../02_assemble.Rmd) §1.3
 (the union of tracts present in either survey; the full join keeps all tracts).

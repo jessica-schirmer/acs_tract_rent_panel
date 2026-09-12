@@ -52,6 +52,6 @@ is introduced. The three duplicate-code request aliases (`grent_3`, `grent_20`,
 
 **Downstream:** `02_assemble.Rmd` continues to aggregate this block-group table
 to 2010 tracts using `xwalk_bg24_tr10.feather`. See `01_acs.Rmd` §§4.1 and 6.1.
-The separate [2024 tract input](acs_step1_2024_tract.md) is available for later
-assembly. Generate this file from the revised stage 1; the old cache cannot
+The separate [2024 tract input](acs_step1_2024_tract.md) is consumed by the
+native-2020 tract path in Step 2 §4. Generate this file from the revised stage 1; the old cache cannot
 substitute for this schema. See the [migration instructions](../README.md#stage-1-input-migration).

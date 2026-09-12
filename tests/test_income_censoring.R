@@ -123,15 +123,17 @@ cat("Unrelated columns match the previous helper before and after aggregation.\n
 # Exercise the actual notebook expectation chunks with synthetic inputs.
 income_expectations <- function(vintage, sources, reference) {
   lines <- readLines(here::here("02_assemble.Rmd"))
-  start <- match(paste0("```{r income-expectations-", vintage, "}"), lines)
+  product <- if (vintage == "24") "2024_bg_aggregated" else "16"
+  chunk_suffix <- if (vintage == "24") "2024-bg-aggregated" else "16"
+  start <- match(paste0("```{r income-expectations-", chunk_suffix, "}"), lines)
   stopifnot(!is.na(start))
   end <- which(seq_along(lines) > start & lines == "```")[1]
   env <- new.env(parent = environment())
-  env$prior_outputs <- setNames(list(reference), vintage)
-  assign(if (vintage == "24") "acs_bg" else "acs_16", sources, envir = env)
-  assign(paste0("target_tract_ids_", vintage), unique(sources$tr2010_id), envir = env)
+  env$prior_outputs <- setNames(list(reference), product)
+  assign(if (vintage == "24") "acs_2024_bg_allocations" else "acs_16", sources, envir = env)
+  assign(paste0("target_tract_ids_", product), unique(sources$tr2010_id), envir = env)
   invisible(capture.output(eval(parse(text = lines[seq.int(start + 1L, end - 1L)]), env)))
-  get(paste0("expected_income_", vintage), envir = env)
+  get(paste0("expected_income_", product), envir = env)
 }
 
 parity <- function(current, previous = current, expected_income = NULL,

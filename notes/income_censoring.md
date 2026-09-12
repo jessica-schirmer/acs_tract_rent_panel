@@ -11,6 +11,13 @@ analyst-run. Step 2 now also implements rental inventory and the narrow schema
 migration described below; the dated cached-input findings in this note remain
 historical and do not validate regenerated inventory outputs.
 
+**Subsequent Step 2 tract-source addition:** The 2024 direct tract path now
+retains source income independently and validates it on `tr2020_id`. Its parity
+is strict; the historical income-correction exceptions below apply only to the
+2016 and block-group products. Current filenames and diagnostic suffixes are
+listed in the [output migration](../README.md#stage-2-output-naming-and-references).
+Historical filenames and empirical results below remain unchanged.
+
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),
 [tests/test_income_censoring.R](../tests/test_income_censoring.R), this note,
@@ -284,7 +291,7 @@ accepted.
    income MOEs. Review any downstream sample changes due to income availability
    or CV thresholds before accepting revised analytical results. Inspect
    `schema_changes` for only the listed migration and independently validate
-   inventory completeness and complete-target reconciliation in Step 2 §4.6.
+   inventory completeness and complete-target reconciliation in Step 2 §5.6.
 5. Inspect every `socal_parity_16$differences` and `socal_parity_24$differences`
    row. Every geographically unaffected difference must be a
    `verified_income_correction`; investigate anything else before accepting

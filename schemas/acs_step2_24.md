@@ -1,12 +1,18 @@
-# Schema: `acs_step2_24.feather`
+# Schema: `acs_step2_2024_block_group_aggregated.feather`
 
 **Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2024_block_group.feather` + `xwalk_bg24_tr10.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
 California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
-§1.3 (`target_counties`, shared by both vintages), built by weight-aggregating
+§1.3 (`target_counties`, shared by all three Step 2 products), built by weight-aggregating
 2020 block groups to 2010 tracts.
 **Key:** `tr2010_id` (unique, non-missing).
+
+The production filename replaces `acs_step2_24.feather`; existing data and
+historical parity references retain that legacy name. `03_merge.Rmd` is unchanged
+and requires a follow-up input-filename update before it consumes this output.
+The separate [2024 tract-source product](acs_step2_2024_tract.md) retains
+`tr2020_id`; it is not compared with this product.
 
 Selection is by destination tract county. All source block groups contributing
 through the crosswalk are retained, including sources outside the target
@@ -76,7 +82,7 @@ vacancy rates, occupied `rhuE`, cash/low-rent/bin counts, rent/income calculatio
 weights, MOEs, CVs, and flags retain their calculations. Inventory is never
 derived from the existing vacancy-rate input or used as a rent denominator.
 
-Before saving and after reloading (§4.6), keyed output missingness must equal
+Before saving and after reloading (§5.6), keyed output missingness must equal
 `inventory_incomplete`. Every complete target must have finite, nonnegative
 inventory equal to its three component totals. Source-first and target-first
 totals reconcile over **complete targets only**, with incomplete targets
@@ -133,6 +139,6 @@ estimate in its existing formula. See the
 
 | column | type | description |
 |---|---|---|
-| `tc_flag_rent_24` | integer (0/1) | 1 if the tract had any top-coded (`>= 3500`) renter rent before censoring. |
+| `tc_flag_rent_24` | numeric (double, 0/1) | 1 if the tract had any top-coded (`>= 3500`) renter rent before censoring. Existing storage and column name are preserved. |
 | `rhu_id` | logical | Constant `TRUE`; tag added during aggregation. |
 | `merge`, `left_id`, `right_id` | character / logical | Join indicators retained from the final `merge_df()` steps (interpolated rent and top-code-flag merges). All rows should be `"both"`. |

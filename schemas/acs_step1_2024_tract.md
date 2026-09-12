@@ -90,6 +90,8 @@ only the [block-group output](acs_step1_2024_block_group.md) excludes them.
 1–18 / 1–20. The [2016 tract output](acs_step1_2016_tract.md) uses categories
 1–17 / 1–19. See `01_acs.Rmd` §§3.2, 4.2, and 5.2.
 
-**Downstream:** This direct 2020-tract input is available for later assembly.
-Stage 2 continues to aggregate the [2024 block-group input](acs_step1_2024_block_group.md)
-to 2010 tracts; it does not consume this file.
+**Downstream:** `02_assemble.Rmd` §4 restricts this input to the configured target
+counties and constructs the [2024 tract-source output](acs_step2_2024_tract.md),
+retaining `tr2020_id`. The separate [2024 block-group input](acs_step1_2024_block_group.md)
+is aggregated to 2010 tracts in §2; no comparison or reconciliation is performed
+between the two 2024 products.

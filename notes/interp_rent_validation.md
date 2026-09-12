@@ -383,7 +383,8 @@ the formulas and sample denominators stated above. The audit was deterministic.
 **Subsequent stage-1 migration (2026-09-12):** The historical
 `acs_step1_24.feather` in the table below has the current counterpart
 `acs_step1_2024_block_group.feather`, with a revised variable contract. A new
-`acs_step1_2024_tract.feather` is available for later assembly. This audit used
+`acs_step1_2024_tract.feather` is now consumed separately on native 2020 tracts
+in Step 2; that path does not calculate interpolated rent. This audit used
 the original block-group cache; filenames, hashes, and results below still
 identify those original inputs, not regenerated outputs. See the
 [migration instructions](../README.md#stage-1-input-migration).

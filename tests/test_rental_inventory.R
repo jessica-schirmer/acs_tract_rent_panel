@@ -168,13 +168,13 @@ for (column in paste0("grentcat", 1:24, "E")) assembly_sources[[column]] <- 100 
 
 assemble_24 <- function(include_inventory) {
   env <- new.env(parent = environment())
-  env$acs_bg <- assembly_sources
+  env$acs_2024_bg_allocations <- assembly_sources
   env$weight_cols <- c("wt_pop", "wt_hh", "wt_hu", "wt_renthu")
   env$xwalk_target <- select(assembly_sources, bg2020_id, tr2010_id, all_of(env$weight_cols))
-  env$target_tract_ids_24 <- unique(assembly_sources$tr2010_id)
-  chunks <- c("relative-weights-and-tc", "censor-and-structure", "aggregate-to-tracts",
-              "aggregate-supplemental-24", if (include_inventory) "rental-inventory-24",
-              "derive-measures-24", "merge-flags-24")
+  env$target_tract_ids_2024_bg_aggregated <- unique(assembly_sources$tr2010_id)
+  chunks <- c("relative-weights-and-tc-2024-bg-aggregated", "censor-and-structure-2024-bg-aggregated", "aggregate-to-tracts-2024-bg-aggregated",
+              "aggregate-supplemental-2024-bg-aggregated", if (include_inventory) "rental-inventory-2024-bg-aggregated",
+              "derive-measures-2024-bg-aggregated", "merge-flags-2024-bg-aggregated")
   for (chunk in chunks) run_chunk(chunk, env)
   env
 }
@@ -192,35 +192,150 @@ with_24 <- assemble_24(TRUE)
 without_24 <- assemble_24(FALSE)
 with_16 <- assemble_16(TRUE)
 without_16 <- assemble_16(FALSE)
-for (tables in list(list(with_24$acs_tr10_24_interp, without_24$acs_tr10_24_interp),
+for (tables in list(list(with_24$acs_2024_bg_aggregated_interp, without_24$acs_2024_bg_aggregated_interp),
                     list(with_16$acs_16, without_16$acs_16))) {
   stopifnot(identical(setdiff(names(tables[[1]]), names(tables[[2]])), "rhu_inventoryE"),
             identical(select(tables[[1]], -rhu_inventoryE), tables[[2]]))
 }
-stopifnot(identical(with_24$acs_bg, without_24$acs_bg),
-          !"vac_rentedE" %in% names(with_24$acs_tr10_24_interp),
+stopifnot(identical(with_24$acs_2024_bg_allocations, without_24$acs_2024_bg_allocations),
+          !"vac_rentedE" %in% names(with_24$acs_2024_bg_aggregated_interp),
           all(c("vac_rentedE", "vac_rentedM") %in% names(with_16$acs_16)),
-          setequal(with_24$inventory_missing_sources_24$missing_component, "vac_rentedE"),
-          setequal(with_24$inventory_missing_sources_24$bg2020_id, source_ids[2]))
+          setequal(with_24$inventory_missing_sources_2024_bg_aggregated$missing_component, "vac_rentedE"),
+          setequal(with_24$inventory_missing_sources_2024_bg_aggregated$bg2020_id, source_ids[2]))
 
-round_trip <- function(df) {
-  path <- tempfile(fileext = ".feather")
-  on.exit(unlink(path))
-  write_feather(df, path)
-  reloaded <- read_feather(path)
-  assert_same_schema(reloaded, df, "Synthetic Feather schema")
-  reloaded
+# Exercise the new native-2020 tract path using documented source columns.
+configured_env <- new.env(parent = environment())
+run_chunk("set-paths", configured_env)
+native_ids <- c(sprintf("06037%06d", 1:8),
+                paste0("06", configured_env$target_counties, "000009"), "06073000001")
+native_source <- assembly_sources[rep(1L, length(native_ids)), ] |>
+  select(-tr2010_id, -bg2020_id, -starts_with("wt_")) |>
+  mutate(tr2020_id = native_ids, NAME = "Synthetic 2020 tract", rent_id = TRUE,
+         rentE = 1800, lqcrentE = 1400, med_hhincE = 80000,
+         vac_forrentE = 10, vac_rentedE = 5,
+         rhu_lrE = 70, rhu_lr2E = 90)
+for (bedroom in 1:3) {
+  native_source[[paste0("rent", bedroom, "bdrE")]] <- 3600 + bedroom
+  native_source[[paste0("rent", bedroom, "bdrM")]] <- 100
 }
+native_source$rentE[1:4] <- c(3499, 3500, 3501, NA_real_)
+native_source$lqcrentE[1:4] <- c(3500, 3499, NA_real_, 3501)
+native_source$med_hvalE[1:3] <- c(1999999, 2000000, 2000001)
+native_source$rhuE[3:5] <- c(0, NA_real_, 0)
+native_source$vac_forrentE[5:6] <- c(0, NA_real_)
+native_source$vac_rentedE[c(5, 7)] <- c(0, NaN)
+native_source$med_hhincE[6] <- NA_real_
+native_source$rentE[8] <- NA_real_
+native_source$ohuE[5] <- 0
+native_source$vac_forsaleE[5] <- 0
+
+assemble_2024_tract <- function(source = native_source, counties = "037", reference = NULL) {
+  env <- new.env(parent = environment())
+  run_chunk("set-paths", env)
+  if (!is.null(counties)) env$target_counties <- counties
+  env$prior_outputs <- list(`2024_tract` = reference)
+  env$load_data <- function(path, folder = NULL, name) {
+    stopifnot(name == "acs_step1_2024_tract.feather")
+    source
+  }
+  for (chunk in c("load-restrict-2024-tract", "income-source-2024-tract",
+                  "flag-censor-2024-tract", "structure-pct-cv-2024-tract",
+                  "rental-inventory-2024-tract", "acceptance-2024-tract")) {
+    run_chunk(chunk, env)
+  }
+  env
+}
+native <- assemble_2024_tract()
+native_out <- native$acs_2024_tract
+native_before <- filter(native_source, substr(tr2020_id, 3, 5) == "037")
+stopifnot(
+  identical(native_out$tr2020_id, native_before$tr2020_id),
+  !any(c("tr2010_id", "interp_rent", "pct_miss_rent", "inventory_incomplete") %in% names(native_out)),
+  identical(native_out$rentE[1:4], c(3499, NA_real_, NA_real_, NA_real_)),
+  identical(native_out$lqcrentE[1:4], c(NA_real_, 3499, NA_real_, NA_real_)),
+  identical(native_out$tc_flag_rent[1:4], c(0, 1, 1, NA_real_)),
+  identical(native_out$m_flag_rent[1:4], c(0, 1, 1, 1)),
+  identical(native_out$zero_flag_rhu[3:5], c(1, NA_real_, 1)),
+  identical(native_out$tc_flag_med_hval[1:3], c(0, 1, 1)),
+  identical(native_out$med_hhincE, native_before$med_hhincE),
+  identical(native_out$med_hvalE, native_before$med_hvalE),
+  identical(native_out$med_hhincCV, (native_before$med_hhincM / 1.645) / native_before$med_hhincE),
+  native_out$rhu_inventoryE[3] == 15, native_out$rhu_inventoryE[5] == 0,
+  all(is.na(native_out$rhu_inventoryE[c(4, 6, 7)])),
+  native_out$rhu_inventoryE[8] == 115,
+  is.na(native_out$pctrvacE[5]), is.na(native_out$pctsvacE[5]),
+  all(native_out$mf5E == 400), all(native_out$smfE == 300), all(native_out$nsfaE == 700),
+  native_out$pctrhuE[3] == 0, native_out$rentCV[1] == (10 / 1.645) / 3499,
+  is.null(native$socal_parity_2024_tract)
+)
+pass_through <- setdiff(names(native_before), c("rentE", "lqcrentE"))
+stopifnot(identical(native_out[pass_through], native_before[pass_through]))
+all_counties_native <- assemble_2024_tract(counties = NULL)
+stopifnot(setequal(substr(all_counties_native$acs_2024_tract$tr2020_id, 3, 5),
+                   configured_env$target_counties),
+          !"06073000001" %in% all_counties_native$acs_2024_tract$tr2020_id)
+expect_error(assemble_2024_tract(bind_rows(native_source, native_source[1, ])), "missing or duplicate key")
+expect_error(assemble_2024_tract(mutate(native_source, tr2020_id = NA_character_)), "missing or duplicate key")
+expect_error(assemble_2024_tract(mutate(native_source, tr2020_id = as.numeric(tr2020_id))), "character California tract GEOIDs")
+expect_error(assemble_2024_tract(rename(native_source, tr2010_id = tr2020_id)), "tr2020_id")
+expect_error(assemble_2024_tract(select(native_source, -rent2bdrM)), "documented tract fields")
+expect_error(report_tract_counties(native_out, c("037", "001"), "Missing county", key = "tr2020_id"),
+             "missing target counties")
+expect_error(assert_tract_keys(native_out[-1, ], native_out$tr2020_id, "Membership", key = "tr2020_id"),
+             "tract membership changed")
+quiet(assert_rental_inventory(native_out, native$inventory_2024_tract[nrow(native_out):1, ],
+                               "Reordered native diagnostics", key = "tr2020_id"))
+native_parity <- assemble_2024_tract(reference = native_out)$socal_parity_2024_tract
+stopifnot(nrow(native_parity$differences) == 0L,
+          "tr2020_id" %in% names(native_parity$tracts),
+          !"tr2010_id" %in% names(native_parity$tracts))
+expect_error(assemble_2024_tract(reference = mutate(native_out, med_hhincE = med_hhincE + 1)), "parity failed")
+expect_error(assemble_2024_tract(reference = select(native_out, -rhu_inventoryE)), "column names, order, or types differ")
+expect_error(assemble_2024_tract(reference = with_24$acs_2024_bg_aggregated_interp), "column names, order, or types differ")
+cat("Passed: native tract filtering, retained source fields/income, flags, derived measures, inventory, and strict source-specific parity.\n")
+
 saved_env <- with_24
 saved_env$acs_16 <- with_16$acs_16
 saved_env$inventory_16 <- with_16$inventory_16
 saved_env$inventory_missing_sources_16 <- with_16$inventory_missing_sources_16
 saved_env$inventory_county_qa_16 <- with_16$inventory_county_qa_16
-saved_env$acs16_out <- round_trip(with_16$acs_16)
-saved_env$acs24_out <- round_trip(with_24$acs_tr10_24_interp)
-run_chunk("validate-rental-inventory-step2", saved_env)
-saved_env$acs24_out$pctrvacE[1] <- saved_env$acs24_out$pctrvacE[1] + 0.01
-expect_error(run_chunk("validate-rental-inventory-step2", saved_env), "Saving must preserve every 2024 value")
+saved_env$target_tract_ids_16 <- with_16$target_tract_ids_16
+saved_env$target_counties <- "037"
+saved_env$rent_raw_qa_16 <- tibble(county = "037", tracts = nrow(with_16$acs_16))
+for (name in ls(native, pattern = "2024_tract$")) assign(name, get(name, native), saved_env)
+validate_saved_products <- function(env) {
+  directory <- tempfile("step2-synthetic-")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE))
+  env$data_dir <- paste0(directory, "/")
+  for (chunk in c("save-16", "save-2024-bg-aggregated", "save-2024-tract")) run_chunk(chunk, env)
+  stopifnot(setequal(list.files(directory), c("acs_step2_2016_tract.feather",
+                                             "acs_step2_2024_block_group_aggregated.feather",
+                                             "acs_step2_2024_tract.feather")))
+  for (chunk in c("reload-step2", "validate-keys-step2", "validate-missingness-step2",
+                  "validate-flags-step2", "validate-numeric-step2",
+                  "validate-county-rent-step2", "validate-rental-inventory-step2")) run_chunk(chunk, env)
+  env$parity_reference_dir <- file.path(directory, "references")
+  dir.create(env$parity_reference_dir)
+  run_chunk("load-parity-references", env)
+  stopifnot(identical(names(env$prior_outputs), c("16", "2024_bg_aggregated", "2024_tract")),
+            all(vapply(env$prior_outputs, is.null, logical(1))))
+  write_feather(env$acs_16, file.path(env$parity_reference_dir, "acs_step2_16.feather"))
+  write_feather(env$acs_2024_bg_aggregated_interp, file.path(env$parity_reference_dir, "acs_step2_24.feather"))
+  write_feather(env$acs_2024_tract, file.path(env$parity_reference_dir, "acs_step2_2024_tract.feather"))
+  reference_hashes <- tools::md5sum(list.files(env$parity_reference_dir, full.names = TRUE))
+  run_chunk("load-parity-references", env)
+  stopifnot(identical(env$prior_outputs[["16"]], env$acs_16),
+            identical(env$prior_outputs[["2024_bg_aggregated"]], env$acs_2024_bg_aggregated_interp),
+            identical(env$prior_outputs[["2024_tract"]], env$acs_2024_tract),
+            identical(reference_hashes, tools::md5sum(names(reference_hashes))))
+}
+validate_saved_products(saved_env)
+saved_env$acs_2024_bg_aggregated_out$pctrvacE[1] <- saved_env$acs_2024_bg_aggregated_out$pctrvacE[1] + 0.01
+expect_error(run_chunk("validate-rental-inventory-step2", saved_env), "Saving must preserve every 2024 block-group-aggregated value")
+saved_env$acs_2024_bg_aggregated_out <- saved_env$acs_2024_bg_aggregated_interp
+saved_env$acs_2024_tract_out$rent1bdrE[1] <- saved_env$acs_2024_tract_out$rent1bdrE[1] + 1
+expect_error(run_chunk("validate-rental-inventory-step2", saved_env), "Saving must preserve every 2024 tract-source value")
 cat("Passed: notebook joins, unchanged unrelated measures/allocations, and synthetic Feather validation.\n")
 
 # Fixed vintage allowlists never authorize unrelated schema or value changes.
@@ -233,8 +348,8 @@ removed_columns <- as.vector(outer(removed_measures, c("E", "M"), paste0))
 previous_16 <- without_16$acs_16 |> select(-vac_rentedE, -vac_rentedM)
 for (column in removed_columns) previous_16[[column]] <- 1
 current_16 <- with_16$acs_16
-current_24 <- with_24$acs_tr10_24_interp
-previous_24 <- without_24$acs_tr10_24_interp
+current_24 <- with_24$acs_2024_bg_aggregated_interp
+previous_24 <- without_24$acs_2024_bg_aggregated_interp
 expect_error(parity(current_16, previous_16), "output column names, order, or types differ")
 expect_error(parity(current_24, previous_24), "output column names, order, or types differ")
 audit_16 <- parity(current_16, previous_16, "2016")

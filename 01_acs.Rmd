@@ -37,7 +37,7 @@ knitr::opts_chunk$set(
 
 - `../../../data/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
 - `../../../data/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
-- `../../../data/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract, available for later assembly.
+- `../../../data/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract, consumed by the separate Step 2 tract-source path.
 - `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
 - `../../../data/xwalk_tr00_tr10.feather` — 2000 tract → 2010 tract crosswalk (weights).
 
@@ -60,12 +60,14 @@ both years; `vac_forrent` and `vac_rented` are retained in all three requests.
 This step only **imports and stores** source data; it performs no row-level
 filtering or sample restriction. Geographic harmonization (aggregating the
 2020–2024 block-group data to 2010 tracts using these crosswalks) happens in
-`02_assemble.Rmd`, which continues to use the block-group input. The new 2024
-tract input is available for later assembly. Generate the newly named inputs
+`02_assemble.Rmd`. Its separate 2024 tract-source path retains native 2020
+tracts and constructs the same direct tract measures as the 2016 path.
+Generate the newly named inputs
 from this notebook; old caches do not implement the revised variable contract.
 Existing data files are retained. Stage 2 now adds rental inventory from the
 three required estimates with explicit missingness propagation, using `wt_renthu`
-for all 2024 components. Its narrow vintage-specific schema migration permits
+for block-group components and direct sums for both tract sources. Its narrow
+schema migration for the existing 2016 and block-group products permits
 the agreed additions/removals against older parity references while retaining
 strict checks on shared columns; see [README.md](README.md). This notebook's
 extraction and storage contracts remain unchanged.
@@ -436,9 +438,9 @@ save_data(acs_bg_24, data_dir, "acs_step1_2024_block_group.feather")
 ## 5.1 Download 2024 ACS tract estimates
 
 Download the full `tract_vars` mapping, including the three bedroom-rent
-measures, for all California 2020-vintage tracts. This direct tract input is
-available for later assembly. Stage 2 continues to use the block-group input
-from §4. Expected: one row per CA 2020-vintage tract.
+measures, for all California 2020-vintage tracts. Stage 2 consumes this direct
+tract input separately from the block-group input in §4. Expected: one row per
+CA 2020-vintage tract, retained on `tr2020_id` in the tract-source assembly path.
 
 ```{r download-acs-tract-24}
 acs_trt_24 <- get_acs(geography = "tract",

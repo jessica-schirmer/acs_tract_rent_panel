@@ -270,16 +270,17 @@ calc_rental_inventory <- function(df, id, weight_col = NULL) {
 }
 
 # Validate the production inventory against its separate, keyed diagnostics.
-assert_rental_inventory <- function(df, diagnostics, label, tolerance = 1e-10) {
+assert_rental_inventory <- function(df, diagnostics, label, tolerance = 1e-10,
+                                    key = "tr2010_id") {
   for (table in list(df, diagnostics)) {
     stopifnot("Inventory validation requires unique, nonmissing tract keys" =
-                "tr2010_id" %in% names(table) && is.character(table$tr2010_id) &&
-                !anyNA(table$tr2010_id) && all(grepl("^[0-9]{11}$", table$tr2010_id)) &&
-                !anyDuplicated(table$tr2010_id))
+                key %in% names(table) && is.character(table[[key]]) &&
+                !anyNA(table[[key]]) && all(grepl("^[0-9]{11}$", table[[key]])) &&
+                !anyDuplicated(table[[key]]))
   }
   stopifnot("Inventory diagnostic and output key sets must agree" =
-              setequal(df$tr2010_id, diagnostics$tr2010_id) && nrow(df) == nrow(diagnostics))
-  diagnostics <- diagnostics[match(df$tr2010_id, diagnostics$tr2010_id), ]
+              setequal(df[[key]], diagnostics[[key]]) && nrow(df) == nrow(diagnostics))
+  diagnostics <- diagnostics[match(df[[key]], diagnostics[[key]]), ]
   incomplete <- diagnostics$inventory_incomplete
   components <- diagnostics[c("inventory_rhuE", "inventory_vac_forrentE", "inventory_vac_rentedE")]
   missing_counts <- diagnostics[c("n_missing_rhuE", "n_missing_vac_forrentE", "n_missing_vac_rentedE")]

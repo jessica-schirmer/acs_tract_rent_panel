@@ -10,9 +10,9 @@ assert_unique_key <- function(df, key, label) {
   invisible(df)
 }
 
-assert_tract_keys <- function(df, expected_ids, label) {
-  assert_unique_key(df, "tr2010_id", label)
-  if (!setequal(df$tr2010_id, expected_ids)) {
+assert_tract_keys <- function(df, expected_ids, label, key = "tr2010_id") {
+  assert_unique_key(df, key, label)
+  if (!setequal(df[[key]], expected_ids)) {
     stop(label, ": tract membership changed unexpectedly")
   }
   invisible(df)
@@ -26,10 +26,10 @@ assert_complete_tract_join <- function(df, expected_ids, label) {
   invisible(df)
 }
 
-report_tract_counties <- function(df, target_counties, label) {
-  assert_unique_key(df, "tr2010_id", label)
+report_tract_counties <- function(df, target_counties, label, key = "tr2010_id") {
+  assert_unique_key(df, key, label)
   observed <- df |>
-    transmute(state = substr(tr2010_id, 1, 2), county = substr(tr2010_id, 3, 5)) |>
+    transmute(state = substr(.data[[key]], 1, 2), county = substr(.data[[key]], 3, 5)) |>
     dplyr::count(state, county, name = "tracts")
   county_counts <- full_join(
     tibble(state = "06", county = unname(target_counties)), observed,
@@ -38,7 +38,7 @@ report_tract_counties <- function(df, target_counties, label) {
     mutate(tracts = coalesce(tracts, 0L)) |>
     arrange(state, county)
   print(county_counts, n = Inf)
-  if (!all(grepl("^06[0-9]{9}$", df$tr2010_id)) ||
+  if (!is.character(df[[key]]) || !all(grepl("^06[0-9]{9}$", df[[key]])) ||
       !setequal(observed$county, unname(target_counties))) {
     stop(label, ": missing target counties or unintended destination geography")
   }
@@ -59,7 +59,7 @@ assert_same_schema <- function(current, previous, label) {
 
 # Boundary IDs identify destination tracts receiving sources excluded by the old
 # Southern California source filter. Differences there require analyst review.
-# Optional expected_income is uniquely keyed by tr2010_id, with numeric
+# Optional expected_income is uniquely keyed by key (default tr2010_id), with numeric
 # legacy_med_hhincE, corrected_med_hhincE, legacy_med_hhincCV, and
 # corrected_med_hhincCV columns computed from uncensored inputs/reference MOEs.
 # Only income cells matching both expectations qualify for the correction.
@@ -67,7 +67,8 @@ assert_same_schema <- function(current, previous, label) {
 # Its fixed allowlist applies to additions/removals; shared columns stay strict.
 compare_socal_parity <- function(current, previous, socal_counties,
                                  boundary_ids = character(), tolerance = 1e-10,
-                                 expected_income = NULL, schema_migration = NULL) {
+                                 expected_income = NULL, schema_migration = NULL,
+                                 key = "tr2010_id") {
   if (is.null(previous)) {
     cat("PARITY NOT CHECKED: no prior output; supply parity_reference_dir.\n")
     return(invisible(NULL))
@@ -108,19 +109,19 @@ compare_socal_parity <- function(current, previous, socal_counties,
                        "Southern California parity shared columns")
   }
   shared_columns <- intersect(names(current), names(previous))
-  assert_unique_key(previous, "tr2010_id", "Prior output")
-  assert_unique_key(current, "tr2010_id", "Candidate output")
+  assert_unique_key(previous, key, "Prior output")
+  assert_unique_key(current, key, "Candidate output")
   income_columns <- c("med_hhincE", "med_hhincCV")
   if (!is.null(expected_income)) {
     expected_columns <- c(paste0("legacy_", income_columns),
                           paste0("corrected_", income_columns))
     if (!is.data.frame(expected_income) ||
-        !all(c("tr2010_id", expected_columns) %in% names(expected_income)) ||
+        !all(c(key, expected_columns) %in% names(expected_income)) ||
         anyDuplicated(names(expected_income)) ||
         !all(vapply(expected_income[expected_columns], is.numeric, logical(1)))) {
-      stop("Income expectations require tr2010_id and numeric legacy/corrected income and CV columns")
+      stop("Income expectations require ", key, " and numeric legacy/corrected income and CV columns")
     }
-    assert_unique_key(expected_income, "tr2010_id", "Income expectations")
+    assert_unique_key(expected_income, key, "Income expectations")
   }
   values_match <- function(old, new) {
     same <- (is.na(old) & is.na(new)) | (!is.na(old) & !is.na(new) & old == new)
@@ -133,26 +134,26 @@ compare_socal_parity <- function(current, previous, socal_counties,
   }
   select_socal <- function(df) {
     df |>
-      filter(substr(tr2010_id, 1, 2) == "06",
-             substr(tr2010_id, 3, 5) %in% socal_counties)
+      filter(substr(.data[[key]], 1, 2) == "06",
+             substr(.data[[key]], 3, 5) %in% socal_counties)
   }
   before <- select_socal(previous)
   after <- select_socal(current)
-  ids <- union(before$tr2010_id, after$tr2010_id)
+  ids <- union(before[[key]], after[[key]])
   tract_audit <- tibble(
-    tr2010_id = ids,
+    !!key := ids,
     allocation = if_else(ids %in% boundary_ids, "boundary", "unaffected"),
     membership = case_when(
-      ids %in% before$tr2010_id & ids %in% after$tr2010_id ~ "both",
-      ids %in% before$tr2010_id ~ "prior_only",
+      ids %in% before[[key]] & ids %in% after[[key]] ~ "both",
+      ids %in% before[[key]] ~ "prior_only",
       TRUE ~ "candidate_only"
     )
   )
-  shared_ids <- tract_audit$tr2010_id[tract_audit$membership == "both"]
-  before <- before[match(shared_ids, before$tr2010_id), , drop = FALSE]
-  after <- after[match(shared_ids, after$tr2010_id), , drop = FALSE]
-  expected_index <- match(shared_ids, expected_income$tr2010_id)
-  differences <- lapply(setdiff(shared_columns, "tr2010_id"), function(column) {
+  shared_ids <- tract_audit[[key]][tract_audit$membership == "both"]
+  before <- before[match(shared_ids, before[[key]]), , drop = FALSE]
+  after <- after[match(shared_ids, after[[key]]), , drop = FALSE]
+  expected_index <- match(shared_ids, expected_income[[key]])
+  differences <- lapply(setdiff(shared_columns, key), function(column) {
     old <- before[[column]]
     new <- after[[column]]
     changed <- which(!values_match(old, new))
@@ -164,7 +165,7 @@ compare_socal_parity <- function(current, previous, socal_counties,
         values_match(new[changed], expected_income[[paste0("corrected_", column)]][expected_rows])
     }
     tibble(
-      tr2010_id = shared_ids[changed], variable = rep(column, length(changed)),
+      !!key := shared_ids[changed], variable = rep(column, length(changed)),
       prior = as.character(old[changed]), candidate = as.character(new[changed]),
       difference = if (is.numeric(old)) new[changed] - old[changed] else rep(NA_real_, length(changed)),
       classification = case_when(
@@ -175,9 +176,9 @@ compare_socal_parity <- function(current, previous, socal_counties,
     )
   }) |>
     bind_rows() |>
-    left_join(select(tract_audit, tr2010_id, allocation), by = "tr2010_id")
+    left_join(select(tract_audit, all_of(key), allocation), by = key)
   tract_audit <- tract_audit |>
-    mutate(changed = membership != "both" | tr2010_id %in% differences$tr2010_id)
+    mutate(changed = membership != "both" | .data[[key]] %in% differences[[key]])
   summary <- tract_audit |>
     dplyr::count(allocation, membership, changed, name = "tracts")
   difference_summary <- differences |>

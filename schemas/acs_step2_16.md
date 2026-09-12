@@ -1,15 +1,19 @@
-# Schema: `acs_step2_16.feather`
+# Schema: `acs_step2_2016_tract.feather`
 
 **Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2016_tract.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
 California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
-§1.3 (`target_counties`, shared by both vintages).
+§1.3 (`target_counties`, shared by all three Step 2 products).
 **Key:** `tr2010_id` (unique, non-missing).
 
 This file is the 2012–2016 tract table restricted to those 14 counties, with
 top-code/missing/zero flags, structure-type aggregates, rental inventory, and
 share/CV measures added.
+
+The production filename replaces `acs_step2_16.feather`; existing data and
+historical parity references retain that legacy name. `03_merge.Rmd` is unchanged
+and requires a follow-up input-filename update before it consumes this output.
 
 ## Base columns
 
@@ -44,7 +48,7 @@ substitution is allowed. Missing rent, income, or source MOEs do not affect
 inventory completeness. Required estimate/MOE columns must be numeric, and
 observed contributing estimates must be finite and nonnegative.
 
-The [2024 counterpart](acs_step2_24.md#rental-inventory) allocates each of the
+The [2024 block-group counterpart](acs_step2_24.md#rental-inventory) allocates each of the
 same components with `wt_renthu`. A retained link contributes only when
 `wt_renthu > 0`; zero-weight links contribute zero and do not affect completeness.
 A target without positive-weight contributors has zero components and inventory,
@@ -55,7 +59,7 @@ Component totals (`inventory_rhuE`, `inventory_vac_forrentE`,
 `inventory_vac_rentedE`), missing-component counts, and `inventory_incomplete`
 remain in notebook diagnostics. Only the key and `rhu_inventoryE` are joined
 one-to-one onto the output, preserving its other columns and rows. Pre-save and
-reload checks in §4.6 validate keyed missingness and reconcile complete-target
+reload checks in §5.6 validate keyed missingness and reconcile complete-target
 totals separately from incomplete targets, including when inventory is absent
 from a reference. No inventory MOE/CV is added. `rhuE` and all existing rent
 denominators remain occupied-renter measures. Step 3 keeps its existing selection;
@@ -91,7 +95,11 @@ denominators remain occupied-renter measures. Step 3 keeps its existing selectio
 | `pctrhuCV`, `pctblkCV`, `pcthspCV` | numeric | CVs for the corresponding shares. |
 | `rhuCV`, `huCV`, `popCV` | numeric | CVs for renter units / housing units / population. |
 
-## Data-quality flag columns (0/1 integers)
+## Data-quality flag columns (numeric 0/1)
+
+The existing helpers store these flags as doubles. Top-code and zero flags
+retain `NA` when their source estimate is missing; missing flags are non-missing.
+This documents the existing encoding without changing it.
 
 | column pattern | description |
 |---|---|

@@ -164,13 +164,13 @@ the three Feathers were unchanged. This note is the only repository write.
 **Subsequent stage-1 migration (2026-09-12):** The audit's original
 `acs_step1_24.feather` is retained as historical data. Its current counterpart,
 `acs_step1_2024_block_group.feather`, requires regeneration for the revised
-variable contract. A separate `acs_step1_2024_tract.feather` is available for
-later assembly; stage 2 still uses block groups. This note's empirical findings
+variable contract. Stage 2 now also consumes `acs_step1_2024_tract.feather` in
+its separate native-2020 tract path. This note's empirical findings
 refer to the original cached inputs. See the [migration and parity compatibility](../README.md#stage-1-input-migration).
 
-**Subsequent Step 2 inventory implementation (2026-09-12):** Both outputs now
+**Subsequent Step 2 inventory implementation (2026-09-12):** Both original products
 add `rhu_inventoryE` from renter-occupied, vacant-for-rent, and rented-not-occupied
-estimates. All 2024 components use retained `wt_renthu` fractions; any missing
+estimates. All block-group components use retained `wt_renthu` fractions; any missing
 estimate on a positive-weight link makes inventory `NA`. Zero-weight links
 do not affect completeness, and zero-contributor targets have zero inventory.
 The occupied `rhuE` formula audited above and the separate `wt_hu` vacancy-rate
@@ -180,3 +180,6 @@ empirical findings and broader low-rent/bin suggestions above remain historical.
 The narrow parity migration reports only the agreed schema additions/removals
 and preserves shared-column checks. Synthetic tests passed; full execution,
 canonical output regeneration, and empirical inventory review remain analyst-run.
+
+The subsequently added 2024 tract-source inventory uses direct tract sums with
+the same missingness rule. See the [current output names and separate validation](../README.md#stage-2-output-naming-and-references).
