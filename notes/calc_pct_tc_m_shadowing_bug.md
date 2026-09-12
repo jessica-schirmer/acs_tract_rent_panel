@@ -46,6 +46,12 @@ in `[0, 1]`.
 
 ## Magnitudes (real `acs_step1_24` data, SCAG region)
 
+Historical filename: these magnitudes use the original `acs_step1_24.feather`
+cache. Since the 2026-09-12 stage-1 revision, its current counterpart is
+`acs_step1_2024_block_group.feather`, with a revised variable contract requiring
+regeneration. The recorded findings refer to the original input; see the
+[migration note](../README.md#stage-1-input-migration).
+
 | measure | buggy (old §2.3 printout) | corrected |
 |---|---|---|
 | `pct_m_rent` | mean **0.55**, max **8.0**, 558 tracts > 1 | mean 0.084, max 1.0 |

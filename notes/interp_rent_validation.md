@@ -38,7 +38,7 @@ rent-related columns, and ran targeted calculations in memory. It did not run
 or knit an entire notebook, download new ACS observations, or regenerate data.
 The only repository write is this note.
 
-The [configured sample](../02_assemble.Rmd#L103) is the five Southern California
+The [configured sample](../02_assemble.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
 and nine Bay Area counties, selected by **destination 2010 tract**. Of 29,740
 statewide crosswalk rows, 19,807 point to the target tracts. Following the
 notebook, one unmatched source link with all four allocation weights equal to
@@ -71,7 +71,7 @@ the missing-source-median share.
 The [2024 Census B25063 variable definitions](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html)
 confirm `rhucashE = B25063_002E`, the cash-renter total. The 24 cash-rent bins
 are `_003E` through `_026E`; `_027E` is no-cash rent and is excluded.
-[Stage 1's mapping](../01_acs.Rmd#L167) and the helper's range table match the
+[Stage 1's mapping](../01_acs.Rmd#22-specify-variables-to-extract) and the helper's range table match the
 published category order. The helper converts category suffixes to integers
 and sorts them numerically, so categories 10–24 follow category 9 correctly.
 The saved aggregation supplies exactly the 24 estimate columns, without MOEs
@@ -379,6 +379,14 @@ first numerically ordered cumulative bin reaching `rhucashE / 2`; widths and
 within-bin fractions were read/reconstructed from the unchanged helper. All
 summaries, correlations, signed differences, coverage groups, and ranks use
 the formulas and sample denominators stated above. The audit was deterministic.
+
+**Subsequent stage-1 migration (2026-09-12):** The historical
+`acs_step1_24.feather` in the table below has the current counterpart
+`acs_step1_2024_block_group.feather`, with a revised variable contract. A new
+`acs_step1_2024_tract.feather` is available for later assembly. This audit used
+the original block-group cache; filenames, hashes, and results below still
+identify those original inputs, not regenerated outputs. See the
+[migration instructions](../README.md#stage-1-input-migration).
 
 Input MD5 hashes were checked before and after the calculations and were
 unchanged. They identify the exact saved data behind this note:

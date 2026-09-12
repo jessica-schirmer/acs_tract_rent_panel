@@ -1,4 +1,4 @@
-# Schema: `acs_step1_16.feather`
+# Schema: `acs_step1_2016_tract.feather`
 
 **Produced by:** `01_acs.Rmd` (Step 1) · **Source:** 2012–2016 ACS 5-year, tract level, California (`tidycensus::get_acs`)
 
@@ -7,13 +7,22 @@
 
 ## Column conventions
 
-The table is pulled in **wide** format. Each analytic measure listed below
-appears as **two columns**:
+The full `tract_vars` mapping is shared by both tract requests: **65 aliases
+cover 62 distinct Census codes**. The table is pulled in **wide** format. Each
+distinct analytic measure appears as **two columns**:
 
 - `<name>E` — the ACS point estimate
 - `<name>M` — the 90% margin of error
 
 Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
+The three duplicate-code aliases (`grent_3`, `grent_20`, `grent_26`) stay in the
+request mapping; tidycensus returns these codes under their first aliases
+(`grentcat1`, `grentcat18`, `grentcat24`), without separate duplicate pairs.
+Requested-alias counts therefore differ from returned-column counts.
+
+All selected B25111 measures (including its total) and B25113 measures are
+removed. The three B25031 bedroom-rent pairs remain in both tract outputs;
+only the [block-group output](acs_step1_2024_block_group.md) excludes them.
 
 ## Identifier columns
 
@@ -22,7 +31,7 @@ Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
 | `tr2010_id` | character | 11-digit tract GEOID (renamed from `GEOID`). Table key. |
 | `NAME` | character | Census long name for the tract. |
 
-## Analytic measures (each present as `<name>E` and `<name>M`)
+## Analytic mapping (distinct measures returned as `<name>E` and `<name>M`)
 
 | name | census var | description |
 |---|---|---|
@@ -45,16 +54,9 @@ Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
 | `rhu` | B25003_003 | Renter-occupied housing units |
 | `ohu` | B25003_002 | Owner-occupied housing units |
 | `rent` | B25064_001 | Median gross rent (dollars) |
-| `rentmv1yr` | B25113_002 | Median gross rent, householder moved in most recent period |
-| `rentmv5yr` | B25113_003 | Median gross rent, householder moved in prior period |
 | `rent1bdr` | B25031_003 | Median gross rent, 1 bedroom |
 | `rent2bdr` | B25031_004 | Median gross rent, 2 bedrooms |
 | `rent3bdr` | B25031_005 | Median gross rent, 3 bedrooms |
-| `rentyrblt` | B25111_001 | Median gross rent by year built — total |
-| `rentyrblt_14_16` | B25111_002 | Median gross rent, built 2014 or later |
-| `rentyrblt_10_13` | B25111_003 | Median gross rent, built 2010–2013 |
-| `rentyrblt_00_09` | B25111_004 | Median gross rent, built 2000–2009 |
-| `rentyrblt_90_99` | B25111_005 | Median gross rent, built 1990–1999 |
 | `rhutot` | B25063_001 | Renter units with gross rent computed — total |
 | `rhucash` | B25063_002 | With cash rent |
 | `rhunocash` | B25063_027 | No cash rent |
@@ -73,6 +75,7 @@ Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
 | `tot_vac_base` | B25002_001 | Occupancy status — total (denominator) |
 | `tot_vac` | B25002_003 | Vacant housing units |
 | `vac_forrent` | B25004_002 | Vacant units for rent (available rental units) |
+| `vac_rented` | B25004_003 | Vacant units rented, not occupied |
 | `vac_forsale` | B25004_004 | Vacant units for sale only (available for-sale units) |
 
 ## Derived and flag columns
@@ -84,6 +87,12 @@ Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
 | `rent_id` | logical | Join flag, constant `TRUE` (marks rows sourced from an ACS rent table). |
 
 **Note on year-specific cutoffs:** `rhu_lrE` / `rhu_lr2E` use categories 1–17 /
-1–19 here; the 2024 file (`acs_step1_24.feather`) shifts these up one bin
-(1–18 / 1–20) to hold the real rent threshold roughly constant. See the decision
-blocks in `01_acs.Rmd` §3.2 and §4.2.
+1–19 here; both 2024 outputs
+([block group](acs_step1_2024_block_group.md) and [tract](acs_step1_2024_tract.md))
+shift these up one bin (1–18 / 1–20) to hold the real rent threshold roughly
+constant. See `01_acs.Rmd` §§3.2, 4.2, and 5.2.
+
+**Downstream:** Stage 2 passes through this revised schema. Older parity
+snapshots are incompatible with its removed measure pairs and added
+`vac_rentedE/M`; see the [migration and parity follow-up](../README.md#stage-1-input-migration).
+Generate this file from the revised stage 1; retain the old cache as historical data.

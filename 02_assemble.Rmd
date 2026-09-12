@@ -25,9 +25,9 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step1_24.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
+- `../../../data/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
 - `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
-- `../../../data/acs_step1_16.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
+- `../../../data/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
 - Optional prior `acs_step2_16.feather` and `acs_step2_24.feather` in
   `../../../data/parity_reference` (§1.3) — schema and Southern California parity references.
 
@@ -47,6 +47,12 @@ Both vintages use the same 14 destination counties: the five Southern California
 counties and nine Bay Area counties named in §1.3. The geographic crosswalk and
 weights come from `01_acs.Rmd`. Sources outside the target counties are retained
 where they allocate to a target 2010 tract; allocation weights are unchanged.
+
+Stage 2 continues to consume block-group data for 2024; the new
+`acs_step1_2024_tract.feather` is available for later assembly. See the
+[stage-1 input migration](README.md#stage-1-input-migration) for required
+regeneration and the unresolved strict-schema parity mismatch in the 2016
+pass-through output. Existing parity checks remain in place.
 
 # 1. Set up environment
 
@@ -146,7 +152,7 @@ names(prior_outputs) <- c("16", "24")
 
 ```{r import-bg-and-xwalk}
 # Load 2024 ACS block group data
-acs_bg_24 <- load_data(data_dir, NULL, "acs_step1_24.feather")
+acs_bg_24 <- load_data(data_dir, NULL, "acs_step1_2024_block_group.feather")
 report_n(acs_bg_24, "2024 ACS block groups loaded")
 
 # acs_bg_24 <- acs_bg_24 |>
@@ -740,7 +746,7 @@ median rent. Retained for provenance; intentionally left commented out.
 
 ```{r load-restrict-16}
 # Load 2016 ACS tract data
-acs_16 <- load_data(data_dir, NULL, "acs_step1_16.feather")
+acs_16 <- load_data(data_dir, NULL, "acs_step1_2016_tract.feather")
 report_n(acs_16, "2016 ACS tracts loaded")
 assert_unique_key(acs_16, "tr2010_id", "Statewide 2016 ACS")
 

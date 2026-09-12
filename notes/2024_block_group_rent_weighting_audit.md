@@ -1,7 +1,7 @@
 # Audit: 2024 block-group-to-tract rent weighting
 
 Reviewed 2026-09-11 at commit `b4ab25e`. Scope: the rent calculations in
-[02_assemble.Rmd](../02_assemble.Rmd#L293), starting with available ACS source
+[02_assemble.Rmd](../02_assemble.Rmd#L299), starting with available ACS source
 estimates and crosswalk allocations; earlier-vintage inspection was limited to
 conceptual comparability.
 
@@ -18,7 +18,7 @@ the source variable, `rent = B25064_001`, and its use against the earlier tract
 median. B25064's universe excludes no-cash-rent units. However, §2.5 explicitly
 chooses an average of source medians, while §2.6 calls it “weighted median rent.”
 The intended research quantity therefore needs to distinguish a tract median
-from the documented index. ([Source definitions](../schemas/acs_step1_16.md),
+from the documented index. ([Source definitions](../schemas/acs_step1_2016_tract.md),
 [Census B25064](https://data.census.gov/table/ACSDT5Y2024.B25064).)
 
 For source block group $b$ and destination tract $t$, define
@@ -70,8 +70,8 @@ contributes 25/75 units, not 100 to each tract. Original fractions are preserved
 when destinations are restricted, and pair uniqueness is asserted. `_agg`
 summary names preserve the source `rhuE` vector during calculation. Precomputed
 `rel_wt_rhu = q_bt / sum(q_bt)` is not used for `rentE` or `rentM`.
-([Allocation checks](../02_assemble.Rmd#L191),
-[weight preservation](../02_assemble.Rmd#L313).)
+([Allocation checks](../02_assemble.Rmd#L197),
+[weight preservation](../02_assemble.Rmd#L319).)
 
 **Statistical limits remain.** Medians cannot generally be combined by averaging;
 even changing to a weighted median of source medians would not recover the pooled

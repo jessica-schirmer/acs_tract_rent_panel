@@ -3,7 +3,7 @@
 **Produced by:** `01_acs.Rmd` (Step 1) · **Source:** NHGIS crosswalk `nhgis_bg2020_tr2010_06.csv`
 
 **Purpose:** allocate 2020-vintage block-group measures to 2010 census tracts.
-Used by `02_assemble.Rmd` to aggregate `acs_step1_24.feather` to the 2010-tract
+Used by `02_assemble.Rmd` to aggregate `acs_step1_2024_block_group.feather` to the 2010-tract
 grain.
 
 **Grain:** one row per (2020 block group → 2010 tract) allocation.

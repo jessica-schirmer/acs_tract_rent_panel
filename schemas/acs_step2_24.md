@@ -1,6 +1,6 @@
 # Schema: `acs_step2_24.feather`
 
-**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_24.feather` + `xwalk_bg24_tr10.feather`
+**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2024_block_group.feather` + `xwalk_bg24_tr10.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
 California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)

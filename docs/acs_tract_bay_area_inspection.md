@@ -11,6 +11,14 @@ notebooks or external/API requests were run. Checks were limited to file and
 cached-data inspection, environment inspection, and a small in-memory helper
 probe. This document records the findings from that inspection.
 
+**Subsequent stage-1 migration (2026-09-12):** The inspection below records the
+inputs and outputs as they existed on its date. Current stage 1 writes
+`acs_step1_2016_tract.feather` and `acs_step1_2024_block_group.feather` in place
+of the two historical ACS filenames, and adds `acs_step1_2024_tract.feather`.
+The variable contract also changed; old caches are retained and cannot
+substitute for newly generated inputs. Stage 2 continues to use block groups.
+See the [migration and parity follow-up](../README.md#stage-1-input-migration).
+
 1. **Current pipeline structure**
 
    | Stage | Main work and outputs |

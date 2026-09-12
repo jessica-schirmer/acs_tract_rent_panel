@@ -76,7 +76,7 @@ rename_id <- function(df, new_name, old_name) {
 #'
 #' @param df Data frame to write.
 #' @param dir Character directory path, with a trailing slash (e.g. `"../../../data/"`).
-#' @param name Character file name (e.g. `"acs_step1_16.feather"`).
+#' @param name Character file name (e.g. `"acs_step1_2016_tract.feather"`).
 #' @return Invisibly, the input `df` (after writing).
 save_data <- function(df, dir, name) {
     df |>

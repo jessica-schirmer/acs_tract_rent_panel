@@ -1,6 +1,6 @@
 # Schema: `acs_step2_16.feather`
 
-**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_16.feather`
+**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2016_tract.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
 California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
@@ -13,11 +13,19 @@ added.
 
 ## Base columns
 
-All columns from `acs_step1_16.feather` carry through — see
-`schemas/acs_step1_16.md` for the full `<name>E` / `<name>M` measure list, plus
+All columns from `acs_step1_2016_tract.feather` carry through — see
+[acs_step1_2016_tract.md](acs_step1_2016_tract.md) for the full `<name>E` / `<name>M` measure list, plus
 `tr2010_id`, `NAME`, `rhu_lrE`, `rhu_lr2E`, and `rent_id`. Note that `rentE` and
 `lqcrentE` are **censored** here: values `>= 3500` are set to `NA` (top-code
 removal). See the §2.4 / §3.2 decision blocks in the notebook.
+
+The revised input removes `rentmv1yr`, `rentmv5yr`, `rentyrblt`,
+`rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, and `rentyrblt_90_99`
+(each estimate/MOE pair), and adds `vac_rentedE/M` (B25004_003, rented, not
+occupied). These pass-through changes also apply to this output; the three
+bedroom-rent pairs remain. Existing strict schema parity against older
+snapshots will fail. Parity compatibility is a follow-up, and the checks are
+preserved; see the [stage-1 migration](../README.md#stage-1-input-migration).
 
 ## Added structure-type aggregates
 
