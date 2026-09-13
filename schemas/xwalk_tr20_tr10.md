@@ -84,7 +84,13 @@ After selecting consistent rows, join native-2020 2024 ACS measures on
 `tr2020_id`, then corresponding 2016 ACS measures on the explicit `tr2010_id`.
 Both IDs are unique within the consistent subset. This stage does not merge ACS
 measures, allocate changed tracts, or restrict to the Step 2 target counties.
-The existing Step 4 panel does not yet consume this crosswalk.
+Step 4 consumes this crosswalk in a notebook-only diagnostic copy of the full
+2010 panel. It collapses only agreeing status/class records for retained 2010
+keys and leaves unresolved panel statuses missing. Because merge/many-to-many
+partner IDs are omitted, a complete five-class 2010-panel classification cannot
+be recovered from this file. Census measurement comparisons use only consistent
+pairs, including pairs with different GEOIDs; native-2020 coverage retains all
+five classes. Canonical values and the saved panel schema are unchanged.
 
 The notebook reports source path, size, and MD5 for provenance; source/pair and
 tract counts; consistent count/percentage; class counts; zero-land relationships;

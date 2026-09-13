@@ -9,10 +9,11 @@ California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_a
 **Key:** `tr2010_id` (unique, non-missing).
 
 The production filename replaces `acs_step2_24.feather`; existing data and
-historical parity references retain that legacy name. `04_merge.Rmd` is unchanged
-and requires a follow-up input-filename update before it consumes this output.
+historical parity references retain that legacy name. `04_merge.Rmd` consumes
+this current filename as its canonical 2024 source and for separate diagnostics.
 The separate [2024 tract-source product](acs_step2_2024_tract.md) retains
-`tr2020_id`; it is not compared with this product.
+`tr2020_id`; Step 4 compares its measurements with this product only on
+geographically consistent links, without changing canonical source selection.
 
 Selection is by destination tract county. All source block groups contributing
 through the crosswalk are retained, including sources outside the target
@@ -94,8 +95,8 @@ These checks apply independently when a reference lacks inventory or is absent.
 retain strict order, type, and value checks, including existing income and
 geographic rules. The default `schema_migration = NULL` and save/reload schema
 checks remain strict. Missing references remain **parity not checked**.
-Step 4 keeps its current selection and panel contract; `rhuPOST` still measures
-occupied-renter change.
+Step 4 keeps its current canonical selection and panel contract, with inventory
+comparisons only in notebook diagnostics; `rhuPOST` still measures occupied-renter change.
 
 ## Aggregated medians/means (weighted means)
 

@@ -65,12 +65,11 @@ The two 2024 products are processed separately, without comparison or geographic
 reconciliation. `xwalk_tr00_tr10.feather` is not an input here.
 See the [stage-1 input migration](README.md#stage-1-input-migration) for required
 regeneration and the narrow schema compatibility used with older references
-(§1.4). `04_merge.Rmd` is unchanged and still reads the legacy
-`acs_step2_16.feather` / `acs_step2_24.feather` filenames. Updating those two
-input references to the renamed 2016 and block-group outputs is deferred;
-existing legacy files are retained and are not refreshed by this notebook.
-The new 2024 tract product is separate from that panel. No inventory MOE or CV
-is introduced.
+(§1.4). `04_merge.Rmd` consumes the current 2016 and block-group output names for
+its existing canonical panel, and all three products for notebook-only inventory
+and consistent-pair source/change diagnostics. Existing legacy files are retained
+and are not refreshed by this notebook. Census tract measures do not yet enter
+the canonical saved panel. No inventory MOE or CV is introduced.
 
 # 1. Set up environment
 
@@ -699,7 +698,7 @@ cor(acs_2024_bg_aggregated_interp$interp_rent, acs_2024_bg_aggregated_interp$ren
 **Output:** `acs_step2_2024_block_group_aggregated.feather` — 2020–2024 ACS measures aggregated to 2010
 tracts (Southern California + Bay Area), including `rhu_inventoryE`. It replaces
 the production filename `acs_step2_24.feather`; the legacy file is retained.
-`04_merge.Rmd` requires a separate input-filename update to consume this output.
+`04_merge.Rmd` consumes this filename for its canonical 2024 measures and diagnostics.
 
 Before writing, assert county containment/coverage and keyed inventory
 completeness, component totals, and range. Compare every shared output column
@@ -1045,8 +1044,8 @@ print(inventory_reconciliation_16, width = Inf)
 **Output:** `acs_step2_2016_tract.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area),
 including `rhu_inventoryE` and the revised Step 1 pass-through columns. It
 replaces the production filename `acs_step2_16.feather`; the legacy file is
-retained. `04_merge.Rmd` requires a separate input-filename update to consume
-this output.
+retained. `04_merge.Rmd` consumes this filename for its canonical baseline and
+separate inventory diagnostics.
 
 All previously included Southern California 2016 records must retain parity
 on shared columns except individually verified income/CV corrections from §3.2.

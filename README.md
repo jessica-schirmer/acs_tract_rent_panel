@@ -19,7 +19,7 @@ target counties, with the original NHGIS fractions (no renormalization).
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
 02_assemble.Rmd - aggregate 2020-2024 block groups to 2010 tracts; prepare 2016 and 2024 tract-source measures separately; construct rental inventory with explicit missingness, data flags, and uncertainty measures for all three products
 03_tract_change.Rmd - characterize statewide 2010–2020 tract intersections and save a 2020-tract crosswalk identifying exact geographic consistency
-04_merge.Rmd - import 2024 ACS measures aggregated to 2010 tracts and merge w/ 2016 ACS measures; calculate change variables; save ACS tract panel
+04_merge.Rmd - build the existing 2010-tract panel from revised 2016 and 2024 block-group inputs; compare Census tract measurements on consistent links and rental inventory in notebook diagnostics; optionally save the canonical panel
 
 
 
@@ -127,8 +127,8 @@ Inventory is validated independently before saving and after reloading even
 when absent from a reference. Save/reload schema checks remain strict for every
 column. Preserve all reference snapshots; a missing reference remains **parity
 not checked**. The removed source measures have no direct downstream calculation
-references. Step 4 keeps its existing selection and panel contract, so `rhuPOST`
-remains occupied-renter change.
+references. Step 4 keeps its existing canonical selection and panel contract,
+with inventory in separate notebook diagnostics; `rhuPOST` remains occupied-renter change.
 
 
 ## Step 2: Assemble 2016 tract and separate 2024 block-group/tract measures
@@ -183,7 +183,8 @@ for vacancy rates; inventory's diagnostic vacancy components use **`wt_renthu`**
 Occupied-renter counts and rent denominators, cash/low-rent/bin measures,
 censoring, income, other weights, flags, MOEs, and CVs keep their calculations.
 No inventory MOE/CV is added. The 2000-to-2010 tract crosswalk remains outside
-Step 2's input contract. The two 2024 products are not compared or reconciled.
+Step 2's input contract. The two 2024 products are not compared or reconciled in
+Step 2; Step 4 compares their measurements on geographically consistent links.
 
 ### Stage-2 output naming and references
 
@@ -254,7 +255,8 @@ is selected. The tract zero-land flag covers any associated zero-land-area pair.
 For later ACS comparison, select `geo_consistent == 1`, join the native-2020
 2024 product using `tr2020_id`, then the 2016 product using `tr2010_id`. This
 stage does not merge ACS measures or impose Step 2's county selection. Step 4
-does not yet consume this crosswalk. The differently structured historical
+consumes the crosswalk for geographic coverage and consistent-pair diagnostics;
+it does not select canonical measurements using these flags. The differently structured historical
 `tract_change.feather` is preserved.
 
 Targeted validation uses `Rscript --vanilla tests/test_tract_change.R` for
@@ -287,38 +289,68 @@ regional/county reconciliation, full-source reverse counts, the `matrixStats`
 masking case, and the actual notebook save/reload chunks replacing an existing
 temporary Feather.
 
-## Step 4: Create ACS panel, calculate change variables
+## Step 4: Create ACS panel and compare revised measurement sources
 Script: `04_merge.Rmd`
 
-**Deferred filename update:** Renumbering preserves this notebook's logic; it still reads the
-legacy input names below. Before using newly generated Step 2 outputs, update
-its 2016 input to `acs_step2_2016_tract.feather` and its 2024 input to
-`acs_step2_2024_block_group_aggregated.feather`. Existing legacy files may be
-stale after assembly. The new native-2020 tract product does not enter this panel.
+The notebook reads all three current Step 2 products and the Step 3 crosswalk.
+Canonical 2024 measures still use the block-group source; Census tract measures,
+inventory, and geographic flags enter separate notebook diagnostics. Hierarchical
+source selection and availability fallback are deferred until diagnostic review.
 
 Inputs:
-- `../../../data/acs_step2_16.feather` — 2012-2016 ACS tract measures (Southern California + Bay Area).
-- `../../../data/acs_step2_24.feather` — 2020-2024 ACS tract measures (Southern California + Bay Area), aggregated to 2010 tracts.
-- Existing `../../../data/acs_full.feather`, if present — column/type reference.
+- `../../../data/acs_step2_2016_tract.feather` — 2012-2016 ACS measures on `tr2010_id`.
+- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020-2024 block-group measures aggregated to `tr2010_id`.
+- `../../../data/acs_step2_2024_tract.feather` — Census-reported 2020-2024 tract measures on native `tr2020_id`.
+- `../../../data/xwalk_tr20_tr10.feather` — statewide geographic-consistency flags and explicit links on `tr2020_id`.
+- Existing `../../../data/acs_full.feather`, if saving is enabled and the file is present — column/type reference.
 
 Outputs:
-- `../../../data/acs_full.feather` — the ACS tract panel: 2016 and 2024 measures (2016 dollars inflation-adjusted to 2024) side by side on `tr2010_id`, with change ("POST") ratios and their coefficients of variation.
+- Notebook-only `acs_diagnostics`, geographic coverage/unmatched keys, source level/change comparisons, and inventory comparisons; no diagnostic Feather or new output contract.
+- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, block-group 2024 measures, level-change ratios, share/rate differences, and existing CVs. `write_panel <- FALSE` is the default.
 
 Schema:
 - `schemas/acs_full.md`
 
 Steps:
-1. Set up environment (packages, `R/merge_helpers.R` and `R/geography_qa.R`, data directory, prior panel schema reference)
-2. Import and prepare the 2020-2024 and 2012-2016 tract measures (rename with year suffix, select, inflation-adjust 2016 dollars to 2024)
-3. Merge the two surveys (full join on tr2010_id, keep all tracts) and calculate change variables — level ratios (`*POST`) for dollar/count measures and percentage-point differences (`*PPC`) for share/rate measures (renter-occupied share, vacancy rates) — plus CVs, then save the panel
-4. Validate output (key union and one-period-only membership from original input keys, county coverage, missingness, flag encoding, numeric distributions)
+1. Set up environment (existing packages and canonical/geographic helpers, `R/merge_diagnostics.R`, `here::here()` data path, optional-write control)
+2. Import and prepare all three ACS sources (native-key/county checks, explicit diagnostic source names, existing canonical selection, inflation-adjust 2016 dollars)
+3. Merge 2016 and block-group 2024 surveys (full join on `tr2010_id`, keep all tracts), retaining existing `*POST`, `*PPC`, and CV calculations
+4. Review geographic coverage (validate crosswalk encodings, attach available statuses and consistent links to the diagnostic panel, report native/panel denominators and unmatched keys)
+5. Compare 2024 sources and implied changes (diagnostic only): median `rentE` and `rhu_inventoryE`, overall/by consistency, with full-denominator coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
+6. Compare occupied renter units and rental inventory (diagnostic only): all three native input products, then inventory vs. occupied-renter change for the full block-group panel and consistent Census pairs
+7. Validate the panel and optionally save (key union, unchanged canonical values, missingness, flags, numeric distributions; strict schema and saved-value checks when writing is enabled)
+
+**Geographic diagnostic eligibility:** the analyst selected only
+`geo_consistent == 1` for paired source/change comparisons, using the explicit
+2010 and 2020 keys even when the GEOIDs differ. Available statuses are attached
+without dropping panel tracts; repeated split links must agree before reducing
+them to one status record. Merge/many-to-many 2010 partners are absent from the
+crosswalk, so unresolved panel statuses remain `NA`. Native 2020 coverage reports
+all five classes; missing panel mappings are not reclassified as inconsistent.
+Alignment coverage distinguishes no consistent link, no Census source record,
+and a missing estimate within an existing source record.
+
+Change diagnostics retain the established 2024/positive-2016 ratio definition,
+using inflation-adjusted rent and each count concept's own baseline. The saved
+`rhuPOST` remains occupied-renter change. Inventory-minus-occupied counts and
+inventory/occupied ratios use the documented Step 2 estimates directly; shares
+with inventory below occupied units use paired observations as denominator.
+Undefined ratios/correlations and empty-group summaries are `NA`. No inventory
+MOE/CV, geographic allocation, or changed-boundary measurement pairing is added.
+
+Run `Rscript --vanilla tests/test_merge_diagnostics.R` for synthetic geography,
+missingness/denominator cases, actual notebook chunks using temporary inputs,
+canonical-column preservation, and guarded save/reload checks. An analyst can run
+all diagnostics with writing disabled. Enable `write_panel <- TRUE` in setup and
+rerun from there only when the existing canonical panel should be written;
+replacement is announced and schema validation remains strict.
 
 Analyst validation of assembly and the panel (after regenerating the revised stage-1 inputs):
 
 - The earlier geographic extension alone used cached statewide inputs. With
   the revised stage-1 contract, generate the new inputs first, then validate
-  stage 2 with the source-specific parity rules above. Stage 4 also needs the
-  deferred input-filename update before panel validation. Focused checks run with
+  stage 2 with the source-specific parity rules above. Stage 4 consumes those
+  revised filenames and the Step 3 crosswalk. Assembly checks run with
   `Rscript tests/test_rental_inventory.R` and `Rscript tests/test_income_censoring.R`.
   They exercise synthetic inventory, both tract keys, configured county coverage,
   native-2020 tract flags/derived measures/income retention, strict/narrow parity,
@@ -370,12 +402,19 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   Incomplete targets remain separately reported. §5.6 repeats inventory checks
   after reloading and verifies all saved values, original allocation pairs/weights,
   and occupied-count reconciliation.
-- Inspect `panel_membership`/`saved_panel_membership` for one-period-only tracts;
+- Inspect `panel_membership`/`validated_panel_membership` and, after an enabled write,
+  `saved_panel_membership` for one-period-only tracts;
   these use original input keys, independently of the output's constant `base_id`.
   Shared column names/order/types are checked against prior Step 2 files when
   available, with only the allowed migration; panel and save/reload schema
-  checks remain strict. The panel filename is unchanged; the Step 2 filenames
-  and deferred consumer update are documented above.
+  checks remain strict. The panel filename/schema are unchanged; new geographic,
+  inventory, and source-comparison fields remain in notebook diagnostics.
+- Review `geography_coverage`, `geography_unmatched`, `alignment_coverage`, and
+  `native_tract_measure_coverage` before interpreting paired results. Inspect
+  `source_level_diagnostics`, `source_change_diagnostics`, `baseline_coverage`,
+  `inventory_level_diagnostics`, and `inventory_change_diagnostics` for coverage,
+  undefined denominators, discrepancies, and inventory below occupied units.
+  Missingness shares use full labeled universes; no empirical threshold is imposed.
 
 Income is retained independently of missing or top-coded rent, following the
 analyst decision; see the [income correction and acceptance checks](notes/income_censoring.md).

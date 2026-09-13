@@ -25,29 +25,41 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step2_16.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area).
-- `../../../data/acs_step2_24.feather` — 2020–2024 ACS tract measures (Southern California + Bay Area), aggregated to 2010 tracts.
-- Existing `../../../data/acs_full.feather`, if present — column/type reference read before saving.
+- `../../../data/acs_step2_2016_tract.feather` — 2012–2016 ACS measures on `tr2010_id`.
+- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 block-group measures aggregated to `tr2010_id`.
+- `../../../data/acs_step2_2024_tract.feather` — Census-reported 2020–2024 tract measures on native `tr2020_id`.
+- `../../../data/xwalk_tr20_tr10.feather` — statewide geographic-consistency flags and explicit tract links, keyed by `tr2020_id`.
+- Existing `../../../data/acs_full.feather`, if saving is enabled and the file is present — column/type reference read before saving.
 
 **Outputs:**
 
-- `../../../data/acs_full.feather` — the ACS tract panel: 2016 and 2024 measures
+- Notebook-only `acs_diagnostics`, geographic coverage, source/change comparisons,
+  and inventory comparisons; no diagnostic data files are written.
+- Optional `../../../data/acs_full.feather` — the existing ACS tract panel: 2016 and block-group-aggregated 2024 measures
   (2016 dollars inflation-adjusted to 2024) side by side on `tr2010_id`, with
   change measures (level `*POST` ratios and share/rate `*PPC` percentage-point
-  differences) and their coefficients of variation.
+  differences) and their coefficients of variation. `write_panel <- FALSE` is
+  the default; the diagnostic workflow does not require a canonical output write.
 
 This notebook:
 
 1. Set up environment
 2. Import and prepare survey measures
 3. Merge surveys and calculate change variables
-4. Validate outputs
+4. Review geographic coverage
+5. Compare 2024 sources and implied changes (diagnostic only)
+6. Compare occupied renter units and rental inventory (diagnostic only)
+7. Validate the panel and optionally save
 
 This step only **merges** existing tract measures and derives change variables;
-both inputs already use the 14 destination counties configured and validated in
+all three ACS inputs already use the 14 counties configured and validated in
 `02_assemble.Rmd`, so no further sample restriction happens here. This notebook
-inherits county coverage from the 2016 input and checks that the 2024 input and
-full panel agree. County definitions remain centralized in stage 2.
+inherits county coverage from the 2016 input and checks both 2024 inputs on their
+native keys and the full panel. County definitions remain centralized in stage 2.
+Paired Census-vs-block-group comparisons use only geographically consistent
+links, including consistent pairs with different GEOIDs. This restricts paired
+diagnostic eligibility, not panel membership. Canonical 2024 values continue to
+come from block groups; hierarchical selection and availability fallback are deferred.
 
 # 1. Set up environment
 
@@ -74,58 +86,93 @@ renaming/selection, inflation adjustment, and the change-variable functions —
 live in `R/merge_helpers.R`. That file is self-contained for this notebook (its
 `merge_df()` differs from the one used by `02_assemble.Rmd`).
 Shared geographic, key, and schema diagnostics live in `R/geography_qa.R`.
+Diagnostic joins, geographic coverage, and paired summaries live in
+`R/merge_diagnostics.R`; they do not change the canonical helpers.
 
 ```{r load-helpers}
 source(here::here("R", "merge_helpers.R"))
 source(here::here("R", "geography_qa.R"))
+source(here::here("R", "merge_diagnostics.R"))
 ```
 
-## 1.3 Set data directory
+## 1.3 Set data directory and optional output write
+
+Leave `write_panel <- FALSE` to run through all diagnostics and validate the
+in-memory canonical panel. Setting it to `TRUE` explicitly enables the existing
+canonical save path, with schema comparison and announced replacement. Diagnostic
+fields never enter that file.
 
 ```{r set-paths}
-# Trailing slash is intentional: save_data() builds paths with paste0().
-data_dir <- "../../../data/"
+data_dir <- here::here("..", "..", "..", "data")
+write_panel <- FALSE
 prior_panel_path <- file.path(data_dir, "acs_full.feather")
-prior_panel <- if (file.exists(prior_panel_path)) arrow::read_feather(prior_panel_path) else NULL
+prior_panel <- if (isTRUE(write_panel) && file.exists(prior_panel_path)) {
+  arrow::read_feather(prior_panel_path)
+} else NULL
 ```
 
 # 2. Import and prepare survey measures
 
-## 2.1 Load and prepare 2020–2024 measures
+## 2.1 Load and prepare 2020–2024 block-group-aggregated measures
 
-Load the assembled 2024 tract measures, suffix their variables with `_24`, and
+Load the 2024 block-group-aggregated measures, suffix canonical variables with `_24`, and
 keep the analytic variable set plus a few extra quality/derived columns
 (`pct_miss_rent`, `pct_tc_rent`, `pct_miss_hval`, `tc_flag_rent_24`, `interp_rent`).
 `pct_tc_rent` is the top-coded portion of `pct_miss_rent` (see §2.3/§2.6 of
 `02_assemble.Rmd`). The analytic set now also carries the renamed multifamily count
 `mf5E`, the non-single-family-attached count `nsfaE`, and the rental / for-sale
 vacancy rates `pctrvacE` / `pctsvacE` (added to `rename_vars()` so they get the
-year suffix).
+year suffix). Preserve `rentE`, `rhuE`, and `rhu_inventoryE` separately with
+`_24_bg_agg` suffixes for diagnostics before the canonical selection drops inventory.
 
-```{r prep-24}
+```{r prep-24-bg-agg}
 # # Load 2005-2009 ACS data
 # rent_09 <- load_data(data_dir, NULL, "acs_09_step2.feather")
 
 # Load 2020-2024 ACS data
-acs_24 <- load_data(data_dir, NULL, "acs_step2_24.feather")
-report_n(acs_24, "2024 tract measures loaded")
-assert_unique_key(acs_24, "tr2010_id", "2024 panel input")
-input_keys_24 <- acs_24$tr2010_id
+acs_24_bg_agg <- load_data(data_dir, NULL, "acs_step2_2024_block_group_aggregated.feather")
+report_n(acs_24_bg_agg, "2024 block-group-aggregated measures loaded")
+assert_merge_measures(acs_24_bg_agg, "tr2010_id", "2024 block-group panel input")
+input_keys_24_bg_agg <- acs_24_bg_agg$tr2010_id
+acs_24_bg_agg_diagnostic <- acs_24_bg_agg |>
+  select(tr2010_id, rentE, rhuE, rhu_inventoryE) |>
+  rename_with(~ paste0(.x, "_24_bg_agg"), -tr2010_id)
 
 # Rename variables
-acs_24 <- rename_vars(acs_24, "24")
+acs_24_bg_agg <- rename_vars(acs_24_bg_agg, "24")
 
 # Select variables
 # var_list <- c("pct_miss_rent", "pct_tc_rent")
 # var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent", "interp_rentCV", "interp_rentM")
 var_list <- c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent")
-acs_24 <- select_vars(acs_24, "24", var_list)
+acs_24_bg_agg <- select_vars(acs_24_bg_agg, "24", var_list)
 
 # Apply inflation adjustment
 # n/a
 ```
 
-## 2.2 Load and prepare 2012–2016 measures
+## 2.2 Load Census-reported 2020–2024 tract measures
+
+This source retains native 2020 geography and the documented post-censoring
+`rentE`, occupied-renter `rhuE`, and `rhu_inventoryE`. These measures are kept
+under explicit `_24_tract` names for diagnostics. Census tract `rentE` is a
+direct median; the block-group counterpart is a weighted mean of block-group
+medians. Use the upstream estimates without changing censoring or substituting
+the separate interpolated-rent measure.
+
+```{r prep-24-tract}
+acs_24_tract <- load_data(data_dir, NULL, "acs_step2_2024_tract.feather")
+report_n(acs_24_tract, "2024 Census tract measures loaded")
+assert_merge_measures(acs_24_tract, "tr2020_id", "2024 Census tract input")
+input_keys_24_tract <- acs_24_tract$tr2020_id
+acs_24_tract_diagnostic <- acs_24_tract |>
+  select(tr2020_id, rentE, rhuE, rhu_inventoryE) |>
+  rename_with(~ paste0(.x, "_24_tract"), -tr2020_id)
+assert_tract_keys(acs_24_tract_diagnostic, input_keys_24_tract,
+                  "Prepared Census tract diagnostics", key = "tr2020_id")
+```
+
+## 2.3 Load and prepare 2012–2016 measures
 
 ### Decision: Inflation-adjust 2016 dollars to 2024 dollars
 
@@ -141,14 +188,18 @@ all items) to adjust 2016 dollars to 2024 dollars. Factor = 313.689 / 240.007 �
 
 ```{r prep-16}
 # Load 2012-2016 ACS data
-acs_16 <- load_data(data_dir, NULL, "acs_step2_16.feather")
+acs_16 <- load_data(data_dir, NULL, "acs_step2_2016_tract.feather")
 report_n(acs_16, "2016 tract measures loaded")
-assert_unique_key(acs_16, "tr2010_id", "2016 panel input")
+assert_merge_measures(acs_16, "tr2010_id", "2016 panel input")
 input_keys_16 <- acs_16$tr2010_id
+acs_16_diagnostic <- acs_16 |>
+  select(tr2010_id, rentE, rhuE, rhu_inventoryE) |>
+  rename_with(~ paste0(.x, "_16"), -tr2010_id)
 panel_counties <- sort(unique(substr(input_keys_16, 3, 5)))
 stopifnot("Run stage 2 with all 14 configured counties before merging" = length(panel_counties) == 14L)
 report_tract_counties(acs_16, panel_counties, "2016 input counties (validated in stage 2)")
-report_tract_counties(acs_24, panel_counties, "2024 input counties")
+report_tract_counties(acs_24_bg_agg, panel_counties, "2024 block-group destination counties")
+report_tract_counties(acs_24_tract, panel_counties, "2024 Census tract counties", key = "tr2020_id")
 
 # Rename variables
 acs_16 <- rename_vars(acs_16, "16")
@@ -162,13 +213,15 @@ acs_16 <- select_vars(acs_16, "16", var_list)
 summary(acs_16$rentE_16)
 acs_16 <- infl_adj_vars(acs_16, "16")
 summary(acs_16$rentE_16)
+stopifnot(identical(acs_16_diagnostic$tr2010_id, acs_16$tr2010_id))
+acs_16_diagnostic$rentE_16 <- acs_16$rentE_16
 
 # table(acs_16$m_flag1_16, useNA="ifany")
 ```
 
 # 3. Merge surveys and calculate change variables
 
-## 3.1 Merge 2016 and 2024 tract measures
+## 3.1 Merge 2016 and block-group-aggregated 2024 measures
 
 ### Decision: Keep all tracts (full join, not inner join)
 
@@ -178,7 +231,7 @@ out. Tracts present in only one period keep `NA` for the other period's measures
 change variables (§3.2) are guarded so they are `NA` when a base value is
 missing or zero. There is therefore **no row-dropping filter** in this notebook.
 
-Membership is audited against `input_keys_16` and `input_keys_24`, captured on
+Membership is audited against `input_keys_16` and `input_keys_24_bg_agg`, captured on
 import. The expected panel key set is their union, with one row per tract.
 `panel_membership` reports every one-period-only tract and county-level counts.
 The output's existing constant-`TRUE` `base_id` is preserved as part of its
@@ -187,24 +240,24 @@ schema; it is not used to infer presence in the earlier survey.
 ```{r merge-surveys}
 # Merge post rent data
 n_16 <- nrow(acs_16)
-n_24 <- nrow(acs_24)
+n_24_bg_agg <- nrow(acs_24_bg_agg)
 assert_tract_keys(acs_16, input_keys_16, "Prepared 2016 input")
-assert_tract_keys(acs_24, input_keys_24, "Prepared 2024 input")
-acs_16_24 <- merge_df(acs_16, acs_24)
-table(acs_16_24$merge)
-panel_membership <- audit_panel_keys(acs_16_24, input_keys_16, input_keys_24)
-cat(sprintf("Merged %s (2016) and %s (2024) tracts -> %s panel rows\n",
+assert_tract_keys(acs_24_bg_agg, input_keys_24_bg_agg, "Prepared 2024 block-group input")
+acs_16_24_bg_agg <- merge_df(acs_16, acs_24_bg_agg)
+table(acs_16_24_bg_agg$merge)
+panel_membership <- audit_panel_keys(acs_16_24_bg_agg, input_keys_16, input_keys_24_bg_agg)
+cat(sprintf("Merged %s (2016) and %s (2024 block-group) tracts -> %s panel rows\n",
             formatC(n_16, format = "d", big.mark = ","),
-            formatC(n_24, format = "d", big.mark = ","),
-            formatC(nrow(acs_16_24), format = "d", big.mark = ",")))
+            formatC(n_24_bg_agg, format = "d", big.mark = ","),
+            formatC(nrow(acs_16_24_bg_agg), format = "d", big.mark = ",")))
 
 # Keep all
-acs_16_24 <- acs_16_24 |>
+acs_16_24_bg_agg <- acs_16_24_bg_agg |>
   # dplyr::filter(merge=="both") |>
   select(-c(merge)) |>
   mutate(base_id=TRUE)
 
-acs_full <- acs_16_24
+acs_full <- acs_16_24_bg_agg
 
 # # Merge pre- baseline rent data
 # rent_full <- full_join(rent_16_24, rent_09,
@@ -267,28 +320,7 @@ summary(acs_full$pctsvacPPC)
 acs_full <- calc_cv_change_vars (acs_full)
 ```
 
-## 3.3 Save the ACS tract panel
-
-**Output:** `acs_full.feather` — the ACS tract panel feeding the downstream
-analysis stages.
-
-```{r save-panel}
-report_n(acs_full, "ACS tract panel to save")
-audit_panel_keys(acs_full, input_keys_16, input_keys_24)
-report_tract_counties(acs_full, panel_counties, "Final panel destination counties")
-if (!is.null(prior_panel)) {
-  assert_same_schema(acs_full, prior_panel, "Panel schema versus prior output")
-} else {
-  cat("Prior panel schema comparison not checked: no existing acs_full.feather.\n")
-}
-
-# Save file
-cat("Writing/replacing", file.path(data_dir, "acs_full.feather"), "\n")
-acs_full %>%
-  arrow::write_feather(paste0(data_dir, "acs_full.feather"))
-```
-
-## 3.4 Summarize coefficients of variation
+## 3.3 Summarize coefficients of variation
 
 Quick reliability check: CV distributions for the level and change measures.
 
@@ -322,21 +354,295 @@ summary(acs_full$med_hhincCV_24)
 print("Summary Stats: CV, Median income change")
 summary(acs_full$med_hhincPOSTCV)
 
-cor(acs_full$interp_rentPOST, acs_full$rentPOST, use = "complete.obs")
-# correlation between interpolated rent change and weighed median rent change is .88
+diagnostic_correlation(acs_full$interp_rentPOST, acs_full$rentPOST)
 ```
 
-# 4. Validate outputs
+# 4. Review geographic coverage
 
-Re-loads the saved panel and checks key uniqueness, missingness on critical
-variables, the encoding of the flag columns, and the distribution of every
-numeric column.
+## 4.1 Load and validate geographic-consistency links
 
-```{r reload-panel}
-acs_out <- arrow::read_feather(paste0(data_dir, "acs_full.feather"))
+### Decision: Pair measurements only across exactly consistent geography
+
+The analyst selected consistent pairs for source/change comparisons. The
+crosswalk's non-missing double `geo_consistent` uses 0/1; `relationship_class`
+uses `consistent`, `one_to_one_changed`, `split`, `merge`, and `many_to_many`.
+Use those upstream classifications without redefining consistency. The explicit
+2010 link, rather than equal GEOID text, aligns a consistent pair.
+
+A split repeats a 2010 key. Collapse only agreeing status/class records before
+attaching status to the panel; do not choose a split's Census measurement.
+Merge/many-to-many records omit their 2010 partners, so this product cannot fully
+classify the 2010 panel. Unresolved panel status remains `NA`, not zero or an
+inferred class. Counts for all five classes are available on native 2020 tracts.
+
+```{r load-geography}
+tract_geography <- load_data(data_dir, NULL, "xwalk_tr20_tr10.feather")
+report_n(tract_geography, "Statewide 2020-tract geographic-consistency input")
+geography_links <- prepare_merge_geography(tract_geography)
+print(table(tract_geography$geo_consistent, useNA = "ifany"))
+print(table(tract_geography$relationship_class, useNA = "ifany"))
 ```
 
-## 4.1 Check key uniqueness and duplicates
+## 4.2 Attach statuses and source-specific diagnostic measures
+
+`acs_diagnostics` is the full canonical panel plus notebook-only status and
+source-specific columns. Every join below must preserve its 2010 keys and rows.
+Only consistent links supply `tr2020_id` and Census measures. A missing Census
+value may therefore reflect no eligible link, an absent source record, or a
+missing estimate in an existing record; coverage tables distinguish these cases.
+
+```{r build-diagnostic-panel}
+acs_diagnostics <- merge_diagnostic_left_join(
+  acs_full, geography_links$statuses, "tr2010_id", "Attach available panel statuses"
+)
+acs_diagnostics <- merge_diagnostic_left_join(
+  acs_diagnostics, geography_links$consistent, "tr2010_id", "Attach consistent Census links"
+)
+acs_diagnostics <- merge_diagnostic_left_join(
+  acs_diagnostics, select(acs_16_diagnostic, tr2010_id, rhu_inventoryE_16),
+  "tr2010_id", "Attach 2016 diagnostic inventory"
+)
+acs_diagnostics <- merge_diagnostic_left_join(
+  acs_diagnostics, acs_24_bg_agg_diagnostic, "tr2010_id", "Attach block-group diagnostic measures"
+)
+acs_diagnostics <- merge_diagnostic_left_join(
+  acs_diagnostics, acs_24_tract_diagnostic, "tr2020_id", "Attach consistent Census measures"
+) |>
+  mutate(
+    in_16 = tr2010_id %in% input_keys_16,
+    in_24_bg_agg = tr2010_id %in% input_keys_24_bg_agg,
+    in_24_tract = tr2020_id %in% input_keys_24_tract,
+    geo_status = case_when(geo_consistent == 1 ~ "consistent",
+                           geo_consistent == 0 ~ "not_consistent", .default = NA_character_)
+  )
+assert_tract_keys(acs_diagnostics, union(input_keys_16, input_keys_24_bg_agg),
+                  "Full diagnostic panel")
+stopifnot("Canonical columns must remain identical" =
+            identical(select(acs_diagnostics, all_of(names(acs_full))), acs_full))
+
+acs_24_tract_geography <- merge_diagnostic_left_join(
+  acs_24_tract_diagnostic,
+  select(tract_geography, tr2020_id, geo_consistent, relationship_class),
+  "tr2020_id", "Native Census tract coverage", left_key = "tr2020_id"
+)
+```
+
+## 4.3 Report native and panel coverage separately
+
+Each class/status share uses all rows in its labeled universe. Panel class
+counts for merge/many-to-many cannot be recovered from the omitted 2010 IDs;
+their displayed zeros do not establish absence. `status_missing` records remain
+in the denominator. Target crosswalk summaries use 2020 county membership and
+do not alter statewide links or panel membership.
+
+```{r geography-coverage}
+target_tract_geography <- tract_geography |>
+  filter(substr(tr2020_id, 3, 5) %in% panel_counties)
+report_n(target_tract_geography, "Target-county native 2020 crosswalk (coverage only)")
+geography_coverage <- list(
+  statewide_crosswalk = summarize_merge_geography(tract_geography, "Statewide 2020 crosswalk"),
+  target_crosswalk = summarize_merge_geography(target_tract_geography, "Target-county 2020 crosswalk"),
+  census_input = summarize_merge_geography(acs_24_tract_geography, "2024 Census input, native 2020 keys"),
+  full_panel = summarize_merge_geography(acs_diagnostics, "Full 2010 panel, partially resolved statuses")
+)
+walk(geography_coverage, function(result) {
+  print(result$classes, n = Inf, width = Inf)
+  print(result$status, n = Inf, width = Inf)
+})
+
+geography_unmatched <- list(
+  panel_without_status = anti_join(select(acs_full, tr2010_id), geography_links$statuses, by = "tr2010_id"),
+  statuses_outside_panel = anti_join(geography_links$statuses, acs_full, by = "tr2010_id"),
+  census_without_crosswalk = anti_join(acs_24_tract_diagnostic, tract_geography, by = "tr2020_id"),
+  target_crosswalk_without_census = anti_join(target_tract_geography, acs_24_tract_diagnostic, by = "tr2020_id"),
+  consistent_panel_without_census = acs_diagnostics |>
+    filter(geo_consistent == 1, !in_24_tract) |> select(tr2010_id, tr2020_id),
+  consistent_census_outside_panel = geography_links$consistent |>
+    semi_join(acs_24_tract_diagnostic, by = "tr2020_id") |>
+    anti_join(acs_full, by = "tr2010_id")
+)
+iwalk(geography_unmatched, function(rows, label) {
+  report_n(rows, paste("Unmatched:", label))
+  print(head(rows, 20), width = Inf)
+})
+cat("Complete unmatched-key tables are retained in geography_unmatched; up to 20 rows shown above.\n")
+
+alignment_coverage <- imap_dfr(
+  diagnostic_groups(acs_diagnostics, "geo_status", c("consistent", "not_consistent")),
+  function(mask, group) {
+    x <- acs_diagnostics[mask, ]
+    tibble(group = group, n_total = nrow(x),
+           n_no_consistent_link = sum(is.na(x$tr2020_id)),
+           n_consistent_link_without_census = sum(!is.na(x$tr2020_id) & !x$in_24_tract),
+           n_census_record = sum(x$in_24_tract),
+           n_census_rent_missing_in_record = sum(x$in_24_tract & is.na(x$rentE_24_tract)),
+           n_census_inventory_missing_in_record = sum(x$in_24_tract & is.na(x$rhu_inventoryE_24_tract)),
+           n_bg_record_absent = sum(!x$in_24_bg_agg))
+  }
+)
+stopifnot(with(alignment_coverage,
+               all(n_no_consistent_link + n_consistent_link_without_census + n_census_record == n_total)))
+print(alignment_coverage, n = Inf, width = Inf)
+
+native_tract_measure_coverage <- summarize_diagnostic_measures(
+  acs_24_tract_geography, c("rentE_24_tract", "rhu_inventoryE_24_tract"),
+  "relationship_class", merge_relationship_classes
+)
+print(native_tract_measure_coverage, n = Inf, width = Inf)
+```
+
+# 5. Compare 2024 sources and implied changes (diagnostic only)
+
+## 5.1 Compare median rent and rental inventory levels
+
+The full panel is the denominator for overall and geographic-status coverage.
+Source summaries use each source's available values; paired differences and
+correlations use both observed values on consistent links. Census values on
+unpaired changed geography remain available in the native-source coverage table
+in §4.3. A zero paired count outside consistent geography means the comparison
+is unavailable, not that the native Census measure is missing.
+
+For every comparison, `x` is the first measure and `y` the second:
+`difference = x - y`, `absolute_difference = abs(x - y)`, and `ratio = x / y`
+only where `y > 0`. Here x is Census tract and y is block-group aggregated.
+The ratio equals 1 at agreement. The returned `values` tables retain tract keys;
+`coverage` and `summaries` report counts and distributions without complete-case
+filtering. Correlation is Pearson on paired observations and is `NA` for fewer
+than two pairs or a constant measure. Empty/all-missing summaries are `NA`.
+
+```{r compare-source-levels}
+source_level_diagnostics <- list(
+  rent = compare_diagnostic_measures(acs_diagnostics, "rentE_24_tract", "rentE_24_bg_agg",
+                                     "geo_status", c("consistent", "not_consistent")),
+  inventory = compare_diagnostic_measures(acs_diagnostics, "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg",
+                                          "geo_status", c("consistent", "not_consistent"))
+)
+walk(source_level_diagnostics, function(result) {
+  print(result$coverage, n = Inf, width = Inf)
+  print(result$summaries, n = Inf, width = Inf)
+})
+```
+
+## 5.2 Compare implied 2016-to-2024 change ratios
+
+### Decision: Preserve the established level-change definition in diagnostics
+
+Diagnostic rent, inventory, and occupied-renter changes are 2024/2016 ratios,
+defined only for positive observed baselines. Rent uses the same already-adjusted
+2016 dollars as canonical `rentPOST`; counts receive no inflation adjustment.
+Each concept uses its own 2016 baseline. No diagnostic ratio replaces a canonical
+change variable, and no inventory MOE/CV is constructed.
+
+```{r diagnostic-change-vars}
+acs_diagnostics <- acs_diagnostics |>
+  mutate(
+    diag_rentPOST_24_tract = diagnostic_ratio(rentE_24_tract, rentE_16),
+    diag_rentPOST_24_bg_agg = diagnostic_ratio(rentE_24_bg_agg, rentE_16),
+    diag_rhu_inventoryPOST_24_tract = diagnostic_ratio(rhu_inventoryE_24_tract, rhu_inventoryE_16),
+    diag_rhu_inventoryPOST_24_bg_agg = diagnostic_ratio(rhu_inventoryE_24_bg_agg, rhu_inventoryE_16),
+    diag_rhuPOST_24_tract = diagnostic_ratio(rhuE_24_tract, rhuE_16),
+    diag_rhuPOST_24_bg_agg = diagnostic_ratio(rhuE_24_bg_agg, rhuE_16)
+  )
+baseline_coverage <- imap_dfr(
+  diagnostic_groups(acs_diagnostics, "geo_status", c("consistent", "not_consistent")),
+  function(mask, group) {
+    map_dfr(c("rentE_16", "rhu_inventoryE_16", "rhuE_16"), function(measure) {
+      x <- acs_diagnostics[[measure]][mask]
+      tibble(group = group, measure = measure, n_total = length(x),
+             n_base_missing = sum(is.na(x)), n_base_nonpositive = sum(x <= 0, na.rm = TRUE),
+             n_base_positive = sum(x > 0, na.rm = TRUE))
+    })
+  }
+)
+stopifnot(with(baseline_coverage, all(n_base_missing + n_base_nonpositive + n_base_positive == n_total)))
+print(baseline_coverage, n = Inf, width = Inf)
+source_change_diagnostics <- list(
+  rent = compare_diagnostic_measures(acs_diagnostics, "diag_rentPOST_24_tract", "diag_rentPOST_24_bg_agg",
+                                     "geo_status", c("consistent", "not_consistent")),
+  inventory = compare_diagnostic_measures(acs_diagnostics, "diag_rhu_inventoryPOST_24_tract", "diag_rhu_inventoryPOST_24_bg_agg",
+                                          "geo_status", c("consistent", "not_consistent"))
+)
+walk(source_change_diagnostics, function(result) {
+  print(result$coverage, n = Inf, width = Inf)
+  print(result$summaries, n = Inf, width = Inf)
+})
+```
+
+# 6. Compare occupied renter units and rental inventory (diagnostic only)
+
+## 6.1 Compare concepts within each native source and vintage
+
+`rhuE` is renter-occupied units (B25003_003). `rhu_inventoryE` also includes vacant
+for rent (B25004_002) and rented, not occupied (B25004_003). The tract products add
+these estimates directly; block-group inventory allocates each with `wt_renthu`
+and propagates any missing positive-weight contribution. Do not reconstruct
+inventory from the block-group output's housing-weighted vacancy fields.
+
+Each table uses its entire native input as denominator, including all 2024 Census
+tracts regardless of geographic consistency. Here x is inventory and y is
+occupied renter units. `n_x_below_y` and `share_x_below_y` report inventory below
+occupied units; the share denominator is `n_paired`. Such observations are flagged
+for review without changing either measure. Ratio exclusions include occupied
+counts of zero; zero-baseline observations still enter differences and paired counts.
+
+```{r compare-inventory-levels}
+inventory_level_diagnostics <- list(
+  tract_2016 = compare_diagnostic_measures(acs_16_diagnostic, "rhu_inventoryE_16", "rhuE_16"),
+  bg_agg_2024 = compare_diagnostic_measures(acs_24_bg_agg_diagnostic, "rhu_inventoryE_24_bg_agg", "rhuE_24_bg_agg"),
+  tract_2024 = compare_diagnostic_measures(acs_24_tract_diagnostic, "rhu_inventoryE_24_tract", "rhuE_24_tract")
+)
+iwalk(inventory_level_diagnostics, function(result, label) {
+  cat("Native input:", label, "\n")
+  print(result$coverage, n = Inf, width = Inf)
+  print(result$summaries, n = Inf, width = Inf)
+  if (any(result$coverage$n_x_below_y > 0)) {
+    cat("REVIEW: inventory below occupied renter units; inspect this result's values table.\n")
+  }
+})
+```
+
+## 6.2 Compare inventory change with occupied-renter change
+
+Compare the two concepts' change ratios using the full panel for block-group
+2024 measures and separately the consistent subset for Census 2024 measures.
+The full-panel source-change coverage in §5.2 retains information about all
+excluded/unavailable Census comparisons. Here x is inventory change and y is
+occupied-renter change; differences are differences between ratios, not changes
+in unit counts or percentage-point changes. The canonical `rhuPOST` continues
+to measure occupied-renter change.
+
+```{r compare-inventory-changes}
+consistent_diagnostics <- acs_diagnostics |> filter(geo_consistent == 1)
+report_n(consistent_diagnostics, "Consistent subset for Census concept-change diagnostics only")
+inventory_change_diagnostics <- list(
+  bg_agg_full_panel = compare_diagnostic_measures(
+    acs_diagnostics, "diag_rhu_inventoryPOST_24_bg_agg", "diag_rhuPOST_24_bg_agg"),
+  tract_consistent = compare_diagnostic_measures(
+    consistent_diagnostics, "diag_rhu_inventoryPOST_24_tract", "diag_rhuPOST_24_tract")
+)
+walk(inventory_change_diagnostics, function(result) {
+  print(result$coverage, n = Inf, width = Inf)
+  print(result$summaries, n = Inf, width = Inf)
+})
+```
+
+# 7. Validate the panel and optionally save
+
+Validate the in-memory panel and diagnostic invariants before the optional save.
+The default run does not read an old saved panel as if it were the current result.
+
+```{r validation-panel}
+acs_out <- acs_full
+assert_tract_keys(acs_diagnostics, acs_full$tr2010_id, "Diagnostic panel retains all canonical keys")
+stopifnot("Diagnostic work must preserve every canonical column and value" =
+            identical(select(acs_diagnostics, all_of(names(acs_full))), acs_full),
+          "Block-group diagnostic rent change must agree with canonical rentPOST" =
+            isTRUE(all.equal(acs_diagnostics$diag_rentPOST_24_bg_agg, acs_full$rentPOST)),
+          "Block-group diagnostic occupied change must agree with canonical rhuPOST" =
+            isTRUE(all.equal(acs_diagnostics$diag_rhuPOST_24_bg_agg, acs_full$rhuPOST)))
+```
+
+## 7.1 Check key uniqueness and duplicates
 
 Expected: the panel is unique on `tr2010_id`.
 
@@ -344,12 +650,11 @@ Expected: the panel is unique on `tr2010_id`.
 cat("acs_full:", nrow(acs_out), "rows |",
     n_distinct(acs_out$tr2010_id), "unique tr2010_id |",
     sum(duplicated(acs_out$tr2010_id)), "duplicate ids\n")
-saved_panel_membership <- audit_panel_keys(acs_out, input_keys_16, input_keys_24)
-report_tract_counties(acs_out, panel_counties, "Saved panel destination counties")
-assert_same_schema(acs_out, acs_full, "Saved panel schema")
+validated_panel_membership <- audit_panel_keys(acs_out, input_keys_16, input_keys_24_bg_agg)
+report_tract_counties(acs_out, panel_counties, "In-memory panel destination counties")
 ```
 
-## 4.2 Check missingness on critical variables
+## 7.2 Check missingness on critical variables
 
 Expected: no missing `tr2010_id`. Missingness in the change ratios reflects
 tracts present in only one period or with a non-positive base value; we report
@@ -361,14 +666,18 @@ cat("acs_full missing rentE_16:     ", sum(is.na(acs_out$rentE_16)), "\n")
 cat("acs_full missing rentE_24:     ", sum(is.na(acs_out$rentE_24)), "\n")
 cat("acs_full missing rentPOST:     ", sum(is.na(acs_out$rentPOST)), "\n")
 cat("acs_full missing interp_rentPOST:", sum(is.na(acs_out$interp_rentPOST)), "\n")
+print(summarize_diagnostic_measures(
+  acs_diagnostics, c("rentE_24_tract", "rentE_24_bg_agg", "rhu_inventoryE_16",
+                     "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg")
+), n = Inf, width = Inf)
 ```
 
-## 4.3 Check flag-variable encoding
+## 7.3 Check flag-variable encoding
 
 The data-quality / change flags (`m_flag_*`, `zero_flag_*`, `tc_flag_*`) should
-be 0/1 integers, not string labels. The `base_id` / `post_id` columns are
+be numeric 0/1 (existing double storage), not string labels. The `base_id` / `post_id` columns are
 join indicators (logical) and are reported for transparency. `base_id` is
-constant `TRUE`; the input-key audit in §4.1 determines survey membership.
+constant `TRUE`; the input-key audit in §7.1 determines survey membership.
 
 ```{r validate-flags-panel}
 flag_cols <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs_out), value = TRUE)
@@ -380,7 +689,7 @@ cat("acs_full base_id class:", class(acs_out$base_id),
     "| post_id class:", class(acs_out$post_id), "\n")
 ```
 
-## 4.4 Summarize numeric variable distributions
+## 7.4 Summarize numeric variable distributions
 
 Mean, min, and max for every numeric column in the panel. Watch for impossible
 values (negative counts, change ratios far from a plausible range, or shares
@@ -388,4 +697,44 @@ outside [0, 1]).
 
 ```{r validate-numeric-panel}
 print_numeric_summary(acs_out, "acs_full")
+```
+
+## 7.5 Optionally save and validate the canonical output
+
+Only the existing canonical columns in `acs_full` are eligible for saving. Set
+`write_panel <- TRUE` in §1.3 and rerun from setup to enable a write after reviewing
+diagnostics. Existing schema checks remain strict; a missing prior reference is
+reported as not checked. Replacement is announced. The reload branch runs only
+after this run writes the file, and verifies keys, schema, and every saved value.
+
+```{r save-panel}
+panel_written <- FALSE
+if (isTRUE(write_panel)) {
+  report_n(acs_full, "Canonical ACS tract panel to save")
+  audit_panel_keys(acs_full, input_keys_16, input_keys_24_bg_agg)
+  report_tract_counties(acs_full, panel_counties, "Final panel destination counties")
+  if (!is.null(prior_panel)) {
+    assert_same_schema(acs_full, prior_panel, "Panel schema versus prior output")
+  } else {
+    cat("Prior panel schema comparison not checked: no existing acs_full.feather at setup.\n")
+  }
+  cat("Writing/replacing", file.path(data_dir, "acs_full.feather"), "\n")
+  arrow::write_feather(acs_full, file.path(data_dir, "acs_full.feather"))
+  panel_written <- TRUE
+} else {
+  cat("Canonical write disabled: validated in-memory panel; no output replaced.\n")
+}
+```
+
+```{r reload-panel}
+if (isTRUE(panel_written)) {
+  acs_saved <- arrow::read_feather(file.path(data_dir, "acs_full.feather"))
+  saved_panel_membership <- audit_panel_keys(acs_saved, input_keys_16, input_keys_24_bg_agg)
+  report_tract_counties(acs_saved, panel_counties, "Saved panel destination counties")
+  assert_same_schema(acs_saved, acs_full, "Saved panel schema")
+  stopifnot("Saved panel values must agree with the validated in-memory panel" =
+              isTRUE(all.equal(acs_saved, acs_full)))
+} else {
+  cat("Reload skipped: this run did not write a canonical panel.\n")
+}
 ```

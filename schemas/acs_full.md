@@ -1,12 +1,19 @@
 # Schema: `acs_full.feather`
 
-**Produced by:** `04_merge.Rmd` (Step 4) · **Source:** `acs_step2_16.feather` + `acs_step2_24.feather`
+**Produced by:** `04_merge.Rmd` (Step 4, optional write) · **Source:** `acs_step2_2016_tract.feather` + `acs_step2_2024_block_group_aggregated.feather`
 
-These remain Step 4's current input filenames. Step 2 now writes
-`acs_step2_2016_tract.feather` and `acs_step2_2024_block_group_aggregated.feather`;
-the consumer filename update is deferred and legacy files are not refreshed.
-The separate `acs_step2_2024_tract.feather` product uses native 2020 tracts and
-does not enter this panel. See the [output migration](../README.md#stage-2-output-naming-and-references).
+Step 4 consumes the current Step 2 filenames; preserved legacy files are not
+refreshed or used as substitutes. It additionally loads
+`acs_step2_2024_tract.feather` and `xwalk_tr20_tr10.feather` for notebook-only
+coverage and consistent-pair diagnostics. Canonical `_24` measures still use
+the block-group source. Inventory, geographic status, native 2020 keys, and
+diagnostic change variables do not enter this saved schema; hierarchical
+selection and availability fallback are deferred.
+
+`write_panel <- FALSE` is the notebook default. Validation uses the in-memory
+panel; writing and reloading require explicit enablement. Enabled writes retain
+strict prior-schema comparison, announced replacement, and saved-value checks.
+See the [Step 4 diagnostic workflow](../README.md#step-4-create-acs-panel-and-compare-revised-measurement-sources).
 
 **Grain:** one row per 2010-vintage tract in the five Southern California plus
 nine Bay Area counties configured in [02_assemble.Rmd](../02_assemble.Rmd) §1.3
