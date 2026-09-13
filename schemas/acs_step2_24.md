@@ -10,10 +10,12 @@ California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_a
 
 The production filename replaces `acs_step2_24.feather`; existing data and
 historical parity references retain that legacy name. `04_merge.Rmd` consumes
-this current filename as its canonical 2024 source and for separate diagnostics.
-The separate [2024 tract-source product](acs_step2_2024_tract.md) retains
-`tr2020_id`; Step 4 compares its measurements with this product only on
-geographically consistent links, without changing canonical source selection.
+this current filename for canonical 2024 measurements where `geo_consistent == 0`
+and for source-specific diagnostics. The separate [2024 tract-source
+product](acs_step2_2024_tract.md) retains `tr2020_id` and supplies canonical values
+where `geo_consistent == 1`. Selection copies whole measurement bundles with no
+availability fallback; unresolved geographic flags leave canonical values missing.
+Paired source comparisons still use only consistent links.
 
 Selection is by destination tract county. All source block groups contributing
 through the crosswalk are retained, including sources outside the target
@@ -95,8 +97,11 @@ These checks apply independently when a reference lacks inventory or is absent.
 retain strict order, type, and value checks, including existing income and
 geographic rules. The default `schema_migration = NULL` and save/reload schema
 checks remain strict. Missing references remain **parity not checked**.
-Step 4 keeps its current canonical selection and panel contract, with inventory
-comparisons only in notebook diagnostics; `rhuPOST` still measures occupied-renter change.
+Step 4 carries canonical inventory levels and `rhu_inventoryPOST`, separately
+from occupied-renter `rhuPOST`. Its retained `pct_miss_rent`, `pct_tc_rent`,
+`pct_miss_hval`, and interpolated-rent companions remain explicitly block-group
+diagnostics/alternatives on all rows; they do not describe selected Census
+measurement quality. See the [panel schema](acs_full.md).
 
 ## Aggregated medians/means (weighted means)
 

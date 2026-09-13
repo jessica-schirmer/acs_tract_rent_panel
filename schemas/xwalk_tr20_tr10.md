@@ -84,13 +84,19 @@ After selecting consistent rows, join native-2020 2024 ACS measures on
 `tr2020_id`, then corresponding 2016 ACS measures on the explicit `tr2010_id`.
 Both IDs are unique within the consistent subset. This stage does not merge ACS
 measures, allocate changed tracts, or restrict to the Step 2 target counties.
-Step 4 consumes this crosswalk in a notebook-only diagnostic copy of the full
-2010 panel. It collapses only agreeing status/class records for retained 2010
+Step 4 attaches this crosswalk to the full 2010 panel before selecting
+canonical 2024 measurement bundles and calculating changes. It collapses only agreeing status/class records for retained 2010
 keys and leaves unresolved panel statuses missing. Because merge/many-to-many
 partner IDs are omitted, a complete five-class 2010-panel classification cannot
 be recovered from this file. Census measurement comparisons use only consistent
 pairs, including pairs with different GEOIDs; native-2020 coverage retains all
-five classes. Canonical values and the saved panel schema are unchanged.
+five classes. Canonical values use Census tracts for `geo_consistent == 1`
+and block-group aggregates for `geo_consistent == 0`, with no availability
+fallback. Missing/unrecognized numeric flags assign no source and leave
+canonical 2024 values missing without dropping rows. Step 4 reports unexpected
+class labels without overriding a valid flag, and rejects contradictory known
+classifications or invalid links. The flag, available class, consistent-link
+2020 key, and selected-source label enter the [panel schema](acs_full.md).
 
 The notebook reports source path, size, and MD5 for provenance; source/pair and
 tract counts; consistent count/percentage; class counts; zero-land relationships;

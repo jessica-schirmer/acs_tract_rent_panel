@@ -209,14 +209,13 @@ audit_panel_keys <- function(df, keys_16, keys_24) {
   if ("merge" %in% names(df) && !identical(df$merge, audit$membership)) {
     stop("Panel merge indicators disagree with original input keys")
   }
-  for (yr in c("16", "24")) {
-    absent <- !audit[[paste0("in_", yr)]]
-    measures <- df[absent, endsWith(names(df), paste0("_", yr)), drop = FALSE]
-    if (!all(is.na(measures))) stop("Nonmissing measures for absent ", yr, " input keys")
-  }
+  # Canonical 2024 availability is checked against the selected source in
+  # assert_hierarchical_2024(); block-group membership alone cannot establish it.
+  measures_16 <- df[!audit$in_16, endsWith(names(df), "_16"), drop = FALSE]
+  if (!all(is.na(measures_16))) stop("Nonmissing measures for absent 16 input keys")
   change_columns <- grepl("POST$|POSTCV$|PPC$", names(df)) & !startsWith(names(df), "m_flag_")
-  if (!all(is.na(df[!(audit$in_16 & audit$in_24), change_columns, drop = FALSE]))) {
-    stop("Change measures must be missing for one-period-only tracts")
+  if (!all(is.na(df[!audit$in_16, change_columns, drop = FALSE]))) {
+    stop("Change measures must be missing for absent 2016 baselines")
   }
   print(audit |>
           mutate(county = substr(tr2010_id, 3, 5)) |>

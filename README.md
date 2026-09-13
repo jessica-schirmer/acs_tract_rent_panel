@@ -19,7 +19,7 @@ target counties, with the original NHGIS fractions (no renormalization).
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
 02_assemble.Rmd - aggregate 2020-2024 block groups to 2010 tracts; prepare 2016 and 2024 tract-source measures separately; construct rental inventory with explicit missingness, data flags, and uncertainty measures for all three products
 03_tract_change.Rmd - characterize statewide 2010–2020 tract intersections and save a 2020-tract crosswalk identifying exact geographic consistency
-04_merge.Rmd - build the existing 2010-tract panel from revised 2016 and 2024 block-group inputs; compare Census tract measurements on consistent links and rental inventory in notebook diagnostics; optionally save the canonical panel
+04_merge.Rmd - retain the 2016/block-group 2024 key union, select canonical 2024 bundles by geographic consistency, calculate changes including separate rental inventory change, retain source comparisons, and optionally save the panel
 
 
 
@@ -127,8 +127,8 @@ Inventory is validated independently before saving and after reloading even
 when absent from a reference. Save/reload schema checks remain strict for every
 column. Preserve all reference snapshots; a missing reference remains **parity
 not checked**. The removed source measures have no direct downstream calculation
-references. Step 4 keeps its existing canonical selection and panel contract,
-with inventory in separate notebook diagnostics; `rhuPOST` remains occupied-renter change.
+references. Step 4 selects canonical 2024 bundles by geography and adds separate inventory
+levels/change; `rhuPOST` remains occupied-renter change.
 
 
 ## Step 2: Assemble 2016 tract and separate 2024 block-group/tract measures
@@ -255,8 +255,8 @@ is selected. The tract zero-land flag covers any associated zero-land-area pair.
 For later ACS comparison, select `geo_consistent == 1`, join the native-2020
 2024 product using `tr2020_id`, then the 2016 product using `tr2010_id`. This
 stage does not merge ACS measures or impose Step 2's county selection. Step 4
-consumes the crosswalk for geographic coverage and consistent-pair diagnostics;
-it does not select canonical measurements using these flags. The differently structured historical
+uses this crosswalk for canonical source selection, geographic coverage, and
+consistent-pair diagnostics. Missing panel mappings remain unresolved. The differently structured historical
 `tract_change.feather` is preserved.
 
 Targeted validation uses `Rscript --vanilla tests/test_tract_change.R` for
@@ -293,9 +293,12 @@ temporary Feather.
 Script: `04_merge.Rmd`
 
 The notebook reads all three current Step 2 products and the Step 3 crosswalk.
-Canonical 2024 measures still use the block-group source; Census tract measures,
-inventory, and geographic flags enter separate notebook diagnostics. Hierarchical
-source selection and availability fallback are deferred until diagnostic review.
+Canonical 2024 estimates and their uncertainty/quality bundles use Census tract
+values for `geo_consistent == 1` and block-group aggregates for `geo_consistent == 0`.
+Missing or unrecognized flags leave the source and canonical values missing;
+all panel rows remain. A missing selected estimate, source record, MOE, CV, or
+flag is never filled from the alternative source. Selection precedes the single
+set of canonical change calculations.
 
 Inputs:
 - `../../../data/acs_step2_2016_tract.feather` — 2012-2016 ACS measures on `tr2010_id`.
@@ -305,20 +308,20 @@ Inputs:
 - Existing `../../../data/acs_full.feather`, if saving is enabled and the file is present — column/type reference.
 
 Outputs:
-- Notebook-only `acs_diagnostics`, geographic coverage/unmatched keys, source level/change comparisons, and inventory comparisons; no diagnostic Feather or new output contract.
-- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, block-group 2024 measures, level-change ratios, share/rate differences, and existing CVs. `write_panel <- FALSE` is the default.
+- Notebook-only `acs_diagnostics`, geographic coverage/unmatched keys, source level/change comparisons, and inventory comparisons; no diagnostic Feather is written.
+- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, selected 2024 measures, level-change ratios, share/rate differences, existing CVs, separate inventory levels/change, and geographic/source/quality fields. `write_panel <- FALSE` is the default.
 
 Schema:
 - `schemas/acs_full.md`
 
 Steps:
 1. Set up environment (existing packages and canonical/geographic helpers, `R/merge_diagnostics.R`, `here::here()` data path, optional-write control)
-2. Import and prepare all three ACS sources (native-key/county checks, explicit diagnostic source names, existing canonical selection, inflation-adjust 2016 dollars)
-3. Merge 2016 and block-group 2024 surveys (full join on `tr2010_id`, keep all tracts), retaining existing `*POST`, `*PPC`, and CV calculations
-4. Review geographic coverage (validate crosswalk encodings, attach available statuses and consistent links to the diagnostic panel, report native/panel denominators and unmatched keys)
+2. Import and prepare survey measures (all three native sources and their bundles, county/key checks, 2016 inflation adjustment, geographic crosswalk validation)
+3. Merge surveys, select canonical 2024 measures, and calculate changes (original full-join key union, explicit consistent links, geography-selected bundles, existing change/CV formulas, separate inventory ratio)
+4. Review geographic coverage and source-selection QA (native/panel denominators, unmatched keys, source counts/shares, missing/unexpected flags, canonical missingness, exact bundle equality)
 5. Compare 2024 sources and implied changes (diagnostic only): median `rentE` and `rhu_inventoryE`, overall/by consistency, with full-denominator coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
 6. Compare occupied renter units and rental inventory (diagnostic only): all three native input products, then inventory vs. occupied-renter change for the full block-group panel and consistent Census pairs
-7. Validate the panel and optionally save (key union, unchanged canonical values, missingness, flags, numeric distributions; strict schema and saved-value checks when writing is enabled)
+7. Validate the panel and optionally save (key union, source-aware changes, missingness, flags, distributions; fixed schema-addition allowlist and strict shared-schema/saved-value checks)
 
 **Geographic diagnostic eligibility:** the analyst selected only
 `geo_consistent == 1` for paired source/change comparisons, using the explicit
@@ -330,6 +333,23 @@ all five classes; missing panel mappings are not reclassified as inconsistent.
 Alignment coverage distinguishes no consistent link, no Census source record,
 and a missing estimate within an existing source record.
 
+**Canonical inventory and source-specific companions:** the panel includes
+`rhu_inventoryE_16`, `rhu_inventoryE_24`, `rhu_inventoryPOST`, and
+`m_flag_rhu_inventoryPOST`. Inventory adds vacant for rent and rented, not
+occupied units to occupied renters; it uses the saved upstream estimate directly,
+with no inventory MOE/CV. `acs_source_24`, `geo_consistent`, `relationship_class`,
+and the consistent-link `tr2020_id` provide provenance. Relevant 2024 quality
+flags follow the selected source; unavailable aggregate censoring flags remain missing.
+
+The analyst chose to keep `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
+under their existing names and values as block-group diagnostics, including on
+Census-selected/unresolved rows. They do not describe selected Census quality;
+downstream quality rules remain unchanged. `interp_rent` and `interp_rentPOST`
+remain a block-group-specific alternative because the tract product supplies no
+interpolated counterpart. The original `post_id` continues to mean block-group
+input membership: a retained 2016 tract may receive Census values and changes
+through a consistent link despite lacking a block-group record.
+
 Change diagnostics retain the established 2024/positive-2016 ratio definition,
 using inflation-adjusted rent and each count concept's own baseline. The saved
 `rhuPOST` remains occupied-renter change. Inventory-minus-occupied counts and
@@ -340,10 +360,13 @@ MOE/CV, geographic allocation, or changed-boundary measurement pairing is added.
 
 Run `Rscript --vanilla tests/test_merge_diagnostics.R` for synthetic geography,
 missingness/denominator cases, actual notebook chunks using temporary inputs,
-canonical-column preservation, and guarded save/reload checks. An analyst can run
+whole-bundle selection, no-fallback cases in both directions, canonical changes,
+inventory, schema migration, and guarded save/reload checks. An analyst can run
 all diagnostics with writing disabled. Enable `write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
-replacement is announced and schema validation remains strict.
+replacement is announced. Only documented hierarchy/inventory/flag additions
+are permitted against a prior panel; shared column order/types and saved-value
+checks remain strict. No prior reference is reported as not checked.
 
 Analyst validation of assembly and the panel (after regenerating the revised stage-1 inputs):
 
@@ -407,8 +430,14 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   these use original input keys, independently of the output's constant `base_id`.
   Shared column names/order/types are checked against prior Step 2 files when
   available, with only the allowed migration; panel and save/reload schema
-  checks remain strict. The panel filename/schema are unchanged; new geographic,
-  inventory, and source-comparison fields remain in notebook diagnostics.
+  checks remain strict. The panel filename and key union are unchanged; its schema
+  adds documented geography/provenance, selected-source quality flags, and inventory
+  levels/change. Source-comparison fields remain in notebook diagnostics.
+- Review `source_selection_qa` for assigned-source counts/shares, missing and
+  unexpected geographic flags, and canonical missingness. Every mapped bundle
+  must pass `hierarchy_equality`; inspect median-rent/inventory cases with missing
+  selected values and observed alternatives. Review inventory and rent changes
+  alongside final key uniqueness, row counts, and the saved schema.
 - Review `geography_coverage`, `geography_unmatched`, `alignment_coverage`, and
   `native_tract_measure_coverage` before interpreting paired results. Inspect
   `source_level_diagnostics`, `source_change_diagnostics`, `baseline_coverage`,

@@ -61,8 +61,17 @@ stopifnot(sum(geo_summary$classes$n_tracts) == 7,
           sum(geo_summary$status$share) == 1)
 expect_error(prepare_merge_geography(bind_rows(xwalk, xwalk[1, ])), "duplicate key")
 expect_error(prepare_merge_geography(mutate(xwalk, geo_consistent = as.character(geo_consistent))), "encoding")
-expect_error(prepare_merge_geography(mutate(xwalk, geo_consistent = replace(geo_consistent, 1, NA))), "encoding")
-expect_error(prepare_merge_geography(mutate(xwalk, relationship_class = replace(relationship_class, 1, "near_match"))), "encoding")
+unknown <- mutate(xwalk, geo_consistent = replace(geo_consistent, c(1, 2), c(NA_real_, 2)))
+unknown_links <- quiet(prepare_merge_geography(unknown))
+stopifnot(nrow(unknown_links$statuses) == nrow(links$statuses),
+          nrow(unknown_links$consistent) == 1,
+          is.na(unknown_links$statuses$geo_consistent[1]),
+          unknown_links$statuses$geo_consistent[2] == 2)
+unknown_class <- mutate(xwalk, relationship_class = replace(relationship_class, 1, "near_match"))
+stopifnot(nrow(quiet(prepare_merge_geography(unknown_class))$consistent) == 2,
+          summarize_merge_geography(unknown_class, "Unexpected")$classes$n_tracts[7] == 1)
+expect_error(prepare_merge_geography(mutate(xwalk, geo_consistent = replace(geo_consistent, 1, 0))),
+             "contradictory")
 expect_error(prepare_merge_geography(mutate(xwalk, tr2010_id = replace(tr2010_id, 2, tract_id(1)))), "same_geoid")
 conflicting <- xwalk |>
   mutate(tr2010_id = replace(tr2010_id, 2, tract_id(1)), same_geoid = replace(same_geoid, 2, 0))
@@ -104,9 +113,10 @@ expect_error(diagnostic_summary(c(1, Inf)), "finite")
 county_env <- new.env(parent = globalenv())
 eval(notebook_chunk("set-paths", "02_assemble.Rmd"), county_env)
 base_ids <- paste0("06", county_env$target_counties, "000100")
-ids_16 <- c(base_ids, tract_id(901))
+ids_16 <- c(base_ids, tract_id(c(901, 903, 904)))
 ids_bg <- c(base_ids, tract_id(902))
-native_ids <- c(paste0(substr(base_ids[1], 1, 5), "000200"), base_ids[-1], tract_id(902))
+native_ids <- c(paste0(substr(base_ids[1], 1, 5), "000200"), base_ids[-1], tract_id(c(902, 901, 905, 904)))
+linked_ids <- c(ids_bg, tract_id(c(901, 905, 904)))
 
 # Field lists follow schemas/acs_full.md; input flags/tags follow Step 2 schemas.
 estimates <- c("rentE", "lqcrentE", "popE", "huE", "rhuE", "med_hvalE",
@@ -129,31 +139,76 @@ make_input <- function(ids, key, bg = FALSE) {
                  tc_flag_rent_24 = 0, interp_rent = rentE * 1.05)
   } else {
     x <- mutate(x, rent_id = TRUE, m_flag_rent = 0, m_flag_lqcrent = 0,
-                 m_flag_rhu = 0, m_flag_med_hval = 0, zero_flag_rhu = 0,
+                 m_flag_rhu = 0, m_flag_med_hval = 0, zero_flag_rhu = 0, zero_flag_med_hval = 0,
                  tc_flag_rent = 0, tc_flag_lqcrent = 0, tc_flag_med_hval = 0)
   }
   x
 }
+
+# Independent selector exercise supplies both alternatives even on changed rows.
+# This tests no fallback in both directions without inventing geographic links.
+small <- tibble(tr2010_id = tract_id(1:8), geo_consistent = c(1, 0, NA, 2, 1, 0, 1, 0))
+a <- prepare_2024_source(make_input(tract_id(1:8), "tr2020_id"), "tract")
+b <- prepare_2024_source(make_input(tract_id(1:8), "tr2010_id", bg = TRUE), "bg_agg")
+a$rentE_24_tract <- c(30, 30, 30, 30, NA, 30, 30, 30)
+b$rentE_24_bg_agg <- c(20, 20, 20, 20, 20, NaN, 20, 20)
+a$rhu_inventoryE_24_tract <- a$rentE_24_tract + 5
+b$rhu_inventoryE_24_bg_agg <- b$rentE_24_bg_agg + 5
+a$rentM_24_tract <- c(rep(40, 6), NA, 40)
+b$rentM_24_bg_agg <- c(rep(20, 7), NA)
+a$tc_flag_rent_24_tract[7] <- NA_real_
+b$tc_flag_rent_24_bg_agg[8] <- NA_real_
+small <- bind_cols(small, select(a, -tr2020_id), select(b, -tr2010_id))
+selected <- select_canonical_2024(small)
+stopifnot(identical(selected$rentE_24, c(30, 20, NA, NA, NA, NaN, 30, 20)),
+          identical(selected$acs_source_24, c("tract", "bg_agg", NA, NA, "tract", "bg_agg", "tract", "bg_agg")),
+          all(is.na(selected$rentM_24[7:8])), all(is.na(selected$tc_flag_rent_24[7:8])))
+equality <- assert_hierarchical_2024(selected)
+stopifnot(all(equality$n_mismatch == 0),
+          all(filter(equality, measure == "rentE_24")$n_alternative_available_when_selected_missing == 1))
+expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = coalesce(rentE_24, rentE_24_bg_agg))),
+             "violates")
+expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = replace(rentE_24, 5, 20))), "violates")
+expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = replace(rentE_24, 6, 30))), "violates")
+expect_error(assert_hierarchical_2024(mutate(selected, rentM_24 = rentM_24_bg_agg)), "violates")
+expect_error(assert_hierarchical_2024(mutate(selected, acs_source_24 = "tract")), "selected source")
+stopifnot(nrow(assert_hierarchical_2024(select_canonical_2024(small[FALSE, ]))) == 2 * nrow(merge_2024_field_map()))
+expect_error(prepare_2024_source(select(make_input(tract_id(1), "tr2020_id"), -rentM)), "missing bundle")
+
 source_16 <- make_input(ids_16, "tr2010_id")
-source_bg <- make_input(ids_bg, "tr2010_id", bg = TRUE)
-source_tract <- make_input(native_ids, "tr2020_id")
+source_bg <- make_input(ids_bg, "tr2010_id", bg = TRUE) |>
+  mutate(across(all_of(c(estimates, "rhu_inventoryE")), ~ .x * 2),
+         across(all_of(moes), ~ .x * 10), across(all_of(cvs), ~ .x * 2),
+         pct_miss_rent = 0.2, pct_tc_rent = 0.1, pct_miss_hval = 0.3, tc_flag_rent_24 = 1)
+source_tract <- make_input(native_ids, "tr2020_id") |>
+  mutate(across(all_of(c(estimates, "rhu_inventoryE")), ~ .x * 3),
+         across(all_of(moes), ~ .x * 20), across(all_of(cvs), ~ .x * 3))
 source_16$rentE[c(2, 3)] <- c(0, NA_real_)
 source_16$rhuE[4] <- 0
 source_16$rhu_inventoryE[5] <- 0
-source_tract$rentE[6] <- NA_real_
-source_tract$rentE[7] <- NA_real_
-# Retain county coverage while leaving one consistent crosswalk key absent.
 source_tract$tr2020_id[6] <- paste0(substr(native_ids[6], 1, 5), "000300")
-source_bg$rhu_inventoryE[7] <- NA_real_
-source_tract$rhu_inventoryE[8] <- NA_real_
+source_tract$rentE[c(7, 14)] <- NA_real_
+source_tract$m_flag_rent[c(7, 14)] <- 1
+source_tract$rentCV[c(7, 14)] <- NA_real_
+source_tract$tc_flag_rent[14] <- 1
+source_tract$rentM[12] <- NA_real_
+source_tract$rentCV[12] <- NA_real_
+source_tract$rhu_inventoryE[9] <- NA_real_
+source_bg$rhu_inventoryE[c(7, 8)] <- NA_real_
 source_bg$rhu_inventoryE[9] <- source_bg$rhuE[9] - 1
-notebook_xwalk <- tibble(tr2020_id = native_ids, tr2010_id = ids_bg,
+source_bg$rentE[13] <- NA_real_
+source_bg$rentCV[13] <- NA_real_
+notebook_xwalk <- tibble(tr2020_id = native_ids, tr2010_id = linked_ids,
                          geo_consistent = 1, relationship_class = "consistent",
-                         same_geoid = as.double(native_ids == ids_bg),
+                         same_geoid = as.double(native_ids == linked_ids),
                          n_2010_partners = 1L, n_2020_partners = 1L)
-notebook_xwalk$geo_consistent[2] <- 0
-notebook_xwalk$relationship_class[2] <- "one_to_one_changed"
-tmp_dir <- tempfile("acs-merge-diagnostics-")
+changed <- c(2, 4, 8, 11, 13, 15, 18)
+notebook_xwalk$geo_consistent[changed] <- 0
+notebook_xwalk$relationship_class[changed] <- "one_to_one_changed"
+notebook_xwalk$geo_consistent[10] <- NA_real_
+notebook_xwalk$geo_consistent[11] <- 2
+notebook_xwalk$relationship_class[12] <- "unexpected_class"
+tmp_dir <- tempfile("acs-merge-hierarchy-")
 dir.create(tmp_dir)
 write_feather(source_16, file.path(tmp_dir, "acs_step2_2016_tract.feather"))
 write_feather(source_bg, file.path(tmp_dir, "acs_step2_2024_block_group_aggregated.feather"))
@@ -164,34 +219,69 @@ env$data_dir <- tmp_dir
 env$write_panel <- FALSE
 env$prior_panel <- NULL
 run_chunk <- function(label) quiet(eval(notebook_chunk(label), env))
-for (label in c("prep-24-bg-agg", "prep-24-tract", "prep-16", "merge-surveys", "change-vars")) run_chunk(label)
+for (label in c("prep-24-bg-agg", "prep-24-tract", "prep-16", "load-geography",
+                "merge-surveys", "build-diagnostic-panel", "select-canonical-24", "change-vars")) run_chunk(label)
 canonical_before <- env$acs_full
 canonical_names <- names(canonical_before)
+row_901 <- match(tract_id(901), canonical_before$tr2010_id)
+row_903 <- match(tract_id(903), canonical_before$tr2010_id)
+row_904 <- match(tract_id(904), canonical_before$tr2010_id)
+row_902 <- match(tract_id(902), canonical_before$tr2010_id)
 stopifnot(nrow(canonical_before) == length(union(ids_16, ids_bg)),
           isTRUE(all.equal(env$acs_16_diagnostic$rentE_16, source_16$rentE * 1.307)),
-          isTRUE(all.equal(canonical_before$rentPOST[1], 1/1.307)),
-          canonical_before$rhuPOST[1] == 1,
+          isTRUE(all.equal(canonical_before$rentPOST[1], 3/1.307)),
+          canonical_before$rhuPOST[1] == 3, canonical_before$rhuPOST[2] == 2,
+          canonical_before$rhu_inventoryPOST[1] == 3,
           is.na(canonical_before$rentPOST[2]), is.na(canonical_before$rentPOST[3]),
-          is.na(canonical_before$rhuPOST[4]))
-for (label in c("summarize-cv", "load-geography", "build-diagnostic-panel", "geography-coverage",
+          is.na(canonical_before$rhuPOST[4]), is.na(canonical_before$rhu_inventoryPOST[5]),
+          is.na(canonical_before$rentE_24[6]), is.na(canonical_before$rentE_24[7]),
+          is.na(canonical_before$rhu_inventoryE_24[8]), is.na(canonical_before$rhu_inventoryE_24[9]),
+          all(is.na(canonical_before$rentE_24[10:11])),
+          canonical_before$acs_source_24[12] == "tract", is.na(canonical_before$rentM_24[12]),
+          is.na(canonical_before$rentPOSTCV[12]), is.na(canonical_before$rentE_24[13]),
+          canonical_before$m_flag_rent_24[13] == 1,
+          canonical_before$tc_flag_rent_24[1] == 0, canonical_before$tc_flag_rent_24[2] == 1,
+          canonical_before$tc_flag_rent_24[14] == 1, is.na(canonical_before$rentE_24[14]),
+          is.na(canonical_before$tc_flag_lqcrent_24[2]),
+          is.na(canonical_before$post_id[row_901]), !is.na(canonical_before$rentPOST[row_901]),
+          is.na(canonical_before$acs_source_24[row_903]),
+          canonical_before$acs_source_24[row_904] == "bg_agg", is.na(canonical_before$rentE_24[row_904]),
+          is.na(canonical_before$rhu_inventoryPOST[row_902]),
+          !tract_id(905) %in% canonical_before$tr2010_id,
+          !any(grepl("inventory.*(M_|CV|POSTCV)", canonical_names)))
+# Shares use raw differences (not ratios or a multiplier of 100).
+for (measure in c("pctrhu", "pctvac", "pctrvac", "pctsvac")) {
+  stopifnot(isTRUE(all.equal(canonical_before[[paste0(measure, "PPC")]][1:2], c(0.4, 0.2))))
+}
+for (measure in c("rent", "rhu", "med_hhinc")) {
+  e16 <- canonical_before[[paste0(measure, "E_16")]][1]
+  m16 <- canonical_before[[paste0(measure, "M_16")]][1]
+  ratio <- canonical_before[[paste0(measure, "POST")]][1]
+  expected_moe <- sqrt(max(0, 40^2 - ratio^2 * m16^2)) / e16
+  stopifnot(isTRUE(all.equal(canonical_before[[paste0("moe_", measure, "POST")]][1], expected_moe)),
+            isTRUE(all.equal(canonical_before[[paste0(measure, "POSTCV")]][1], expected_moe/1.645/ratio)))
+}
+bg_rows <- match(canonical_before$tr2010_id, source_bg$tr2010_id)
+for (column in c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "interp_rent")) {
+  stopifnot(identical(canonical_before[[column]], source_bg[[column]][bg_rows]))
+}
+for (label in c("summarize-cv", "geography-coverage", "source-selection-qa",
                 "compare-source-levels", "diagnostic-change-vars", "compare-inventory-levels",
                 "compare-inventory-changes", "validation-panel", "validate-keys-panel",
                 "validate-missingness-panel", "validate-flags-panel", "validate-numeric-panel")) run_chunk(label)
 stopifnot(identical(env$acs_full, canonical_before),
           identical(select(env$acs_diagnostics, all_of(canonical_names)), canonical_before),
-          !any(grepl("\\.[xy]$|^diag_|rhu_inventory|geo_consistent|tr2020_id", canonical_names)),
-          nrow(env$acs_diagnostics) == 16,
-          env$source_level_diagnostics$rent$coverage$n_total[1] == 16,
-          env$inventory_level_diagnostics$tract_2024$coverage$n_total == 15,
+          !any(grepl("\\.[xy]$|^diag_|_24_tract$|_24_bg_agg$|^in_|^same_geoid$", canonical_names)),
+          env$source_level_diagnostics$rent$coverage$n_total[1] == nrow(canonical_before),
+          env$inventory_level_diagnostics$tract_2024$coverage$n_total == nrow(source_tract),
           env$inventory_level_diagnostics$bg_agg_2024$coverage$n_x_below_y == 1,
           env$alignment_coverage$n_consistent_link_without_census[1] == 1,
-          env$alignment_coverage$n_census_rent_missing_in_record[1] == 1,
-          nrow(env$geography_unmatched$census_without_crosswalk) == 1,
-          is.na(env$acs_diagnostics$diag_rentPOST_24_tract[2]),
-          is.na(env$acs_diagnostics$diag_rhu_inventoryPOST_24_bg_agg[5]))
+          sum(env$source_selection_qa$counts$n_tracts) == nrow(canonical_before),
+          isTRUE(all.equal(sum(env$source_selection_qa$counts$share), 1)),
+          env$source_selection_qa$geography$status$n_tracts[4] == 1,
+          all(env$hierarchy_equality$n_mismatch == 0))
 
-# Run the actual disabled-save/reload chunks with no prior file, then with an
-# unreadable stale file. Neither case may read, create, or overwrite the panel.
+# Disabled writes must not read/create/replace the canonical destination.
 run_chunk("save-panel")
 run_chunk("reload-panel")
 saved_path <- file.path(tmp_dir, "acs_full.feather")
@@ -201,27 +291,46 @@ writeLines("stale reference sentinel", saved_path)
 sentinel_md5 <- tools::md5sum(saved_path)
 run_chunk("save-panel")
 run_chunk("reload-panel")
-stopifnot(identical(tools::md5sum(saved_path), sentinel_md5),
-          !exists("acs_saved", envir = env, inherits = FALSE))
+stopifnot(identical(tools::md5sum(saved_path), sentinel_md5))
 
-# The explicitly enabled branch keeps schema protection and round-trips only
-# canonical columns in the temporary test directory.
+# Fixed migration allowlist, strict shared order/types, and temporary round trips.
+legacy <- select(canonical_before, -all_of(panel_schema_additions()))
+quiet(assert_panel_schema(canonical_before, legacy))
+quiet(assert_panel_schema(canonical_before, canonical_before))
+expect_error(assert_panel_schema(mutate(canonical_before, unexpected = 1), legacy), "unapproved")
+expect_error(assert_panel_schema(select(canonical_before, -rentE_16), legacy), "unapproved")
+expect_error(assert_panel_schema(mutate(canonical_before, rentE_16 = as.integer(rentE_16)), legacy), "types")
+expect_error(assert_panel_schema(select(canonical_before, rentE_16, everything()), legacy), "order")
+expect_error(assert_panel_schema(mutate(canonical_before, m_flag_rhu_inventoryPOST = TRUE)), "storage")
 env$write_panel <- TRUE
-env$prior_panel <- mutate(canonical_before, unexpected = 1)
+env$prior_panel <- mutate(legacy, unexpected = 1)
 expect_error(eval(notebook_chunk("save-panel"), env), "schema")
 stopifnot(identical(tools::md5sum(saved_path), sentinel_md5), !env$panel_written)
-env$prior_panel <- canonical_before
+env$prior_panel <- legacy
 run_chunk("save-panel")
 run_chunk("reload-panel")
 stopifnot(env$panel_written, isTRUE(all.equal(env$acs_saved, canonical_before)))
+env$prior_panel <- env$acs_saved
+run_chunk("save-panel")
+run_chunk("reload-panel")
+env$prior_panel <- NULL
+run_chunk("save-panel")
+run_chunk("reload-panel")
 
-# Parse every executable chunk; verify the checked-in default and heading order.
+# Parse actual chunks and check all section numbering and overview titles.
 lines <- readLines(here::here("04_merge.Rmd"), warn = FALSE)
-starts <- which(grepl("^```\\{r", lines))
+starts <- which(startsWith(lines, "```{r"))
 for (start in starts) {
   end <- which(seq_along(lines) > start & lines == "```")[1]
   parse(text = lines[seq.int(start + 1L, end - 1L)])
 }
+headings <- lines[grepl("^# [0-9]+\\.", lines)]
 stopifnot(any(lines == "write_panel <- FALSE"),
-          identical(sub("^# ([0-9]+)\\..*", "\\1", lines[grepl("^# [0-9]+\\.", lines)]), as.character(1:7)))
-cat("Merge diagnostics tests passed: geography, coverage, ratios, canonical preservation, and guarded save/reload.\n")
+          identical(sub("^# ([0-9]+)\\..*", "\\1", headings), as.character(1:7)),
+          all(sub("^# ", "", headings) %in% lines))
+for (section in 1:7) {
+  subsections <- lines[grepl(paste0("^## ", section, "\\."), lines)]
+  numbers <- sub(paste0("^## ", section, "\\.([0-9]+).*"), "\\1", subsections)
+  stopifnot(identical(numbers, as.character(seq_along(subsections))))
+}
+cat("Merge tests passed: hierarchical bundles, source-aware changes, inventory, geography, diagnostics, and guarded migration/save/reload.\n")

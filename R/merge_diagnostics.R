@@ -1,4 +1,4 @@
-# Diagnostic-only helpers for 04_merge.Rmd. Source after merge_helpers.R and
+# Geographic alignment and diagnostic helpers for 04_merge.Rmd. Source after merge_helpers.R and
 # geography_qa.R; uses the notebook's existing dplyr/tidyr/purrr packages.
 
 merge_relationship_classes <- c(
@@ -33,24 +33,34 @@ prepare_merge_geography <- function(xwalk) {
       !all(is.na(xwalk$tr2010_id) | grepl("^[0-9]{11}$", xwalk$tr2010_id))) {
     stop("Crosswalk: invalid native tract keys")
   }
-  if (!is.double(xwalk$geo_consistent) || anyNA(xwalk$geo_consistent) ||
-      !all(xwalk$geo_consistent %in% c(0, 1)) ||
-      !is.character(xwalk$relationship_class) || anyNA(xwalk$relationship_class) ||
-      !all(xwalk$relationship_class %in% merge_relationship_classes) ||
-      !all((xwalk$geo_consistent == 1) == (xwalk$relationship_class == "consistent"))) {
-    stop("Crosswalk: invalid consistency encoding or classification")
+  if (!is.double(xwalk$geo_consistent) || !is.character(xwalk$relationship_class)) {
+    stop("Crosswalk: invalid consistency encoding storage")
   }
-  unique_partner <- xwalk$relationship_class %in%
-    c("consistent", "one_to_one_changed", "split")
-  one_to_one <- xwalk$relationship_class %in% c("consistent", "one_to_one_changed")
+  status_qa <- summarize_merge_geography(xwalk, "Crosswalk before alignment")
+  print(status_qa$status, n = Inf)
+  print(status_qa$classes, n = Inf)
+  known_status <- xwalk$geo_consistent %in% c(0, 1)
+  known_class <- xwalk$relationship_class %in% merge_relationship_classes
+  if (!all((xwalk$geo_consistent[known_status & known_class] == 1) ==
+             (xwalk$relationship_class[known_status & known_class] == "consistent"))) {
+    stop("Crosswalk: contradictory consistency flag and classification")
+  }
   if (!is.integer(xwalk$n_2010_partners) || !is.integer(xwalk$n_2020_partners) ||
-      anyNA(xwalk$n_2010_partners) || any(xwalk$n_2010_partners < 1L) ||
-      !identical(!is.na(xwalk$tr2010_id), unique_partner) ||
-      !all((xwalk$n_2010_partners == 1L) == unique_partner) ||
+      anyNA(xwalk$n_2010_partners) || any(xwalk$n_2010_partners < 1L)) {
+    stop("Crosswalk: invalid partner counts")
+  }
+  unique_partner <- xwalk$n_2010_partners == 1L
+  one_to_one <- xwalk$relationship_class %in% c("consistent", "one_to_one_changed")
+  consistent_flag <- xwalk$geo_consistent %in% 1
+  if (!identical(!is.na(xwalk$tr2010_id), unique_partner) ||
       !identical(!is.na(xwalk$n_2020_partners), unique_partner) ||
+      !all(unique_partner[known_class] == (xwalk$relationship_class[known_class] %in%
+                                            c("consistent", "one_to_one_changed", "split"))) ||
       any(xwalk$n_2020_partners[unique_partner] < 1L) ||
       any(xwalk$n_2020_partners[one_to_one] != 1L) ||
-      any(xwalk$n_2020_partners[xwalk$relationship_class == "split"] <= 1L)) {
+      any(xwalk$n_2020_partners[xwalk$relationship_class %in% "split"] <= 1L) ||
+      any(!unique_partner[consistent_flag]) ||
+      any(xwalk$n_2020_partners[consistent_flag] != 1L)) {
     stop("Crosswalk: partner counts or retained 2010 keys disagree with classes")
   }
   if (!is.double(xwalk$same_geoid) ||
@@ -69,7 +79,7 @@ prepare_merge_geography <- function(xwalk) {
     dplyr::select(tr2010_id, tr2020_id, same_geoid)
   assert_unique_key(consistent, "tr2010_id", "Consistent links, 2010 key")
   assert_unique_key(consistent, "tr2020_id", "Consistent links, 2020 key")
-  report_n(consistent, "Consistent links eligible for paired measurement diagnostics")
+  report_n(consistent, "Consistent links eligible for Census measurement and paired diagnostics")
   list(statuses = statuses, consistent = consistent)
 }
 
@@ -127,9 +137,10 @@ diagnostic_groups <- function(df, by = NULL, group_levels = NULL) {
   if (!is.null(by)) {
     values <- as.character(df[[by]])
     if (is.null(group_levels)) group_levels <- sort(unique(values[!is.na(values)]))
-    if (!all(values[!is.na(values)] %in% group_levels)) stop("Unrecognized diagnostic group")
     for (level in group_levels) masks[[level]] <- !is.na(values) & values == level
     masks[["status_missing"]] <- is.na(values)
+    unexpected <- !is.na(values) & !values %in% group_levels
+    if (any(unexpected)) masks[["status_unexpected"]] <- unexpected
   }
   masks
 }
@@ -190,20 +201,73 @@ compare_diagnostic_measures <- function(df, x, y, by = NULL, group_levels = NULL
 
 summarize_merge_geography <- function(df, label) {
   class_counts <- tibble::tibble(
-    relationship_class = factor(df$relationship_class,
-                                levels = c(merge_relationship_classes, "status_missing"))
+    relationship_class = factor(dplyr::case_when(
+      is.na(df$relationship_class) ~ "status_missing",
+      df$relationship_class %in% merge_relationship_classes ~ df$relationship_class,
+      .default = "status_unexpected"
+    ), levels = c(merge_relationship_classes, "status_missing", "status_unexpected"))
   ) |>
-    dplyr::mutate(relationship_class = tidyr::replace_na(relationship_class, "status_missing")) |>
     dplyr::count(relationship_class, .drop = FALSE, name = "n_tracts") |>
     dplyr::mutate(universe = label, share = diagnostic_ratio(n_tracts, rep(nrow(df), dplyr::n())))
   flag_counts <- tibble::tibble(
     geo_status = factor(dplyr::case_when(
       df$geo_consistent == 1 ~ "consistent", df$geo_consistent == 0 ~ "not_consistent",
-      .default = "status_missing"
-    ), levels = c("consistent", "not_consistent", "status_missing"))
+      is.na(df$geo_consistent) ~ "status_missing", .default = "status_unexpected"
+    ), levels = c("consistent", "not_consistent", "status_missing", "status_unexpected"))
   ) |>
     dplyr::count(geo_status, .drop = FALSE, name = "n_tracts") |>
     dplyr::mutate(universe = label, share = diagnostic_ratio(n_tracts, rep(nrow(df), dplyr::n())))
   stopifnot(sum(class_counts$n_tracts) == nrow(df), sum(flag_counts$n_tracts) == nrow(df))
   list(classes = class_counts, status = flag_counts)
+}
+
+# Equality treats NA and NaN as missing, and compares every observed value exactly.
+assert_hierarchical_2024 <- function(df) {
+  fields <- merge_2024_field_map()
+  required <- c("geo_consistent", "acs_source_24", unlist(fields, use.names = FALSE))
+  if (!all(required %in% names(df))) stop("Hierarchy QA: missing canonical/source fields")
+  masks <- list(tract = df$geo_consistent %in% 1, bg_agg = df$geo_consistent %in% 0)
+  unresolved <- !df$geo_consistent %in% c(0, 1)
+  if (!all(is.na(df$acs_source_24[unresolved])) ||
+      !identical(df$acs_source_24[masks$tract], rep("tract", sum(masks$tract))) ||
+      !identical(df$acs_source_24[masks$bg_agg], rep("bg_agg", sum(masks$bg_agg)))) {
+    stop("Hierarchy QA: selected source disagrees with geographic consistency")
+  }
+  purrr::imap_dfr(masks, function(mask, source) {
+    alternative <- if (source == "tract") "bg_agg" else "tract"
+    purrr::map_dfr(seq_len(nrow(fields)), function(i) {
+      canonical <- df[[fields$canonical[i]]]
+      selected <- df[[fields[[source]][i]]]
+      other <- df[[fields[[alternative]][i]]]
+      missing_mismatch <- is.na(canonical[mask]) != is.na(selected[mask])
+      observed <- mask & !is.na(canonical) & !is.na(selected)
+      n_mismatch <- sum(missing_mismatch) + sum(canonical[observed] != selected[observed])
+      if (n_mismatch || any(!is.na(canonical[unresolved]))) {
+        stop("Hierarchy QA: ", fields$canonical[i], " violates ", source,
+             " selection, missingness, or unresolved-status rule")
+      }
+      tibble::tibble(source = source, measure = fields$canonical[i], n_selected = sum(mask),
+                     n_selected_missing = sum(mask & is.na(selected)),
+                     n_alternative_available_when_selected_missing =
+                       sum(mask & is.na(selected) & !is.na(other)),
+                     n_mismatch = n_mismatch)
+    })
+  })
+}
+
+summarize_source_selection <- function(df) {
+  counts <- tibble::tibble(source = factor(
+    dplyr::coalesce(df$acs_source_24, "unassigned"), levels = c("tract", "bg_agg", "unassigned")
+  )) |>
+    dplyr::count(source, .drop = FALSE, name = "n_tracts") |>
+    dplyr::mutate(share = diagnostic_ratio(n_tracts, rep(nrow(df), dplyr::n())))
+  stopifnot(sum(counts$n_tracts) == nrow(df))
+  missingness <- summarize_diagnostic_measures(
+    df, c("rentE_24", "rhuE_24", "rhu_inventoryE_24", "med_hhincE_24",
+          "rentPOST", "rhu_inventoryPOST"), "acs_source_24", c("tract", "bg_agg")
+  ) |>
+    dplyr::mutate(group = dplyr::recode(group, status_missing = "unassigned"),
+                  share_missing = diagnostic_ratio(n_missing, n_total))
+  list(counts = counts, missingness = missingness,
+       geography = summarize_merge_geography(df, "Canonical 2010 panel"))
 }

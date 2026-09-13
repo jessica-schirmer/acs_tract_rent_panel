@@ -8,10 +8,12 @@ California and nine Bay Area counties configured by `target_counties` in §1.3.
 
 This direct tract-source product uses no crosswalk or allocation. It is separate
 from the [2024 block-group-aggregated product](acs_step2_24.md), which is keyed
-by `tr2010_id`. Step 2 processes them separately. Step 4 uses this product for
-native-source coverage/inventory diagnostics and paired source/change comparisons
-through `geo_consistent == 1` links. Its values do not enter the canonical saved
-panel; hierarchical selection and availability fallback remain deferred.
+by `tr2010_id`. Step 2 processes them separately. Step 4 selects this product
+for canonical measurements through explicit `geo_consistent == 1` links,
+including different-GEOID pairs, and retains native-source and paired diagnostics.
+Estimates, uncertainty, and available quality flags follow the same source;
+missing selected values are never filled from block-group aggregates. Canonical
+inventory/change and provenance fields are described in the [panel schema](acs_full.md).
 
 ## Base columns and censoring
 

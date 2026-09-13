@@ -13,7 +13,8 @@ share/CV measures added.
 
 The production filename replaces `acs_step2_16.feather`; existing data and
 historical parity references retain that legacy name. `04_merge.Rmd` consumes
-this current filename for the canonical panel and separate inventory diagnostics.
+this current filename for canonical 2016 levels, including rental inventory,
+and source-specific notebook diagnostics.
 
 ## Base columns
 
@@ -62,9 +63,9 @@ one-to-one onto the output, preserving its other columns and rows. Pre-save and
 reload checks in §5.6 validate keyed missingness and reconcile complete-target
 totals separately from incomplete targets, including when inventory is absent
 from a reference. No inventory MOE/CV is added. `rhuE` and all existing rent
-denominators remain occupied-renter measures. Step 4 keeps its existing canonical
-selection and adds inventory comparisons only in notebook diagnostics;
-`rhuPOST` remains occupied-renter change.
+denominators remain occupied-renter measures. Step 4 retains `rhu_inventoryE_16`
+and adds `rhu_inventoryPOST` against the hierarchically selected 2024 inventory.
+`rhuPOST` remains occupied-renter change. See the [panel schema](acs_full.md).
 
 ## Added structure-type aggregates
 
