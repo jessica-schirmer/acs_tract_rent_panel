@@ -199,6 +199,57 @@ assert_tract_crosswalk <- function(crosswalk, relationships) {
   invisible(crosswalk)
 }
 
+# Add notebook-only reasons for rejecting a pair that passes both partner counts.
+add_tract_land_diagnostics <- function(crosswalk) {
+  diagnostics <- crosswalk |>
+    dplyr::mutate(
+      one_to_one_candidate = n_2010_partners == 1L &
+        dplyr::coalesce(n_2020_partners == 1L, FALSE),
+      rejection_reason = dplyr::case_when(
+        one_to_one_candidate & (arealand_2020 == 0 | arealand_2010 == 0) ~
+          "zero_land_area",
+        one_to_one_candidate & arealand_2020 > 0 & arealand_2010 > 0 &
+          (arealand_part != arealand_2020 | arealand_part != arealand_2010) ~
+          "positive_land_mismatch",
+        TRUE ~ NA_character_
+      )
+    )
+  stopifnot("One-to-one rejections must have exactly one land-based reason" = identical(
+    !is.na(diagnostics$rejection_reason),
+    diagnostics$one_to_one_candidate & diagnostics$geo_consistent == 0
+  ))
+  diagnostics
+}
+
+# Works statewide or by the supplied grouping columns; absent classes count as zero.
+summarize_tract_classification <- function(diagnostics, groups = character()) {
+  summary <- diagnostics |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(groups))) |>
+    dplyr::summarise(
+      n_2020_tracts = dplyr::n(),
+      n_consistent = sum(relationship_class == "consistent"),
+      n_one_to_one_changed = sum(relationship_class == "one_to_one_changed"),
+      n_split = sum(relationship_class == "split"),
+      n_merge = sum(relationship_class == "merge"),
+      n_many_to_many = sum(relationship_class == "many_to_many"),
+      n_one_to_one_candidates = sum(one_to_one_candidate),
+      n_one_to_one_rejected = sum(one_to_one_candidate & geo_consistent == 0),
+      n_positive_land_mismatch = sum(rejection_reason == "positive_land_mismatch", na.rm = TRUE),
+      n_zero_land_excluded = sum(rejection_reason == "zero_land_area", na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(pct_consistent = 100 * n_consistent / dplyr::na_if(n_2020_tracts, 0L))
+  stopifnot(
+    "Classification counts must sum to total tracts" = with(summary,
+      all(n_2020_tracts == n_consistent + n_one_to_one_changed + n_split + n_merge + n_many_to_many)),
+    "One-to-one candidates must reconcile with consistency and exclusions" = with(summary,
+      all(n_one_to_one_candidates == n_consistent + n_one_to_one_rejected &
+            n_one_to_one_rejected == n_positive_land_mismatch + n_zero_land_excluded &
+            n_one_to_one_rejected == n_one_to_one_changed))
+  )
+  summary
+}
+
 save_tract_crosswalk <- function(crosswalk, path, overwrite = FALSE) {
   if (file.exists(path)) {
     if (!isTRUE(overwrite)) stop("Refusing to overwrite existing tract crosswalk: ", path)

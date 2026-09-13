@@ -18,6 +18,14 @@ expect_error <- function(expr, message) {
   error <- tryCatch({ quiet(expr); NULL }, error = identity)
   stopifnot(inherits(error, "error"), grepl(message, conditionMessage(error), fixed = TRUE))
 }
+notebook_chunk <- function(label, file = "03_tract_change.Rmd") {
+  lines <- readLines(here::here(file), warn = FALSE)
+  start <- which(lines == paste0("```{r ", label, "}"))
+  stopifnot(length(start) == 1L)
+  end <- which(seq_along(lines) > start & lines == "```")[1]
+  stopifnot(!is.na(end), end > start + 1L)
+  parse(text = lines[seq.int(start + 1L, end - 1L)])
+}
 tract_id <- function(number) sprintf("06037%06d", number)
 pair <- function(id20, id10, land20 = 100, land10 = land20, part = land20) {
   tibble(tr2020_id = tract_id(id20), tr2010_id = tract_id(id10),
@@ -110,6 +118,73 @@ local({
 })
 cat("Passed: actual notebook diagnostic counts with matrixStats masking count.\n")
 
+# County lookup parity, both directions of land mismatch, and complete county summaries.
+local({
+  env <- new.env(parent = environment())
+  quiet(eval(notebook_chunk("target-county-config"), env))
+  assembly_config <- new.env()
+  for (expr in notebook_chunk("set-paths", "02_assemble.Rmd")) {
+    if (is.call(expr) && identical(expr[[1]], as.name("<-")) &&
+        as.character(expr[[2]]) %in% c("southern_california_counties", "bay_area_counties")) {
+      eval(expr, assembly_config)
+    }
+  }
+  stopifnot(identical(env$southern_california_counties, assembly_config$southern_california_counties),
+            identical(env$bay_area_counties, assembly_config$bay_area_counties))
+  in_county <- function(x, county) mutate(x, tr2020_id = paste0("06", county, substr(tr2020_id, 6, 11)))
+  regional_pairs <- bind_rows(
+    source_pairs,
+    in_county(pair(200, 200, 100, 80, 80), "001"),
+    in_county(pair(201, 201, 100, 120, 100), "001"),
+    in_county(pair(202, 202, 100, 100, 99), "073"),
+    in_county(pair(203, 203, 0), "001"),
+    in_county(pair(204, 204), "073"),
+    in_county(pair(205, 205), "001"),
+    in_county(pair(210, 210, 50, 100, 50), "001"),
+    in_county(pair(211, 210, 50, 100, 50), "073")
+  )
+  env$tract_relationships <- quiet(characterize_tract_relationships(regional_pairs))
+  regional_crosswalk <- quiet(build_tract_crosswalk(env$tract_relationships))
+  quiet(assert_tract_crosswalk(regional_crosswalk, env$tract_relationships))
+  env$tract_crosswalk <- regional_crosswalk
+  stopifnot(identical(get("count", env), matrixStats::count))
+  quiet(eval(notebook_chunk("summarize-classification"), env))
+  quiet(eval(notebook_chunk("summarize-target-counties"), env))
+  stopifnot(
+    identical(env$tract_crosswalk, regional_crosswalk),
+    identical(select(env$target_region_summary, region, n_2020_tracts, n_consistent,
+                      n_one_to_one_candidates, n_one_to_one_rejected,
+                      n_positive_land_mismatch, n_zero_land_excluded), tibble(
+      region = c("Bay Area", "Southern California"), n_2020_tracts = c(5L, 19L),
+      n_consistent = c(1L, 3L), n_one_to_one_candidates = c(4L, 7L),
+      n_one_to_one_rejected = c(3L, 4L), n_positive_land_mismatch = c(2L, 1L),
+      n_zero_land_excluded = c(1L, 3L)
+    )),
+    env$one_to_one_land_summary$n_2020_tracts == 27L,
+    env$one_to_one_land_summary$n_positive_land_mismatch == 4L,
+    env$one_to_one_land_summary$n_zero_land_excluded == 4L,
+    nrow(env$one_to_one_rejected_pairs) == 8L,
+    nrow(env$target_county_summary) == nrow(env$target_county_lookup),
+    env$target_region_summary$n_merge[1] == 0L,
+    env$target_region_summary$n_many_to_many[1] == 0L,
+    env$target_region_summary$n_split[1] == 1L,
+    all(env$target_region_summary$pct_consistent == 100 * c(1 / 5, 3 / 19)),
+    all(env$one_to_one_rejected_pairs$rejection_reason[
+      env$one_to_one_rejected_pairs$tr2010_id %in% tract_id(c(200, 201, 202))
+    ] == "positive_land_mismatch"),
+    any(env$one_to_one_rejected_pairs$county == "FIPS 06073")
+  )
+  absent_counties <- filter(env$target_county_summary, !county_fips %in% c("001", "037"))
+  stopifnot(all(as.matrix(select(absent_counties, starts_with("n_"))) == 0L),
+            all(is.na(absent_counties$pct_consistent)))
+  env$tract_crosswalk <- filter(regional_crosswalk, substr(tr2020_id, 3, 5) == "073")
+  quiet(eval(notebook_chunk("summarize-target-counties"), env))
+  stopifnot(nrow(env$target_county_summary) == nrow(env$target_county_lookup),
+            all(env$target_region_summary$n_2020_tracts == 0L),
+            all(is.na(env$target_region_summary$pct_consistent)))
+})
+cat("Passed: county configuration parity, regional membership, empty counties/classes, exclusion reasons, and full-source partner counts.\n")
+
 # Reject structural input errors instead of repairing the relationship universe.
 expect_error(characterize_tract_relationships(source_pairs[0, ]), "nonempty table")
 expect_error(characterize_tract_relationships(select(source_pairs, -arealand_part)), "three land areas")
@@ -159,3 +234,28 @@ local({
             identical(arrow::read_feather(path), crosswalk))
 })
 cat("Passed: Feather types/values, overwrite protection, and explicit replacement.\n")
+
+# The actual notebook configuration and save/reload chunks must replace existing data.
+local({
+  env <- new.env(parent = environment())
+  eval(notebook_chunk("set-paths"), env)
+  stopifnot(isTRUE(env$overwrite_output))
+  path <- tempfile(fileext = ".feather")
+  fingerprint_source <- tempfile(fileext = ".txt")
+  on.exit(unlink(c(path, fingerprint_source)))
+  writeLines("Synthetic source fingerprint for notebook save validation", fingerprint_source)
+  env$output_path <- path
+  env$source_path <- fingerprint_source
+  env$source_md5 <- unname(tools::md5sum(fingerprint_source))
+  env$source_relationships <- source_pairs
+  env$tract_relationships <- relationships
+  env$tract_crosswalk <- crosswalk
+  arrow::write_feather(crosswalk[1, ], path)
+  replacement_message <- capture.output(
+    quiet(eval(notebook_chunk("save-crosswalk"), env)), type = "message"
+  )
+  quiet(eval(notebook_chunk("validate-saved-crosswalk"), env))
+  stopifnot(any(grepl("Replacing tract crosswalk", replacement_message)),
+            identical(env$saved_crosswalk, crosswalk))
+})
+cat("Passed: notebook rerun overwrites a different existing Feather and validates the replacement.\n")

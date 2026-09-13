@@ -221,18 +221,19 @@ Outputs:
 - `../../../data/xwalk_tr20_tr10.feather` — one row per California 2020 tract
   (`tr2020_id`), with a uniquely linked `tr2010_id` where available and
   consistency, relationship, zero-land, partner-count, share, and land-area QA.
-- Full relationship-level diagnostics remain in the notebook.
+- Full relationship-level diagnostics, target-region/county summaries, and
+  rejected one-to-one pair details remain in the notebook.
 
 Schema:
 - [2020-to-2010 tract crosswalk](schemas/xwalk_tr20_tr10.md).
 
 Steps:
-1. Set up environment (existing packages and shared/stage-specific helpers, `here::here()` paths, explicit overwrite control)
+1. Set up environment (existing packages and shared/stage-specific helpers, `here::here()` paths, overwrite enabled for reruns, target-county diagnostic lookup)
 2. Read and validate source intersections (character GEOIDs, exact integer-valued land areas stored as doubles, unique pairs, consistent repeated totals)
 3. Characterize tract relationships (distinct partner counts from the complete file, denominator-safe shares, exact consistency and diagnostic flags)
 4. Construct the tract-level crosswalk (retain every 2020 key; attach only unique 2010 links; classify mixed relationships with the analyst-selected rule)
-5. Review geographic diagnostics (tract and relationship counts, same/different consistent GEOIDs, changed-pair share distributions, source coverage and land reconciliation)
-6. Save and validate the output (guarded save, source fingerprint, complete membership, keys, types, values, flags, missingness, and ranges after reload)
+5. Review geographic diagnostics (statewide and target-region/county classifications, one-to-one exclusion reasons, same/different consistent GEOIDs, changed-pair share distributions, source coverage and land reconciliation)
+6. Save and validate the output (announced replacement on reruns, source fingerprint, complete membership, keys, types, values, flags, missingness, and ranges after reload)
 
 **Exact geographic consistency** requires both partner counts to equal one,
 both tract land areas to be positive, and intersection land area to equal each
@@ -260,8 +261,31 @@ Targeted validation uses `Rscript --vanilla tests/test_tract_change.R` for
 synthetic relationships and temporary Feather round trips. The new notebook's
 small local-source calculations can also run directly without executing other
 stages. Its diagnostics report incomplete 2010 land coverage without changing
-the source universe or consistency rule. Saving refuses an existing destination
-unless the analyst explicitly enables `overwrite_output`; replacement is announced.
+the source universe or consistency rule. Notebook reruns overwrite the existing
+crosswalk with `overwrite_output <- TRUE`; replacement is announced and validated
+before saving and after reloading. Setting it to `FALSE` restores the refusal
+guard. The helper retains its protective default for other callers.
+
+In addition to `tract_summary`, §5.2 reports `one_to_one_land_summary` statewide,
+`target_region_summary` for Bay Area and Southern California, and
+`target_county_summary` for all 14 configured counties. Each includes counts for
+all five classes, percent consistent, one-to-one candidates, rejected
+candidates, positive-land mismatches, and zero-land exclusions. County membership
+uses `tr2020_id`; Step 3's diagnostic lookup is checked against Step 2's county
+definitions by the focused tests. Partner counts and the saved crosswalk remain
+statewide. Absent classes count as zero; empty counties retain zero counts and
+an `NA` percentage.
+
+A one-to-one candidate has exactly one partner in **both** directions.
+Candidates reconcile into consistent pairs, zero-land exclusions, and
+positive-land mismatches (intersection land differs from either tract total).
+Zero-land cases receive the zero-land reason even if their areas also differ,
+preventing double counting. `one_to_one_rejected_pairs` lists the rejected
+GEOIDs, 2020 county, three land areas, and reason; non-target counties use FIPS
+labels. These diagnostics add no columns to the Feather. Tests also cover
+regional/county reconciliation, full-source reverse counts, the `matrixStats`
+masking case, and the actual notebook save/reload chunks replacing an existing
+temporary Feather.
 
 ## Step 4: Create ACS panel, calculate change variables
 Script: `04_merge.Rmd`

@@ -93,6 +93,36 @@ land-area reconciliation diagnostics. It validates membership, keys, missingness
 types, flags, ranges, classifications, and saved Feather values. Unexpected
 structural source conditions stop execution rather than triggering repairs.
 
-Saving refuses an existing destination unless `overwrite_output` is explicitly
-enabled; replacement is announced. The historical `tract_change.feather` and
-raw source are preserved.
+Notebook reruns replace the existing destination with `overwrite_output <- TRUE`,
+as authorized by the analyst. Replacement is announced and validated before
+saving and after reloading. Setting this option to `FALSE` restores the refusal
+guard; the save helper's default remains `FALSE` for other callers. The historical
+`tract_change.feather` and raw source are preserved.
+
+## Notebook-only regional and one-to-one diagnostics
+
+The notebook retains its statewide `tract_summary` and adds:
+
+- `one_to_one_land_summary` — statewide classification/candidate/rejection counts.
+- `target_region_summary` — Bay Area and Southern California summaries.
+- `target_county_summary` — all nine Bay Area and five Southern California
+  counties, matching the Step 2 definitions (verified by tests).
+- `one_to_one_rejected_pairs` — rejected candidate GEOIDs, 2020 county/FIPS,
+  `arealand_2020`, `arealand_2010`, `arealand_part`, and `rejection_reason`.
+
+Summary fields are `n_2020_tracts`, counts for all five classes (`n_consistent`,
+`n_one_to_one_changed`, `n_split`, `n_merge`, `n_many_to_many`), `pct_consistent`,
+`n_one_to_one_candidates`, `n_one_to_one_rejected`, `n_positive_land_mismatch`,
+and `n_zero_land_excluded`. Region/county summaries carry the corresponding
+region and county labels/FIPS. Classes absent from a group count as zero;
+empty configured counties/regions retain zero counts and `NA` percent consistent.
+
+Candidates have both partner counts equal to one. A rejected candidate is
+assigned `zero_land_area` when either tract land total is zero; otherwise it is
+`positive_land_mismatch` when intersection land differs from either positive
+tract total. The reasons are mutually exclusive and exhaust rejected candidates.
+Zero-land exclusions therefore differ from the existing count of **all** tract
+relationships involving zero land. County membership uses `tr2020_id`, and
+non-target rejected counties are labeled by FIPS. The regional subset is formed
+only after statewide partner counting and classification. All diagnostic columns
+and tables remain outside the saved crosswalk contract above.
