@@ -344,9 +344,16 @@ flags follow the selected source; unavailable aggregate censoring flags remain m
 The analyst chose to keep `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
 under their existing names and values as block-group diagnostics, including on
 Census-selected/unresolved rows. They do not describe selected Census quality;
-downstream quality rules remain unchanged. `interp_rent` and `interp_rentPOST`
-remain a block-group-specific alternative because the tract product supplies no
-interpolated counterpart. The original `post_id` continues to mean block-group
+downstream quality rules remain unchanged. Canonical `interp_rent` follows the
+geographic hierarchy: native tract median gross rent (`rentE_24_tract`, also
+selected into `rentE_24`) for consistent tracts, and the existing block-group
+interpolation for changed tracts. Missing/unexpected status gives `NA`, with no
+availability fallback. `merge_2024_field_map()` in `R/merge_helpers.R` maps the
+preserved `interp_rent_24_bg_agg` source and native tract rent to the unsuffixed
+canonical name; `04_merge.Rmd` §3.2 applies selection. No new tract interpolation
+or interpolated-rent MOE/CV is constructed. `interp_rentPOST` divides that
+selected value by positive, inflation-adjusted `rentE_16`; no change CV is added.
+The original `post_id` continues to mean block-group
 input membership: a retained 2016 tract may receive Census values and changes
 through a consistent link despite lacking a block-group record.
 
@@ -361,7 +368,8 @@ MOE/CV, geographic allocation, or changed-boundary measurement pairing is added.
 Run `Rscript --vanilla tests/test_merge_diagnostics.R` for synthetic geography,
 missingness/denominator cases, actual notebook chunks using temporary inputs,
 whole-bundle selection, no-fallback cases in both directions, canonical changes,
-inventory, schema migration, and guarded save/reload checks. An analyst can run
+hierarchical interpolated-rent levels/changes, inventory, schema migration, and
+guarded save/reload checks. An analyst can run
 all diagnostics with writing disabled. Enable `write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
 replacement is announced. Only documented hierarchy/inventory/flag additions
@@ -435,8 +443,13 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   levels/change. Source-comparison fields remain in notebook diagnostics.
 - Review `source_selection_qa` for assigned-source counts/shares, missing and
   unexpected geographic flags, and canonical missingness. Every mapped bundle
-  must pass `hierarchy_equality`; inspect median-rent/inventory cases with missing
-  selected values and observed alternatives. Review inventory and rent changes
+  must pass `hierarchy_equality`; inspect median-rent, interpolated-rent, and
+  inventory cases with missing selected values and observed alternatives.
+  Confirm `interp_rent` equals native tract `rentE_24` for consistent tracts and
+  the preserved block-group interpolation for changed tracts, including matching
+  missingness. Unresolved statuses must have missing `interp_rent` and
+  `interp_rentPOST`; validation checks the latter against the canonical selected
+  value over positive `rentE_16`. Review inventory and rent changes
   alongside final key uniqueness, row counts, and the saved schema.
 - Review `geography_coverage`, `geography_unmatched`, `alignment_coverage`, and
   `native_tract_measure_coverage` before interpreting paired results. Inspect

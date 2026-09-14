@@ -263,8 +263,8 @@ summarize_source_selection <- function(df) {
     dplyr::mutate(share = diagnostic_ratio(n_tracts, rep(nrow(df), dplyr::n())))
   stopifnot(sum(counts$n_tracts) == nrow(df))
   missingness <- summarize_diagnostic_measures(
-    df, c("rentE_24", "rhuE_24", "rhu_inventoryE_24", "med_hhincE_24",
-          "rentPOST", "rhu_inventoryPOST"), "acs_source_24", c("tract", "bg_agg")
+    df, c("rentE_24", "interp_rent", "rhuE_24", "rhu_inventoryE_24", "med_hhincE_24",
+          "rentPOST", "interp_rentPOST", "rhu_inventoryPOST"), "acs_source_24", c("tract", "bg_agg")
   ) |>
     dplyr::mutate(group = dplyr::recode(group, status_missing = "unassigned"),
                   share_missing = diagnostic_ratio(n_missing, n_total))

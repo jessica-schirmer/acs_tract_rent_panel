@@ -98,10 +98,14 @@ retain strict order, type, and value checks, including existing income and
 geographic rules. The default `schema_migration = NULL` and save/reload schema
 checks remain strict. Missing references remain **parity not checked**.
 Step 4 carries canonical inventory levels and `rhu_inventoryPOST`, separately
-from occupied-renter `rhuPOST`. Its retained `pct_miss_rent`, `pct_tc_rent`,
-`pct_miss_hval`, and interpolated-rent companions remain explicitly block-group
-diagnostics/alternatives on all rows; they do not describe selected Census
-measurement quality. See the [panel schema](acs_full.md).
+from occupied-renter `rhuPOST`. Its retained `pct_miss_rent`, `pct_tc_rent`, and
+`pct_miss_hval` remain block-group diagnostics on all rows; they do not describe
+selected Census measurement quality. Step 4 uses this product's `interp_rent`
+for canonical interpolated rent on geographically changed tracts. Consistent
+tracts use native tract median gross rent; missing/unexpected status gives `NA`,
+with no availability fallback. `interp_rentPOST` uses the selected canonical
+value over positive, inflation-adjusted 2016 median rent. This upstream product's
+interpolation method is unchanged. See the [panel schema](acs_full.md).
 
 ## Aggregated medians/means (weighted means)
 

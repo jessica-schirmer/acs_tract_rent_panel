@@ -7,6 +7,8 @@
 Step 4 consumes the current filenames; preserved legacy files are not refreshed
 or used as substitutes. All overlapping panel estimates, MOEs, CVs, and quality
 flags follow the geographic hierarchy before canonical changes are calculated.
+The unsuffixed `interp_rent` follows that hierarchy too, using native tract
+median rent as its tract-source counterpart.
 Source-comparison columns and diagnostic changes stay outside this output.
 
 `write_panel <- FALSE` is the notebook default. Validation uses the in-memory
@@ -83,19 +85,27 @@ no MOE/CV. `rhuE_16`/`rhuE_24` remain occupied-renter counts.
 
 | column | source | description |
 |---|---|---|
-| `interp_rent` | 2024 block-group aggregate | Interpolated median rent (not suffixed); source-specific alternative. |
+| `interp_rent` | Selected 2024 source | Numeric double, not suffixed. Native tract `rentE_24_tract` (equal to canonical `rentE_24`) for `geo_consistent == 1`; block-group-aggregated interpolated rent for `geo_consistent == 0`; `NA` for missing/unexpected status. No availability fallback. |
 | `pct_miss_rent`, `pct_miss_hval` | 2024 block-group aggregate | Share of weighted units missing rent / value. Rent includes censored top-coded block groups; see `pct_tc_rent`. |
 | `pct_tc_rent` | 2024 block-group aggregate | Share of weighted renter units whose rent is top-coded; the top-coded portion of `pct_miss_rent`. |
 | `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | 2016 | Missing-value flags (0/1). |
 | `zero_flag_rhu` | 2016 | Zero renter-units flag (0/1). |
 | `tc_flag_rent`, `tc_flag_lqcrent`, `tc_flag_med_hval` | 2016 | Top-code flags (0/1). |
 
-The analyst chose to preserve these block-group companions' existing names and
-values on all panel rows, including Census-selected and unresolved rows. They
-describe the aggregate source, not quality of the selected Census estimate;
-downstream quality-classification rules remain unchanged. `interp_rentPOST`
-remains the corresponding block-group-specific alternative change. Neither
-interpolated rent nor its CV is supplied by the tract product; no CV is created.
+The analyst chose to preserve the existing names and values of `pct_miss_rent`,
+`pct_tc_rent`, and `pct_miss_hval` on all panel rows, including Census-selected
+and unresolved rows. These diagnostics describe the aggregate source, not quality
+of the selected Census estimate; downstream quality-classification rules remain
+unchanged.
+
+Canonical `interp_rent` uses the reported native tract median gross rent as the
+intended tract counterpart; no new tract interpolation is constructed. The
+existing block-group interpolation method is unchanged. Its input is preserved
+as notebook-only `interp_rent_24_bg_agg` before the canonical value is selected.
+`merge_2024_field_map()` in `R/merge_helpers.R` maps that source and
+`rentE_24_tract` to `interp_rent`; selection occurs in `04_merge.Rmd` §3.2.
+The existing output name and double storage are retained; no interpolated-rent
+MOE/CV or change CV is added.
 
 ### Canonical 2024 quality fields
 
@@ -118,7 +128,7 @@ where the 2016 denominator is positive (else `NA`).
 | column | definition |
 |---|---|
 | `rentPOST` | `rentE_24 / rentE_16` |
-| `interp_rentPOST` | `interp_rent / rentE_16` |
+| `interp_rentPOST` | Canonical selected `interp_rent / rentE_16`, for positive `rentE_16`. Equals `rentPOST` for consistent tracts, including missingness; changed tracts use block-group interpolation. Missing/unexpected geographic status gives `NA`. |
 | `lqcrentPOST` | `lqcrentE_24 / lqcrentE_16` |
 | `huPOST` | `huE_24 / huE_16` |
 | `rhuPOST` | `rhuE_24 / rhuE_16` |
@@ -174,7 +184,11 @@ not a value-parity target. Save/reload column order/types and values stay strict
 
 Notebook QA reports source counts/shares, missing/unrecognized status counts,
 canonical missingness by source, and exact equality to each selected bundle.
-Median rent and inventory explicitly report selected missing values with an
-observed alternative. Task 1 comparisons retain their original source-specific
+Median rent, `interp_rent`, and inventory explicitly report selected missing
+values with an observed alternative. `interp_rent` must match the mapped source's
+values and missingness and be missing for unresolved status. Validation also
+checks `interp_rentPOST` against canonical `interp_rent / rentE_16` with the
+positive-baseline rule; it has no unresolved-status exemption.
+Task 1 comparisons retain their original source-specific
 denominators. Full execution and output regeneration remain analyst-run work;
 synthetic tests exercise the notebook with temporary inputs and output only.

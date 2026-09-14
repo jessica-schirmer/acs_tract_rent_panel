@@ -152,6 +152,7 @@ a <- prepare_2024_source(make_input(tract_id(1:8), "tr2020_id"), "tract")
 b <- prepare_2024_source(make_input(tract_id(1:8), "tr2010_id", bg = TRUE), "bg_agg")
 a$rentE_24_tract <- c(30, 30, 30, 30, NA, 30, 30, 30)
 b$rentE_24_bg_agg <- c(20, 20, 20, 20, 20, NaN, 20, 20)
+b$interp_rent_24_bg_agg <- c(25, 25, 25, 25, 25, NaN, 25, 25)
 a$rhu_inventoryE_24_tract <- a$rentE_24_tract + 5
 b$rhu_inventoryE_24_bg_agg <- b$rentE_24_bg_agg + 5
 a$rentM_24_tract <- c(rep(40, 6), NA, 40)
@@ -161,11 +162,25 @@ b$tc_flag_rent_24_bg_agg[8] <- NA_real_
 small <- bind_cols(small, select(a, -tr2020_id), select(b, -tr2010_id))
 selected <- select_canonical_2024(small)
 stopifnot(identical(selected$rentE_24, c(30, 20, NA, NA, NA, NaN, 30, 20)),
+          identical(selected$interp_rent, c(30, 25, NA, NA, NA, NaN, 30, 25)),
+          identical(selected$interp_rent_24_bg_agg, b$interp_rent_24_bg_agg),
+          identical(selected$tr2010_id, small$tr2010_id),
+          identical(select_canonical_2024(selected), selected),
           identical(selected$acs_source_24, c("tract", "bg_agg", NA, NA, "tract", "bg_agg", "tract", "bg_agg")),
           all(is.na(selected$rentM_24[7:8])), all(is.na(selected$tc_flag_rent_24[7:8])))
 equality <- assert_hierarchical_2024(selected)
 stopifnot(all(equality$n_mismatch == 0),
-          all(filter(equality, measure == "rentE_24")$n_alternative_available_when_selected_missing == 1))
+          all(filter(equality, measure %in% c("rentE_24", "interp_rent"))$
+                n_alternative_available_when_selected_missing == 1))
+# Detect wrong values, wrong missingness, fallback, and both unresolved statuses.
+for (row in c(1, 2, 3, 4, 5, 6)) {
+  bad_value <- if (row == 1) 25 else 30
+  expect_error(assert_hierarchical_2024(
+    mutate(selected, interp_rent = replace(interp_rent, row, bad_value))), "interp_rent violates")
+}
+expect_error(assert_hierarchical_2024(mutate(selected, interp_rent = rentE_24)), "interp_rent violates")
+expect_error(assert_hierarchical_2024(
+  mutate(selected, interp_rent = replace(interp_rent, 1, NA_real_))), "interp_rent violates")
 expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = coalesce(rentE_24, rentE_24_bg_agg))),
              "violates")
 expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = replace(rentE_24, 5, 20))), "violates")
@@ -174,6 +189,23 @@ expect_error(assert_hierarchical_2024(mutate(selected, rentM_24 = rentM_24_bg_ag
 expect_error(assert_hierarchical_2024(mutate(selected, acs_source_24 = "tract")), "selected source")
 stopifnot(nrow(assert_hierarchical_2024(select_canonical_2024(small[FALSE, ]))) == 2 * nrow(merge_2024_field_map()))
 expect_error(prepare_2024_source(select(make_input(tract_id(1), "tr2020_id"), -rentM)), "missing bundle")
+expect_error(prepare_2024_source(select(make_input(tract_id(1), "tr2010_id", bg = TRUE),
+                                       -interp_rent), "bg_agg"), "missing bundle")
+expect_error(prepare_2024_source(mutate(make_input(tract_id(1), "tr2010_id", bg = TRUE),
+                                       interp_rent = "25"), "bg_agg"), "must be numeric")
+
+# Positive, zero, negative, and missing 2016 baselines; all numerators are
+# selected first, including a changed tract whose ordinary aggregate rent differs.
+baseline <- make_input(tract_id(1:8), "tr2010_id") |>
+  mutate(rentE = c(10, 10, 10, 10, 10, 10, 0, -1)) |>
+  rename_vars("16") |>
+  select(ends_with("_16"))
+changed_small <- calc_change_vars(bind_cols(selected, baseline))
+stopifnot(isTRUE(all.equal(changed_small$interp_rentPOST,
+                          c(3, 2.5, NA, NA, NA, NA, NA, NA), tolerance = 0)),
+          changed_small$rentPOST[2] == 2)
+baseline$rentE_16[2] <- NA_real_
+stopifnot(is.na(calc_change_vars(bind_cols(selected, baseline))$interp_rentPOST[2]))
 
 source_16 <- make_input(ids_16, "tr2010_id")
 source_bg <- make_input(ids_bg, "tr2010_id", bg = TRUE) |>
@@ -198,6 +230,7 @@ source_bg$rhu_inventoryE[c(7, 8)] <- NA_real_
 source_bg$rhu_inventoryE[9] <- source_bg$rhuE[9] - 1
 source_bg$rentE[13] <- NA_real_
 source_bg$rentCV[13] <- NA_real_
+source_bg$interp_rent[8] <- NA_real_
 notebook_xwalk <- tibble(tr2020_id = native_ids, tr2010_id = linked_ids,
                          geo_consistent = 1, relationship_class = "consistent",
                          same_geoid = as.double(native_ids == linked_ids),
@@ -262,9 +295,20 @@ for (measure in c("rent", "rhu", "med_hhinc")) {
             isTRUE(all.equal(canonical_before[[paste0(measure, "POSTCV")]][1], expected_moe/1.645/ratio)))
 }
 bg_rows <- match(canonical_before$tr2010_id, source_bg$tr2010_id)
-for (column in c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "interp_rent")) {
+for (column in c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval")) {
   stopifnot(identical(canonical_before[[column]], source_bg[[column]][bg_rows]))
 }
+stopifnot(canonical_before$interp_rent[1] == 30,
+          isTRUE(all.equal(canonical_before$interp_rentPOST[1], 3/1.307)),
+          canonical_before$interp_rent[4] == source_bg$interp_rent[4],
+          isTRUE(all.equal(canonical_before$interp_rentPOST[4], 1.05/1.307)),
+          all(is.na(canonical_before$interp_rent[c(6, 7, 8, 10, 11, 14, row_903, row_904)])),
+          all(is.na(canonical_before$interp_rentPOST[c(2, 3, 6, 7, 8, 10, 11, 14, row_903, row_904)])),
+          canonical_before$interp_rent[13] == source_bg$interp_rent[13],
+          !is.na(canonical_before$interp_rentPOST[13]),
+          canonical_before$interp_rent[row_901] == source_tract$rentE[match(tract_id(901), native_ids)],
+          !is.na(canonical_before$interp_rentPOST[row_901]),
+          !any(grepl("^interp_rent(M|CV|POSTCV)$|^moe_interp_rentPOST$", canonical_names)))
 for (label in c("summarize-cv", "geography-coverage", "source-selection-qa",
                 "compare-source-levels", "diagnostic-change-vars", "compare-inventory-levels",
                 "compare-inventory-changes", "validation-panel", "validate-keys-panel",
@@ -279,7 +323,18 @@ stopifnot(identical(env$acs_full, canonical_before),
           sum(env$source_selection_qa$counts$n_tracts) == nrow(canonical_before),
           isTRUE(all.equal(sum(env$source_selection_qa$counts$share), 1)),
           env$source_selection_qa$geography$status$n_tracts[4] == 1,
+          all(c("interp_rent", "interp_rentPOST") %in% env$source_selection_qa$missingness$measure),
           all(env$hierarchy_equality$n_mismatch == 0))
+
+# The actual notebook validation rejects using the preserved block-group source
+# for changes, even when the diagnostic copy has the same incorrect values.
+bad_change_env <- new.env(parent = env)
+bad_change_env$acs_full <- mutate(canonical_before,
+  interp_rentPOST = diagnostic_ratio(env$acs_diagnostics$interp_rent_24_bg_agg, rentE_16))
+bad_change_env$acs_diagnostics <- mutate(env$acs_diagnostics,
+  interp_rentPOST = bad_change_env$acs_full$interp_rentPOST)
+expect_error(eval(notebook_chunk("validation-panel"), bad_change_env),
+             "Interpolated rent change must use the canonical selected value")
 
 # Disabled writes must not read/create/replace the canonical destination.
 run_chunk("save-panel")

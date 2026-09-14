@@ -58,7 +58,13 @@ All added estimates, MOEs, and CVs below are numeric. Definitions match the
 Shares and vacancy rates are missing for non-positive or missing denominators.
 The existing MOE/CV formulas and their missing-value behavior are retained.
 No interpolated rent, block-group missing/top-coded-rent shares, or inventory
-MOE/CV is added to this direct tract product.
+MOE/CV is added to this direct tract product. In Step 4, this product's
+post-censoring `rentE` serves as the tract-source counterpart for canonical
+`interp_rent` on geographically consistent tracts. Changed tracts use the
+block-group interpolation; missing/unexpected status leaves canonical
+`interp_rent` missing. Missing selected values are never filled from the other
+source, and `interp_rentPOST` uses the selected value over positive,
+inflation-adjusted 2016 median rent. No tract interpolation is constructed.
 
 ## Added flags
 

@@ -145,16 +145,16 @@ merge_quality_columns <- function() {
 # Fixed panel fields from the Step 2 schemas, including source-specific flags.
 merge_2024_field_map <- function() {
   fields <- c(merge_measure_columns(), merge_quality_columns())
-  tibble::tibble(canonical = paste0(fields, "_24"),
-                 tract = paste0(fields, "_24_tract"),
-                 bg_agg = paste0(fields, "_24_bg_agg"))
+  tibble::tibble(canonical = c(paste0(fields, "_24"), "interp_rent"),
+                 tract = c(paste0(fields, "_24_tract"), "rentE_24_tract"),
+                 bg_agg = c(paste0(fields, "_24_bg_agg"), "interp_rent_24_bg_agg"))
 }
 
 prepare_2024_source <- function(df, source = c("tract", "bg_agg")) {
   source <- match.arg(source)
   key <- if (source == "tract") "tr2020_id" else "tr2010_id"
   required <- c(key, merge_measure_columns(),
-                if (source == "tract") merge_quality_columns() else "tc_flag_rent_24")
+                if (source == "tract") merge_quality_columns() else c("tc_flag_rent_24", "interp_rent"))
   missing <- setdiff(required, names(df))
   if (length(missing)) stop(source, ": missing bundle fields: ", paste(missing, collapse = ", "))
   if (!all(vapply(df[setdiff(required, key)], is.numeric, logical(1)))) {
@@ -172,7 +172,8 @@ prepare_2024_source <- function(df, source = c("tract", "bg_agg")) {
     df$tc_flag_med_hval <- rep(NA_real_, nrow(df))
   }
   df |>
-    dplyr::select(dplyr::all_of(c(key, merge_measure_columns(), merge_quality_columns()))) |>
+    dplyr::select(dplyr::all_of(c(key, merge_measure_columns(), merge_quality_columns(),
+                                 if (source == "bg_agg") "interp_rent"))) |>
     dplyr::rename_with(~ paste0(.x, "_24_", source), -dplyr::all_of(key))
 }
 
@@ -272,6 +273,7 @@ infl_adj_vars <- function(df, yr, var_list) {
 #'
 #' Level (dollar/count) changes are 2024/2016 ratios (`*POST`); share and rate
 #' changes are percentage-point differences, `value_24 - value_16` (`*PPC`).
+#' Call after source selection so `interp_rentPOST` uses canonical `interp_rent`.
 #'
 #' @param df
 #' @return dataframe with change variables (`*POST` ratios, `*PPC` differences)
