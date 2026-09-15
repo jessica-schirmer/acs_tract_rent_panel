@@ -43,8 +43,9 @@ weights, by measure type (see the §2.5 decision block):
 `tot_vac_baseE`, `pop_blkE`, `pop_hspE`, `pop_aaE`, `pop_raceE`, `pop_ethnE`,
 `sfd_detE`, `sfd_baseE`, `mf5E`, `rhucashE`, `grentcat1E`–`grentcat24E`.
 
-`mf5E` (units in 5+ structures) is renamed from `mfE` after aggregation. The
-following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
+`mf5E` (units in 5+ structures) is renamed from `mfE` after aggregation. 
+
+The following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 `calc_agg_vars()`, then joined onto the tract table:
 `vac_forrentE`, `vac_forsaleE`, `ohuE`, `smfE` (small multifamily:
 `sfd_attE + duplexE + quadplexE`).

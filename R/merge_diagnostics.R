@@ -6,7 +6,7 @@ merge_relationship_classes <- c(
 )
 
 assert_merge_measures <- function(df, key, label) {
-  required <- c(key, "rentE", "rhuE", "rhu_inventoryE")
+  required <- c(key, "rentE", "rhuE", "rhu_inventoryE", "smfE", "sfd_detE")
   if (!all(required %in% names(df))) stop(label, ": missing documented input fields")
   assert_unique_key(df, key, label)
   if (!is.character(df[[key]]) || !all(grepl("^06[0-9]{9}$", df[[key]]))) {

@@ -60,7 +60,8 @@ are numeric doubles, with missingness inherited from the selected source:
 
 - **Estimates `_{yr}`:** `rentE`, `lqcrentE`, `popE`, `huE`, `rhuE`, `med_hvalE`,
   `rhu_lrE`, `rhu_lr2E`, `med_hhincE`, `pctrhuE`, `pctvacE`, `pctblkE`, `pcthspE`,
-  `pctaaE`, `pctsfdE`, `mf5E`, `nsfaE`, `pctrvacE`, `pctsvacE`, `rhu_inventoryE`.
+  `pctaaE`, `pctsfdE`, `mf5E`, `nsfaE`, `smfE`, `sfd_detE`, `pctrvacE`,
+  `pctsvacE`, `rhu_inventoryE`.
   (`mf5E` = units in 5+ structures, renamed from `mfE`; `nsfaE` =
   non-single-family attached count; `pctrvacE` / `pctsvacE` = rental / for-sale
   vacancy rates. These carry no MOE/CV column.)
@@ -68,6 +69,15 @@ are numeric doubles, with missingness inherited from the selected source:
   `med_hvalM`, `med_hhincM`, `pctrhuM`, `pctblkM`, `pcthspM`.
 - **Coefficients of variation `_{yr}`:** `rentCV`, `popCV`, `huCV`, `rhuCV`,
   `med_hvalCV`, `med_hhincCV`, `pctrhuCV`, `pctblkCV`, `pcthspCV`.
+
+**Structure counts retained as levels:** `smfE_16`, `smfE_24`, `sfd_detE_16`,
+and `sfd_detE_24` are numeric doubles copied from the documented Step 2 inputs.
+`smfE` is small multifamily (`sfd_attE + duplexE + quadplexE`); `sfd_detE` is
+detached single-family units (B25024_002). The 2016 levels retain their source
+values; the 2024 levels follow the geographic hierarchy above. Zeros, fractional
+block-group aggregates, and selected-source missingness are preserved. Like
+`mf5E` and `nsfaE`, these are levels only: no change measure, quality flag, MOE,
+or CV is added. Counts receive no inflation adjustment.
 
 **Inflation adjustment:** the 2016 dollar estimates/MOEs (`rentE_16`,
 `lqcrentE_16`, `med_hhincE_16`, `med_hvalE_16`, and the `*M_16` counterparts) are
@@ -176,12 +186,20 @@ diagnostics and adds no output columns.
 ## Schema migration and validation
 
 `panel_schema_additions()` allows only inventory's two levels, ratio and missing
-flag; the four geographic/provenance columns; and the eight newly added 2024
-quality flags above (`tc_flag_rent_24` already existed). No old columns are
-removed; shared columns retain their order and storage types. New fields are
+flag; the four geographic/provenance columns; the eight newly added 2024
+quality flags above (`tc_flag_rent_24` already existed); and `smfE_16`, `smfE_24`,
+`sfd_detE_16`, and `sfd_detE_24`. Relative to the existing hierarchical panel,
+the structure-count update adds exactly these four level columns. No old columns
+are removed; shared columns retain their order and storage types. New fields are
 required and type-checked even without a prior reference. Observed estimate
 values may change under the hierarchy; the prior file is a schema reference,
 not a value-parity target. Save/reload column order/types and values stay strict.
+
+All three inputs require numeric `smfE` and `sfd_detE`, finite and nonnegative
+when observed. Section 7 reports missingness for all four levels and summarizes
+their distributions; mapped-field checks verify exact selected-source equality
+for both 2024 levels. No empirical missingness threshold or fixed row count is
+imposed.
 
 Notebook QA reports source counts/shares, missing/unrecognized status counts,
 canonical missingness by source, and exact equality to each selected bundle.

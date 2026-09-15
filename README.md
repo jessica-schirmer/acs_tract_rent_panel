@@ -19,7 +19,7 @@ target counties, with the original NHGIS fractions (no renormalization).
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
 02_assemble.Rmd - aggregate 2020-2024 block groups to 2010 tracts; prepare 2016 and 2024 tract-source measures separately; construct rental inventory with explicit missingness, data flags, and uncertainty measures for all three products
 03_tract_change.Rmd - characterize statewide 2010–2020 tract intersections and save a 2020-tract crosswalk identifying exact geographic consistency
-04_merge.Rmd - retain the 2016/block-group 2024 key union, select canonical 2024 bundles by geographic consistency, calculate changes including separate rental inventory change, retain source comparisons, and optionally save the panel
+04_merge.Rmd - retain the 2016/block-group 2024 key union, select canonical 2024 bundles by geographic consistency, retain smfE and sfd_detE levels for both years, calculate changes including separate rental inventory change, retain source comparisons, and optionally save the panel
 
 
 
@@ -310,7 +310,7 @@ Inputs:
 
 Outputs:
 - Notebook-only `acs_diagnostics`, geographic coverage/unmatched keys, source level/change comparisons, and inventory comparisons; no diagnostic Feather is written.
-- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, selected 2024 measures, level-change ratios, share/rate differences, existing CVs, separate inventory levels/change, and geographic/source/quality fields. Set `write_panel <- FALSE` to validate without writing.
+- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, selected 2024 measures, `smfE` and `sfd_detE` levels for both years, level-change ratios, share/rate differences, existing CVs, separate inventory levels/change, and geographic/source/quality fields. Set `write_panel <- FALSE` to validate without writing.
 
 Schema:
 - `schemas/acs_full.md`
@@ -351,6 +351,17 @@ and the consistent-link `tr2020_id` provide provenance. `acs_source_24` is
 or measure availability. Relevant 2024 quality flags follow the selected source;
 unavailable aggregate censoring flags remain missing.
 
+**Structure counts retained as levels:** the panel adds `smfE_16`, `smfE_24`,
+`sfd_detE_16`, and `sfd_detE_24`. Small multifamily `smfE` is the upstream sum
+`sfd_attE + duplexE + quadplexE`; `sfd_detE` counts detached single-family units.
+The shared measurement list carries both counts from all three Step 2 inputs.
+The 2016 levels retain their source values, and the 2024 levels follow the
+geographic hierarchy. Zeros, fractional aggregate counts, and selected-source
+missingness are preserved. Like `mf5E` and `nsfaE`, these are levels only, with
+no new change measures, flags, MOEs, CVs, or inflation adjustment. Input checks
+require numeric, finite, nonnegative observed counts; Section 7 reports each
+level's missingness and numeric distribution.
+
 The analyst chose to keep `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
 under their existing names and values as block-group diagnostics, including on
 Census-selected/unresolved rows. They do not describe selected Census quality;
@@ -380,11 +391,13 @@ Run `Rscript --vanilla tests/test_merge_diagnostics.R` for synthetic geography,
 missingness/denominator cases, actual notebook chunks using temporary inputs,
 whole-bundle selection, no-fallback cases in both directions, canonical changes,
 hierarchical interpolated-rent levels/changes, all-field correction counts,
-inventory, schema migration, and guarded save/reload checks. An analyst can run
-all diagnostics with writing disabled. Enable `write_panel <- TRUE` in setup and
+inventory, structure-count levels, schema migration, and guarded save/reload
+checks. An analyst can run all diagnostics with writing disabled. Enable
+`write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
 replacement is announced. Only documented hierarchy/inventory/flag additions
-are permitted against a prior panel; shared column order/types and saved-value
+and the four `smfE` / `sfd_detE` levels are permitted against a prior panel;
+shared column order/types and saved-value
 checks remain strict. No prior reference is reported as not checked.
 
 Analyst validation of assembly and the panel (after regenerating the revised stage-1 inputs):

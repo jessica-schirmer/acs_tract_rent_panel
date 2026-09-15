@@ -93,7 +93,7 @@ merge_measure_columns <- function() {
                       "med_hvalE",
                      "rhu_lrE", "rhu_lr2E",  "med_hhincE", "pctrhuE", "pctvacE",
                      "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "mf5E",
-                     "nsfaE", "pctrvacE", "pctsvacE", "rhu_inventoryE")
+                     "nsfaE", "smfE", "sfd_detE", "pctrvacE", "pctsvacE", "rhu_inventoryE")
     moe_var_list <- c("rentM", "lqcrentM", "popM", "huM", "rhuM",
                       "med_hvalM",
                     #  "rhu_lrM", "rhu_lr2M",  "pctvacM", "pcthspM", "pctaaM",
@@ -194,11 +194,12 @@ select_canonical_2024 <- function(df) {
   df
 }
 
-# The only additions permitted relative to the pre-hierarchy panel contract.
+# Documented hierarchy, inventory, and structure-level additions to older panels.
 panel_schema_additions <- function() {
   c("rhu_inventoryE_16", "rhu_inventoryE_24", "rhu_inventoryPOST",
     "m_flag_rhu_inventoryPOST", "tr2020_id", "geo_consistent",
     "relationship_class", "acs_source_24",
+    "smfE_16", "smfE_24", "sfd_detE_16", "sfd_detE_24",
     setdiff(paste0(merge_quality_columns(), "_24"), "tc_flag_rent_24"))
 }
 
@@ -206,12 +207,12 @@ panel_schema_additions <- function() {
 assert_panel_schema <- function(current, previous = NULL) {
   additions <- panel_schema_additions()
   if (!all(additions %in% names(current)) || anyDuplicated(names(current))) {
-    stop("Panel schema: missing required hierarchy fields or duplicate columns")
+    stop("Panel schema: missing required fields or duplicate columns")
   }
   strings <- c("tr2020_id", "relationship_class", "acs_source_24")
   if (!all(vapply(current[strings], is.character, logical(1))) ||
       !all(vapply(current[setdiff(additions, strings)], is.double, logical(1)))) {
-    stop("Panel schema: invalid hierarchy column storage types")
+    stop("Panel schema: invalid required column storage types")
   }
   if (!all(is.na(current$acs_source_24) | current$acs_source_24 %in% c("tract", "bg_agg")) ||
       !all(is.na(current$tr2020_id) | grepl("^06[0-9]{9}$", current$tr2020_id))) {

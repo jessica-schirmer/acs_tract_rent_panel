@@ -121,7 +121,9 @@ linked_ids <- c(ids_bg, tract_id(c(901, 905, 904)))
 # Field lists follow schemas/acs_full.md; input flags/tags follow Step 2 schemas.
 estimates <- c("rentE", "lqcrentE", "popE", "huE", "rhuE", "med_hvalE",
                "rhu_lrE", "rhu_lr2E", "med_hhincE", "pctrhuE", "pctvacE", "pctblkE",
-               "pcthspE", "pctaaE", "pctsfdE", "mf5E", "nsfaE", "pctrvacE", "pctsvacE")
+               "pcthspE", "pctaaE", "pctsfdE", "mf5E", "nsfaE", "smfE", "sfd_detE",
+               "pctrvacE", "pctsvacE")
+structure_level_columns <- c("smfE_16", "smfE_24", "sfd_detE_16", "sfd_detE_24")
 moes <- c("rentM", "lqcrentM", "popM", "huM", "rhuM", "med_hvalM", "med_hhincM",
            "pctrhuM", "pctblkM", "pcthspM")
 cvs <- c("rentCV", "popCV", "huCV", "rhuCV", "med_hvalCV", "med_hhincCV",
@@ -133,6 +135,9 @@ make_input <- function(ids, key, bg = FALSE) {
   for (column in cvs) x[[column]] <- rep(0.1, length(ids))
   for (column in estimates[startsWith(estimates, "pct")]) x[[column]] <- rep(0.2, length(ids))
   x$rhu_inventoryE <- x$rhuE + 5
+  x$smfE <- as.double(seq_along(ids) * 3)
+  x$sfd_detE <- as.double(seq_along(ids) * 7)
+  x$sfd_detM <- rep(2, length(ids))
   if (bg) {
     x <- mutate(x, rhu_id = TRUE, left_id = TRUE, right_id = TRUE,
                  pct_miss_rent = 0, pct_tc_rent = 0, pct_miss_hval = 0,
@@ -143,6 +148,24 @@ make_input <- function(ids, key, bg = FALSE) {
                  tc_flag_rent = 0, tc_flag_lqcrent = 0, tc_flag_med_hval = 0)
   }
   x
+}
+
+# Both native key types accept zero, fractional, and missing structure counts,
+# and reject absent fields, negative/infinite counts, or nonnumeric storage.
+for (key in c("tr2010_id", "tr2020_id")) {
+  input <- make_input(tract_id(1:5), key)
+  for (column in c("smfE", "sfd_detE")) input[[column]] <- c(0, 2.5, NA, NaN, 4)
+  assert_merge_measures(input, key, "Structure input")
+  for (column in c("smfE", "sfd_detE")) {
+    expect_error(assert_merge_measures(select(input, -all_of(column)), key, "Structure input"),
+                 "missing documented input fields")
+    for (bad_value in list(-1, Inf, -Inf, "1")) {
+      bad_input <- input
+      bad_input[[column]][1] <- bad_value
+      expect_error(assert_merge_measures(bad_input, key, "Structure input"),
+                   "must be numeric, finite and nonnegative")
+    }
+  }
 }
 
 # Independent selector exercise supplies both alternatives even on changed rows.
@@ -159,9 +182,15 @@ a$rentM_24_tract <- c(rep(40, 6), NA, 40)
 b$rentM_24_bg_agg <- c(rep(20, 7), NA)
 a$tc_flag_rent_24_tract[7] <- NA_real_
 b$tc_flag_rent_24_bg_agg[8] <- NA_real_
+a$smfE_24_tract <- c(0, 30, 30, 30, NA, 30, 30, 30)
+b$smfE_24_bg_agg <- c(20, 2.5, 3.5, 4.5, 20, NaN, 20, 0)
+a$sfd_detE_24_tract <- c(70, 70, 70, 70, NA, 70, 0, 70)
+b$sfd_detE_24_bg_agg <- c(40, 5.25, 6.25, 7.25, 40, NA, 40, 0)
 small <- bind_cols(small, select(a, -tr2020_id), select(b, -tr2010_id))
 selected <- select_canonical_2024(small)
 stopifnot(identical(selected$rentE_24, c(30, 20, 20, 20, NA, NaN, 30, 20)),
+          identical(selected$smfE_24, c(0, 2.5, 3.5, 4.5, NA, NaN, 30, 0)),
+          identical(selected$sfd_detE_24, c(70, 5.25, 6.25, 7.25, NA, NA, 0, 0)),
           identical(selected$interp_rent, c(30, 25, 25, 25, NA, NaN, 30, 25)),
           identical(selected$interp_rent_24_bg_agg, b$interp_rent_24_bg_agg),
           identical(selected$tr2010_id, small$tr2010_id),
@@ -289,6 +318,12 @@ source_bg$rhu_inventoryE[9] <- source_bg$rhuE[9] - 1
 source_bg$rentE[13] <- NA_real_
 source_bg$rentCV[13] <- NA_real_
 source_bg$interp_rent[8] <- NA_real_
+source_16$smfE[c(2, 3)] <- c(0, NA_real_)
+source_16$sfd_detE[c(4, 5)] <- c(0, NA_real_)
+source_tract$smfE[c(1, 7)] <- c(0, NA_real_)
+source_tract$sfd_detE[7] <- NA_real_
+source_bg$smfE[c(2, 8, 10, 11)] <- c(4.5, NA, 31.25, 41.75)
+source_bg$sfd_detE[c(2, 8, 10, 11)] <- c(6.25, NA, 51.5, 61.5)
 notebook_xwalk <- tibble(tr2020_id = native_ids, tr2010_id = linked_ids,
                          geo_consistent = 1, relationship_class = "consistent",
                          same_geoid = as.double(native_ids == linked_ids),
@@ -319,6 +354,21 @@ geography_before_selection <- select(env$acs_diagnostics, tr2010_id, tr2020_id,
 for (label in c("select-canonical-24", "change-vars")) run_chunk(label)
 canonical_before <- env$acs_full
 canonical_names <- names(canonical_before)
+stopifnot(setequal(grep("smf|sfd_det", canonical_names, value = TRUE), structure_level_columns),
+          all(vapply(canonical_before[structure_level_columns], is.double, logical(1))))
+# Check values against native keyed inputs, including a different-GEOID link,
+# absent records, selected missing estimates, and fractional aggregate levels.
+rows_16 <- match(canonical_before$tr2010_id, source_16$tr2010_id)
+rows_bg <- match(canonical_before$tr2010_id, source_bg$tr2010_id)
+rows_tract <- match(canonical_before$tr2020_id, source_tract$tr2020_id)
+use_tract <- canonical_before$geo_consistent %in% 1
+for (column in c("smfE", "sfd_detE")) {
+  stopifnot(identical(canonical_before[[paste0(column, "_16")]], source_16[[column]][rows_16]),
+            identical(canonical_before[[paste0(column, "_24")]][use_tract],
+                      source_tract[[column]][rows_tract[use_tract]]),
+            identical(canonical_before[[paste0(column, "_24")]][!use_tract],
+                      source_bg[[column]][rows_bg[!use_tract]]))
+}
 unchanged_columns <- setdiff(names(panel_before_selection), fields$canonical)
 stopifnot(identical(select(canonical_before, all_of(unchanged_columns)),
                     select(panel_before_selection, all_of(unchanged_columns))),
@@ -521,8 +571,16 @@ stopifnot(identical(tools::md5sum(saved_path), sentinel_md5))
 
 # Fixed migration allowlist, strict shared order/types, and temporary round trips.
 legacy <- select(canonical_before, -all_of(panel_schema_additions()))
+prior_structure_levels <- select(canonical_before, -all_of(structure_level_columns))
 quiet(assert_panel_schema(canonical_before, legacy))
+quiet(assert_panel_schema(canonical_before, prior_structure_levels))
 quiet(assert_panel_schema(canonical_before, canonical_before))
+for (column in structure_level_columns) {
+  expect_error(assert_panel_schema(select(canonical_before, -all_of(column))), "missing required fields")
+  wrong_type <- canonical_before
+  wrong_type[[column]] <- as.integer(wrong_type[[column]])
+  expect_error(assert_panel_schema(wrong_type), "storage types")
+}
 expect_error(assert_panel_schema(mutate(canonical_before, unexpected = 1), legacy), "unapproved")
 expect_error(assert_panel_schema(select(canonical_before, -rentE_16), legacy), "unapproved")
 expect_error(assert_panel_schema(mutate(canonical_before, rentE_16 = as.integer(rentE_16)), legacy), "types")
@@ -536,6 +594,11 @@ env$prior_panel <- legacy
 run_chunk("save-panel")
 run_chunk("reload-panel")
 stopifnot(env$panel_written, isTRUE(all.equal(env$acs_saved, canonical_before)))
+env$prior_panel <- prior_structure_levels
+run_chunk("save-panel")
+run_chunk("reload-panel")
+stopifnot(setequal(setdiff(names(env$acs_saved), names(prior_structure_levels)), structure_level_columns),
+          identical(select(env$acs_saved, -all_of(structure_level_columns)), prior_structure_levels))
 env$prior_panel <- env$acs_saved
 run_chunk("save-panel")
 run_chunk("reload-panel")
@@ -559,4 +622,4 @@ for (section in 1:7) {
   numbers <- sub(paste0("^## ", section, "\\.([0-9]+).*"), "\\1", subsections)
   stopifnot(identical(numbers, as.character(seq_along(subsections))))
 }
-cat("Merge tests passed: hierarchical bundles, source-aware changes, inventory, geography, diagnostics, and guarded migration/save/reload.\n")
+cat("Merge tests passed: hierarchical bundles, structure-count levels, source-aware changes, inventory, geography, diagnostics, and guarded migration/save/reload.\n")
