@@ -33,14 +33,15 @@ knitr::opts_chunk$set(
 
 **Outputs:**
 
-- Notebook-only `acs_diagnostics`, geographic coverage, source/change comparisons,
-  and inventory comparisons; no diagnostic data files are written.
+- Notebook-only `acs_diagnostics`, geographic coverage, source-selection correction
+  QA, source/change comparisons on consistent tracts, and inventory comparisons;
+  no diagnostic data files are written.
 - Optional `../../../data/acs_full.feather` — the existing ACS tract panel: 2016 and hierarchically selected 2024 measures
   (2016 dollars inflation-adjusted to 2024) side by side on `tr2010_id`, with
   change measures (level `*POST` ratios and share/rate `*PPC` percentage-point
   differences), existing coefficients of variation, separate inventory change,
   hierarchical `interp_rent` / `interp_rentPOST`, and geographic/source/quality
-  fields. `write_panel <- FALSE` is the default;
+  fields. Set `write_panel <- FALSE` to validate without writing;
   the diagnostic workflow does not require a canonical output write.
 
 This notebook:
@@ -61,9 +62,9 @@ native keys and the full panel. County definitions remain centralized in stage 2
 Paired Census-vs-block-group comparisons use only geographically consistent
 links, including consistent pairs with different GEOIDs. This restricts paired
 diagnostic eligibility, not panel membership. Canonical 2024 values use Census
-tracts for `geo_consistent == 1` and block-group
-aggregates for `geo_consistent == 0`. Unresolved status leaves canonical values
-missing. Source availability never changes assignment.
+tracts for `geo_consistent == 1` and block-group aggregates otherwise, including
+missing/unexpected numeric flags. Original geographic statuses remain intact for
+QA. Source availability never changes assignment.
 
 # 1. Set up environment
 
@@ -101,7 +102,7 @@ source(here::here("R", "merge_diagnostics.R"))
 
 ## 1.3 Set data directory and optional output write
 
-Leave `write_panel <- FALSE` to run through all diagnostics and validate the
+Set `write_panel <- FALSE` to run through all diagnostics and validate the
 in-memory canonical panel. Setting it to `TRUE` explicitly enables the existing
 canonical save path, with schema comparison and announced replacement. Diagnostic
 comparison fields remain in the notebook; geographic provenance, canonical
@@ -249,7 +250,8 @@ print(table(tract_geography$relationship_class, useNA = "ifany"))
 ```
 
 Missing or unrecognized numeric geographic flags remain in the working data,
-with separate QA counts and no source assignment. Unknown class labels are
+with separate QA counts; §3.2 selects block-group measures for those rows.
+Unknown class labels are
 reported without overriding a valid geographic flag. Contradictory known
 classifications, duplicate keys, and ambiguous links fail validation.
 
@@ -360,12 +362,17 @@ acs_24_tract_geography <- merge_diagnostic_left_join(
 ### Decision: Select whole bundles by geography, with no availability fallback
 
 For `geo_consistent == 1`, select Census tract estimates and their associated
-MOEs, CVs, missing/zero flags, and censoring flags. For `geo_consistent == 0`,
-select the block-group bundle. Missing or unexpected flag values leave
-`acs_source_24` and every hierarchy-controlled 2024 field missing; all tracts
-remain. A missing selected estimate, source record, MOE, or flag is never filled
-from the other source. Preserve the selected upstream bundle even when a
-censored estimate has an observed source MOE.
+MOEs, CVs, missing/zero flags, and censoring flags. Select the block-group bundle
+for every other row, including missing or unexpected numeric flags. Task 02
+corrects the earlier rule that left those rows unassigned despite available
+block-group values. Only `geo_consistent == 1` establishes tract-source
+eligibility; omitted crosswalk links must not suppress the aggregate source.
+Preserve the original geographic flags and classes for QA without recoding them.
+Every row receives `acs_source_24 = "tract"` or `"bg_agg"`, independently of
+measurement availability. Copy each mapped field's value and missingness from
+that source. A missing selected estimate, source record, MOE, or flag is never
+filled from the other source. Preserve the selected upstream bundle even when
+a censored estimate has an observed source MOE.
 
 Aggregate missing/zero flags are calculated on its own estimates before joining,
 using existing 0/1 conventions. `tc_flag_rent_24` means a top-coded tract median
@@ -386,10 +393,10 @@ unchanged.
 
 Canonical `interp_rent` uses the native tract median gross rent
 (`rentE_24_tract`, also selected into `rentE_24`) for `geo_consistent == 1` and
-the existing block-group interpolation (`interp_rent_24_bg_agg`) for
-`geo_consistent == 0`. Missing or unexpected status produces `NA`; missing
-selected values never fall back to the alternative. The native tract median is
-the intended tract counterpart, so no tract interpolation is constructed.
+the existing block-group interpolation (`interp_rent_24_bg_agg`) for every other
+row, including missing/unexpected status. Missing selected values never fall
+back to the alternative. The native tract median is the intended tract
+counterpart, so no tract interpolation is constructed.
 `merge_2024_field_map()` in `R/merge_helpers.R` maps both source fields to the
 existing unsuffixed output name. No interpolated-rent MOE/CV or change CV is added.
 
@@ -412,7 +419,7 @@ denominator is positive (otherwise `NA`).
 
 `interp_rentPOST` uses the canonical selected `interp_rent / rentE_16` with
 that same positive-baseline rule. It equals `rentPOST` for consistent tracts,
-including matching missingness; changed tracts use block-group interpolated
+including matching missingness; all other rows use block-group interpolated
 rent in the numerator. The 2016 baseline remains the inflation-adjusted median
 gross rent.
 
@@ -562,13 +569,23 @@ print(native_tract_measure_coverage, n = Inf, width = Inf)
 
 Source counts include every panel tract and distinguish assignment from
 availability. A consistent tract without a Census record remains assigned to
-Census, with missing values. `unassigned` includes missing/unexpected geographic
-flags. Missingness shares use each full source group, including missing values;
-no empirical threshold is imposed. All mapped fields must pass exact source
+Census, with missing values. Every other row remains assigned to block-group
+aggregates, even without an aggregate record. The defensive `unassigned`
+category must contain zero rows; missing/unexpected geographic flags remain
+visible in geographic QA. Missingness shares use each full source group,
+including missing values; no empirical threshold is imposed. All mapped fields must pass exact source
 equality, including `interp_rent` and missingness when an alternative is observed.
 The interpolated-rent check compares with native tract `rentE_24_tract` or
-`interp_rent_24_bg_agg` according to geographic status; unresolved values must
-be missing. Source-group missingness also includes `interp_rentPOST`.
+`interp_rent_24_bg_agg` according to the same two-branch rule.
+Source-group missingness also includes `interp_rentPOST`.
+
+`hierarchy_correction_qa` summarizes all mapped fields for rows not positively
+flagged consistent, including missing/unexpected flags. **Before** reconstructs
+the old rule on this run's inputs: only flag 0 selected block-group values;
+other non-consistent statuses produced missing canonical values. **After** uses
+the corrected canonical values, not a saved panel. Counts are derived at runtime.
+For every field, observed block-group values missing canonically must fall to
+zero, and remaining canonical missingness must equal block-group missingness.
 
 The upstream dollar-MOE aggregation discrepancy documented in
 `notes/2024_block_group_rent_weighting_audit.md` remains a separate research
@@ -583,21 +600,38 @@ hierarchy_equality <- assert_hierarchical_2024(acs_diagnostics)
 print(filter(hierarchy_equality, measure %in% c("rentE_24", "interp_rent", "rhu_inventoryE_24")),
       n = Inf, width = Inf)
 cat("All mapped bundles passed source equality; full checks in hierarchy_equality.\n")
+hierarchy_correction_qa <- summarize_hierarchy_correction(acs_diagnostics)
+cat("Before: old rule reconstructed on this run's inputs; after: corrected canonical values.\n")
+print(hierarchy_correction_qa, n = Inf, width = Inf)
+stopifnot("Observed block-group values must be retained for all rows not flagged consistent" =
+            all(hierarchy_correction_qa$n_bg_observed_canonical_missing_after == 0),
+          "Canonical and block-group missingness must agree for those rows" =
+            all(with(hierarchy_correction_qa,
+                     n_canonical_missing_after == n_not_consistent - n_bg_observed)))
 if (any(!acs_full$geo_consistent %in% c(0, 1))) {
-  cat("REVIEW: unresolved/unexpected geography leaves canonical 2024 measures missing; rows retained.\n")
+  cat("REVIEW: missing/unexpected geographic flags are retained; these rows select block-group measures.\n")
 }
 ```
 
 # 5. Compare 2024 sources and implied changes (diagnostic only)
 
-## 5.1 Compare median rent and rental inventory levels
+## 5.1 Compare median rent, interpolated rent, and rental inventory levels
 
-The full panel is the denominator for overall and geographic-status coverage.
-Source summaries use each source's available values; paired differences and
-correlations use both observed values on consistent links. Census values on
-unpaired changed geography remain available in the native-source coverage table
-in §4.1. A zero paired count outside consistent geography means the comparison
-is unavailable, not that the native Census measure is missing.
+### Decision: Restrict source comparisons to geographically consistent tracts
+
+Section 5 uses only panel tracts with `geo_consistent == 1`, so both 2024 sources
+refer to the same tract geography. In every table, `overall` denotes this
+consistent subset; there are no separate geographic-status groups. Consistent
+tracts with missing source records, estimates, or baselines remain in the
+coverage denominator. Source summaries use each source's available values;
+paired differences and correlations require both values. Full-panel and native
+Census geographic coverage remain available in §4.1.
+
+The interpolated-rent comparison uses `interp_rent_24_bg_agg`, the preserved
+2024 interpolation derived from aggregated block-group rent categories, against
+native tract median gross rent (`rentE_24_tract`). The canonical `interp_rent`
+already equals tract rent on consistent tracts, so it is not used as the
+block-group source in these diagnostics.
 
 For every comparison, `x` is the first measure and `y` the second:
 `difference = x - y`, `absolute_difference = abs(x - y)`, and `ratio = x / y`
@@ -608,11 +642,15 @@ filtering. Correlation is Pearson on paired observations and is `NA` for fewer
 than two pairs or a constant measure. Empty/all-missing summaries are `NA`.
 
 ```{r compare-source-levels}
+source_comparison_diagnostics <- acs_diagnostics |> filter(geo_consistent == 1)
+report_n(source_comparison_diagnostics, "Consistent tracts for Section 5 source comparisons")
+assert_tract_keys(source_comparison_diagnostics,
+                  acs_diagnostics$tr2010_id[acs_diagnostics$geo_consistent %in% 1],
+                  "Section 5 retains all consistent panel tracts")
 source_level_diagnostics <- list(
-  rent = compare_diagnostic_measures(acs_diagnostics, "rentE_24_tract", "rentE_24_bg_agg",
-                                     "geo_status", c("consistent", "not_consistent")),
-  inventory = compare_diagnostic_measures(acs_diagnostics, "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg",
-                                          "geo_status", c("consistent", "not_consistent"))
+  rent = compare_diagnostic_measures(source_comparison_diagnostics, "rentE_24_tract", "rentE_24_bg_agg"),
+  interp_rent = compare_diagnostic_measures(source_comparison_diagnostics, "rentE_24_tract", "interp_rent_24_bg_agg"),
+  inventory = compare_diagnostic_measures(source_comparison_diagnostics, "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg")
 )
 walk(source_level_diagnostics, function(result) {
   print(result$coverage, n = Inf, width = Inf)
@@ -624,11 +662,17 @@ walk(source_level_diagnostics, function(result) {
 
 ### Decision: Preserve the established level-change definition in diagnostics
 
-Diagnostic rent, inventory, and occupied-renter changes are 2024/2016 ratios,
-defined only for positive observed baselines. Rent uses the same already-adjusted
-2016 dollars as canonical `rentPOST`; counts receive no inflation adjustment.
-Each concept uses its own 2016 baseline. No diagnostic ratio replaces a canonical
-change variable, and no inventory MOE/CV is constructed.
+Diagnostic rent, interpolated-rent, inventory, and occupied-renter changes are
+2024/2016 ratios, defined only for positive observed baselines. Both rent
+comparisons use the same already-adjusted `rentE_16`: the new comparison pairs
+`rentE_24_tract / rentE_16` with `interp_rent_24_bg_agg / rentE_16`. Counts receive
+no inflation adjustment and use their own 2016 baselines. All Section 5 change
+comparisons and baseline-coverage tables use the consistent subset.
+
+The existing full-panel source-change columns are retained for Sections 6 and 7;
+the added block-group interpolated-rent ratio is calculated only in the refreshed
+Section 5 subset. No diagnostic ratio replaces a canonical change variable, and
+no inventory or interpolated-rent MOE/CV is constructed.
 
 ```{r diagnostic-change-vars}
 acs_diagnostics <- acs_diagnostics |>
@@ -640,11 +684,15 @@ acs_diagnostics <- acs_diagnostics |>
     diag_rhuPOST_24_tract = diagnostic_ratio(rhuE_24_tract, rhuE_16),
     diag_rhuPOST_24_bg_agg = diagnostic_ratio(rhuE_24_bg_agg, rhuE_16)
   )
+source_comparison_diagnostics <- acs_diagnostics |>
+  filter(geo_consistent == 1) |>
+  mutate(diag_interp_rentPOST_24_bg_agg = diagnostic_ratio(interp_rent_24_bg_agg, rentE_16))
+report_n(source_comparison_diagnostics, "Consistent tracts for Section 5 implied-change comparisons")
 baseline_coverage <- imap_dfr(
-  diagnostic_groups(acs_diagnostics, "geo_status", c("consistent", "not_consistent")),
+  diagnostic_groups(source_comparison_diagnostics),
   function(mask, group) {
     map_dfr(c("rentE_16", "rhu_inventoryE_16", "rhuE_16"), function(measure) {
-      x <- acs_diagnostics[[measure]][mask]
+      x <- source_comparison_diagnostics[[measure]][mask]
       tibble(group = group, measure = measure, n_total = length(x),
              n_base_missing = sum(is.na(x)), n_base_nonpositive = sum(x <= 0, na.rm = TRUE),
              n_base_positive = sum(x > 0, na.rm = TRUE))
@@ -654,10 +702,9 @@ baseline_coverage <- imap_dfr(
 stopifnot(with(baseline_coverage, all(n_base_missing + n_base_nonpositive + n_base_positive == n_total)))
 print(baseline_coverage, n = Inf, width = Inf)
 source_change_diagnostics <- list(
-  rent = compare_diagnostic_measures(acs_diagnostics, "diag_rentPOST_24_tract", "diag_rentPOST_24_bg_agg",
-                                     "geo_status", c("consistent", "not_consistent")),
-  inventory = compare_diagnostic_measures(acs_diagnostics, "diag_rhu_inventoryPOST_24_tract", "diag_rhu_inventoryPOST_24_bg_agg",
-                                          "geo_status", c("consistent", "not_consistent"))
+  rent = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rentPOST_24_tract", "diag_rentPOST_24_bg_agg"),
+  interp_rent = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rentPOST_24_tract", "diag_interp_rentPOST_24_bg_agg"),
+  inventory = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rhu_inventoryPOST_24_tract", "diag_rhu_inventoryPOST_24_bg_agg")
 )
 walk(source_change_diagnostics, function(result) {
   print(result$coverage, n = Inf, width = Inf)
@@ -702,8 +749,8 @@ iwalk(inventory_level_diagnostics, function(result, label) {
 
 Compare the two concepts' change ratios using the full panel for block-group
 2024 measures and separately the consistent subset for Census 2024 measures.
-The full-panel source-change coverage in §5.2 retains information about all
-excluded/unavailable Census comparisons. Here x is inventory change and y is
+The geographic and source-alignment coverage in §4.1 describes unavailable
+Census comparisons across the full panel. Here x is inventory change and y is
 occupied-renter change; differences are differences between ratios, not changes
 in unit counts or percentage-point changes. The canonical `rhuPOST` continues
 to measure occupied-renter change.
@@ -747,10 +794,8 @@ stopifnot("Interpolated rent change must use the canonical selected value" =
             isTRUE(all.equal(acs_full$interp_rentPOST,
                              diagnostic_ratio(acs_full$interp_rent, acs_full$rentE_16),
                              tolerance = 0)))
-canonical_changes <- setdiff(grep("POST$|POSTCV$|PPC$", names(acs_full), value = TRUE),
-                            grep("^m_flag_", names(acs_full), value = TRUE))
-stopifnot("Unassigned sources must have missing canonical changes" =
-            all(is.na(acs_full[is.na(acs_full$acs_source_24), canonical_changes])))
+stopifnot("Every panel row must have an assigned 2024 source" =
+            !anyNA(acs_full$acs_source_24))
 ```
 
 ## 7.1 Check key uniqueness and duplicates
@@ -768,7 +813,7 @@ report_tract_counties(acs_out, panel_counties, "In-memory panel destination coun
 ## 7.2 Check missingness on critical variables
 
 Expected: no missing `tr2010_id`. Missingness in the change ratios reflects
-missing selected estimates/source records, unresolved geography, or missing/non-positive
+missing selected estimates/source records or missing/non-positive
 baselines; we report
 counts rather than impose a threshold.
 
@@ -780,6 +825,8 @@ cat("acs_full missing rentPOST:     ", sum(is.na(acs_out$rentPOST)), "\n")
 cat("acs_full missing inventory 2016:", sum(is.na(acs_out$rhu_inventoryE_16)), "\n")
 cat("acs_full missing inventory 2024:", sum(is.na(acs_out$rhu_inventoryE_24)), "\n")
 cat("acs_full missing inventory change:", sum(is.na(acs_out$rhu_inventoryPOST)), "\n")
+
+cat("acs_full missing inventory 2024:", sum(is.na(acs_out$rhu_inventoryE_24)), "\n")
 cat("acs_full missing interp_rent:", sum(is.na(acs_out$interp_rent)), "\n")
 cat("acs_full missing interp_rentPOST:", sum(is.na(acs_out$interp_rentPOST)), "\n")
 print(summarize_diagnostic_measures(

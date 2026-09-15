@@ -161,18 +161,18 @@ a$tc_flag_rent_24_tract[7] <- NA_real_
 b$tc_flag_rent_24_bg_agg[8] <- NA_real_
 small <- bind_cols(small, select(a, -tr2020_id), select(b, -tr2010_id))
 selected <- select_canonical_2024(small)
-stopifnot(identical(selected$rentE_24, c(30, 20, NA, NA, NA, NaN, 30, 20)),
-          identical(selected$interp_rent, c(30, 25, NA, NA, NA, NaN, 30, 25)),
+stopifnot(identical(selected$rentE_24, c(30, 20, 20, 20, NA, NaN, 30, 20)),
+          identical(selected$interp_rent, c(30, 25, 25, 25, NA, NaN, 30, 25)),
           identical(selected$interp_rent_24_bg_agg, b$interp_rent_24_bg_agg),
           identical(selected$tr2010_id, small$tr2010_id),
           identical(select_canonical_2024(selected), selected),
-          identical(selected$acs_source_24, c("tract", "bg_agg", NA, NA, "tract", "bg_agg", "tract", "bg_agg")),
+          identical(selected$acs_source_24, c("tract", "bg_agg", "bg_agg", "bg_agg", "tract", "bg_agg", "tract", "bg_agg")),
           all(is.na(selected$rentM_24[7:8])), all(is.na(selected$tc_flag_rent_24[7:8])))
 equality <- assert_hierarchical_2024(selected)
 stopifnot(all(equality$n_mismatch == 0),
           all(filter(equality, measure %in% c("rentE_24", "interp_rent"))$
                 n_alternative_available_when_selected_missing == 1))
-# Detect wrong values, wrong missingness, fallback, and both unresolved statuses.
+# Detect wrong values, wrong missingness, and fallback for every status branch.
 for (row in c(1, 2, 3, 4, 5, 6)) {
   bad_value <- if (row == 1) 25 else 30
   expect_error(assert_hierarchical_2024(
@@ -187,12 +187,70 @@ expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = replace(rentE_
 expect_error(assert_hierarchical_2024(mutate(selected, rentE_24 = replace(rentE_24, 6, 30))), "violates")
 expect_error(assert_hierarchical_2024(mutate(selected, rentM_24 = rentM_24_bg_agg)), "violates")
 expect_error(assert_hierarchical_2024(mutate(selected, acs_source_24 = "tract")), "selected source")
+for (row in c(3, 4)) {
+  expect_error(assert_hierarchical_2024(
+    mutate(selected, acs_source_24 = replace(acs_source_24, row, NA_character_))), "selected source")
+}
 stopifnot(nrow(assert_hierarchical_2024(select_canonical_2024(small[FALSE, ]))) == 2 * nrow(merge_2024_field_map()))
 expect_error(prepare_2024_source(select(make_input(tract_id(1), "tr2020_id"), -rentM)), "missing bundle")
 expect_error(prepare_2024_source(select(make_input(tract_id(1), "tr2010_id", bg = TRUE),
                                        -interp_rent), "bg_agg"), "missing bundle")
 expect_error(prepare_2024_source(mutate(make_input(tract_id(1), "tr2010_id", bg = TRUE),
                                        interp_rent = "25"), "bg_agg"), "must be numeric")
+
+# Exercise observed and genuinely missing values for every mapped field, including
+# status-missing/unexpected rows with observed alternatives and source quality flags.
+fields <- merge_2024_field_map()
+all_fields <- mutate(small, geo_consistent = c(1, 0, NA, 2, 1, 0, NA, 2),
+                     rentE_16 = as.double(51:58), pct_miss_rent = 0.25)
+for (i in seq_along(unique(fields$tract))) {
+  column <- unique(fields$tract)[i]
+  value <- if (grepl("_flag_", column)) 0 else as.double(100 + i)
+  all_fields[[column]] <- replace(rep(value, 8), c(3, 5), NA_real_)
+}
+for (i in seq_along(fields$bg_agg)) {
+  column <- fields$bg_agg[i]
+  value <- if (grepl("_flag_", column)) 1 else as.double(200 + i)
+  all_fields[[column]] <- c(rep(value, 5), NA_real_, NA_real_, NaN)
+  all_fields[[fields$canonical[i]]] <- rep(-999, 8)
+}
+all_selected <- select_canonical_2024(all_fields)
+untouched <- setdiff(names(all_fields), fields$canonical)
+stopifnot(identical(all_selected[untouched], all_fields[untouched]),
+          identical(all_selected$acs_source_24,
+                    c("tract", "bg_agg", "bg_agg", "bg_agg", "tract", "bg_agg", "bg_agg", "bg_agg")),
+          identical(select_canonical_2024(all_selected), all_selected),
+          all(assert_hierarchical_2024(all_selected)$n_mismatch == 0))
+for (i in seq_len(nrow(fields))) {
+  column <- fields$canonical[i]
+  stopifnot(identical(all_selected[[column]][c(1, 5)], all_fields[[fields$tract[i]]][c(1, 5)]),
+            identical(all_selected[[column]][c(2, 3, 4, 6, 7, 8)],
+                      all_fields[[fields$bg_agg[i]]][c(2, 3, 4, 6, 7, 8)]))
+  bad_missing <- all_selected
+  bad_missing[[column]][3] <- NA_real_
+  expect_error(assert_hierarchical_2024(bad_missing), paste(column, "violates"))
+  bad_fallback <- all_selected
+  bad_fallback[[column]][7] <- all_fields[[fields$tract[i]]][7]
+  expect_error(assert_hierarchical_2024(bad_fallback), paste(column, "violates"))
+}
+correction <- summarize_hierarchy_correction(all_selected)
+stopifnot(identical(correction$measure, fields$canonical),
+          all(correction$n_not_consistent == 6), all(correction$n_bg_observed == 3),
+          all(correction$n_canonical_missing_before == 5),
+          all(correction$n_canonical_missing_after == 3),
+          all(correction$n_bg_observed_canonical_missing_before == 2),
+          all(correction$n_bg_observed_canonical_missing_after == 0))
+legacy_selected <- all_selected
+legacy_selected$acs_source_24[c(3, 4, 7, 8)] <- NA_character_
+for (column in fields$canonical) legacy_selected[[column]][c(3, 4, 7, 8)] <- NA_real_
+legacy_correction <- summarize_hierarchy_correction(legacy_selected)
+stopifnot(all(legacy_correction$n_bg_observed_canonical_missing_after == 2))
+expect_error(assert_hierarchical_2024(legacy_selected), "selected source")
+for (input in list(all_selected[FALSE, ], all_selected[c(1, 5), ])) {
+  empty_correction <- summarize_hierarchy_correction(input)
+  stopifnot(nrow(empty_correction) == nrow(fields),
+            all(as.matrix(select(empty_correction, -measure)) == 0))
+}
 
 # Positive, zero, negative, and missing 2016 baselines; all numerators are
 # selected first, including a changed tract whose ordinary aggregate rent differs.
@@ -202,7 +260,7 @@ baseline <- make_input(tract_id(1:8), "tr2010_id") |>
   select(ends_with("_16"))
 changed_small <- calc_change_vars(bind_cols(selected, baseline))
 stopifnot(isTRUE(all.equal(changed_small$interp_rentPOST,
-                          c(3, 2.5, NA, NA, NA, NA, NA, NA), tolerance = 0)),
+                          c(3, 2.5, 2.5, 2.5, NA, NA, NA, NA), tolerance = 0)),
           changed_small$rentPOST[2] == 2)
 baseline$rentE_16[2] <- NA_real_
 stopifnot(is.na(calc_change_vars(bind_cols(selected, baseline))$interp_rentPOST[2]))
@@ -238,9 +296,10 @@ notebook_xwalk <- tibble(tr2020_id = native_ids, tr2010_id = linked_ids,
 changed <- c(2, 4, 8, 11, 13, 15, 18)
 notebook_xwalk$geo_consistent[changed] <- 0
 notebook_xwalk$relationship_class[changed] <- "one_to_one_changed"
-notebook_xwalk$geo_consistent[10] <- NA_real_
 notebook_xwalk$geo_consistent[11] <- 2
 notebook_xwalk$relationship_class[12] <- "unexpected_class"
+# An absent crosswalk link leaves status/Census fields missing despite an observed aggregate.
+notebook_xwalk <- filter(notebook_xwalk, tr2010_id != linked_ids[10])
 tmp_dir <- tempfile("acs-merge-hierarchy-")
 dir.create(tmp_dir)
 write_feather(source_16, file.path(tmp_dir, "acs_step2_2016_tract.feather"))
@@ -253,9 +312,18 @@ env$write_panel <- FALSE
 env$prior_panel <- NULL
 run_chunk <- function(label) quiet(eval(notebook_chunk(label), env))
 for (label in c("prep-24-bg-agg", "prep-24-tract", "prep-16", "load-geography",
-                "merge-surveys", "build-diagnostic-panel", "select-canonical-24", "change-vars")) run_chunk(label)
+                "merge-surveys", "build-diagnostic-panel")) run_chunk(label)
+panel_before_selection <- env$acs_full
+geography_before_selection <- select(env$acs_diagnostics, tr2010_id, tr2020_id,
+                                      geo_consistent, relationship_class)
+for (label in c("select-canonical-24", "change-vars")) run_chunk(label)
 canonical_before <- env$acs_full
 canonical_names <- names(canonical_before)
+unchanged_columns <- setdiff(names(panel_before_selection), fields$canonical)
+stopifnot(identical(select(canonical_before, all_of(unchanged_columns)),
+                    select(panel_before_selection, all_of(unchanged_columns))),
+          identical(select(canonical_before, all_of(names(geography_before_selection))),
+                    geography_before_selection))
 row_901 <- match(tract_id(901), canonical_before$tr2010_id)
 row_903 <- match(tract_id(903), canonical_before$tr2010_id)
 row_904 <- match(tract_id(904), canonical_before$tr2010_id)
@@ -269,7 +337,8 @@ stopifnot(nrow(canonical_before) == length(union(ids_16, ids_bg)),
           is.na(canonical_before$rhuPOST[4]), is.na(canonical_before$rhu_inventoryPOST[5]),
           is.na(canonical_before$rentE_24[6]), is.na(canonical_before$rentE_24[7]),
           is.na(canonical_before$rhu_inventoryE_24[8]), is.na(canonical_before$rhu_inventoryE_24[9]),
-          all(is.na(canonical_before$rentE_24[10:11])),
+          is.na(canonical_before$geo_consistent[10]), all(is.na(canonical_before$tr2020_id[10:11])),
+          identical(canonical_before$rentE_24[10:11], source_bg$rentE[10:11]),
           canonical_before$acs_source_24[12] == "tract", is.na(canonical_before$rentM_24[12]),
           is.na(canonical_before$rentPOSTCV[12]), is.na(canonical_before$rentE_24[13]),
           canonical_before$m_flag_rent_24[13] == 1,
@@ -277,7 +346,7 @@ stopifnot(nrow(canonical_before) == length(union(ids_16, ids_bg)),
           canonical_before$tc_flag_rent_24[14] == 1, is.na(canonical_before$rentE_24[14]),
           is.na(canonical_before$tc_flag_lqcrent_24[2]),
           is.na(canonical_before$post_id[row_901]), !is.na(canonical_before$rentPOST[row_901]),
-          is.na(canonical_before$acs_source_24[row_903]),
+          canonical_before$acs_source_24[row_903] == "bg_agg", is.na(canonical_before$rentE_24[row_903]),
           canonical_before$acs_source_24[row_904] == "bg_agg", is.na(canonical_before$rentE_24[row_904]),
           is.na(canonical_before$rhu_inventoryPOST[row_902]),
           !tract_id(905) %in% canonical_before$tr2010_id,
@@ -302,8 +371,12 @@ stopifnot(canonical_before$interp_rent[1] == 30,
           isTRUE(all.equal(canonical_before$interp_rentPOST[1], 3/1.307)),
           canonical_before$interp_rent[4] == source_bg$interp_rent[4],
           isTRUE(all.equal(canonical_before$interp_rentPOST[4], 1.05/1.307)),
-          all(is.na(canonical_before$interp_rent[c(6, 7, 8, 10, 11, 14, row_903, row_904)])),
-          all(is.na(canonical_before$interp_rentPOST[c(2, 3, 6, 7, 8, 10, 11, 14, row_903, row_904)])),
+          all(is.na(canonical_before$interp_rent[c(6, 7, 8, 14, row_903, row_904)])),
+          all(is.na(canonical_before$interp_rentPOST[c(2, 3, 6, 7, 8, 14, row_903, row_904)])),
+          identical(canonical_before$interp_rent[10:11], source_bg$interp_rent[10:11]),
+          identical(canonical_before$rhu_inventoryE_24[10:11], source_bg$rhu_inventoryE[10:11]),
+          isTRUE(all.equal(canonical_before$interp_rentPOST[10:11],
+                           source_bg$interp_rent[10:11] / canonical_before$rentE_16[10:11], tolerance = 0)),
           canonical_before$interp_rent[13] == source_bg$interp_rent[13],
           !is.na(canonical_before$interp_rentPOST[13]),
           canonical_before$interp_rent[row_901] == source_tract$rentE[match(tract_id(901), native_ids)],
@@ -313,18 +386,116 @@ for (label in c("summarize-cv", "geography-coverage", "source-selection-qa",
                 "compare-source-levels", "diagnostic-change-vars", "compare-inventory-levels",
                 "compare-inventory-changes", "validation-panel", "validate-keys-panel",
                 "validate-missingness-panel", "validate-flags-panel", "validate-numeric-panel")) run_chunk(label)
+consistent_keys <- canonical_before$tr2010_id[canonical_before$geo_consistent %in% 1]
 stopifnot(identical(env$acs_full, canonical_before),
           identical(select(env$acs_diagnostics, all_of(canonical_names)), canonical_before),
           !any(grepl("\\.[xy]$|^diag_|_24_tract$|_24_bg_agg$|^in_|^same_geoid$", canonical_names)),
-          env$source_level_diagnostics$rent$coverage$n_total[1] == nrow(canonical_before),
+          env$source_level_diagnostics$rent$coverage$n_total == length(consistent_keys),
           env$inventory_level_diagnostics$tract_2024$coverage$n_total == nrow(source_tract),
           env$inventory_level_diagnostics$bg_agg_2024$coverage$n_x_below_y == 1,
+          identical(env$inventory_change_diagnostics$bg_agg_full_panel$values$tr2010_id,
+                    canonical_before$tr2010_id),
+          identical(env$inventory_change_diagnostics$tract_consistent$values$tr2010_id,
+                    consistent_keys),
           env$alignment_coverage$n_consistent_link_without_census[1] == 1,
           sum(env$source_selection_qa$counts$n_tracts) == nrow(canonical_before),
           isTRUE(all.equal(sum(env$source_selection_qa$counts$share), 1)),
+          env$source_selection_qa$counts$n_tracts[env$source_selection_qa$counts$source == "unassigned"] == 0,
           env$source_selection_qa$geography$status$n_tracts[4] == 1,
           all(c("interp_rent", "interp_rentPOST") %in% env$source_selection_qa$missingness$measure),
-          all(env$hierarchy_equality$n_mismatch == 0))
+          all(env$hierarchy_equality$n_mismatch == 0),
+          identical(env$hierarchy_correction_qa$measure, fields$canonical),
+          all(env$hierarchy_correction_qa$n_bg_observed_canonical_missing_after == 0),
+          all(filter(env$hierarchy_correction_qa, measure %in% c("rentE_24", "interp_rent", "rhu_inventoryE_24"))$
+                n_bg_observed_canonical_missing_before == 2),
+          all(with(env$hierarchy_correction_qa,
+                   n_canonical_missing_after == n_not_consistent - n_bg_observed)))
+
+# Section 5 retains every consistent key, including different-GEOID pairs and
+# missing source records, while Sections 6 and 7 retain their original universes.
+for (results in list(env$source_level_diagnostics, env$source_change_diagnostics)) {
+  stopifnot(identical(names(results), c("rent", "interp_rent", "inventory")))
+  for (result in results) {
+    stopifnot(identical(result$values$tr2010_id, consistent_keys),
+              all(result$values$geo_consistent == 1),
+              identical(result$coverage$group, "overall"),
+              identical(unique(result$summaries$group), "overall"),
+              result$coverage$n_total == length(consistent_keys))
+  }
+}
+interpolated_levels <- env$source_level_diagnostics$interp_rent$values
+interpolated_changes <- env$source_change_diagnostics$interp_rent$values
+stopifnot(identical(interpolated_levels$x_value,
+                    source_tract$rentE[match(interpolated_levels$tr2020_id, source_tract$tr2020_id)]),
+          identical(interpolated_levels$y_value,
+                    source_bg$interp_rent[match(consistent_keys, source_bg$tr2010_id)]),
+          interpolated_levels$x_value[1] == 30, interpolated_levels$y_value[1] == 10.5,
+          interpolated_levels$difference[1] == 19.5,
+          interpolated_levels$absolute_difference[1] == 19.5,
+          isTRUE(all.equal(interpolated_levels$ratio[1], 30/10.5)),
+          isTRUE(all.equal(interpolated_changes$x_value[1], 3/1.307)),
+          isTRUE(all.equal(interpolated_changes$y_value[1], 1.05/1.307)),
+          isTRUE(all.equal(interpolated_changes$difference[1], 1.95/1.307)),
+          isTRUE(all.equal(interpolated_changes$ratio[1], 30/10.5)),
+          all(env$baseline_coverage$group == "overall"),
+          all(env$baseline_coverage$n_total == length(consistent_keys)),
+          !"diag_interp_rentPOST_24_bg_agg" %in% names(env$acs_diagnostics))
+
+# Run only Section 5 chunks on small inputs to check denominator and empty cases.
+section5_input <- tibble(
+  tr2010_id = tract_id(1:9), tr2020_id = tract_id(101:109),
+  geo_consistent = c(rep(1, 6), 0, NA, 2),
+  rentE_24_tract = c(120, 140, 160, NA, 200, 220, 9000, 8000, 7000),
+  rentE_24_bg_agg = c(90, 95, 100, 110, 120, 130, 5000, 4000, 3000),
+  interp_rent_24_bg_agg = c(100, 0, NA, 180, 190, 200, 4000, 3000, 2000),
+  rentE_16 = c(100, 0, -1, 100, NA, 100, 100, 100, 100),
+  rhuE_16 = 10, rhuE_24_tract = 20, rhuE_24_bg_agg = 30,
+  rhu_inventoryE_16 = 12, rhu_inventoryE_24_tract = 25, rhu_inventoryE_24_bg_agg = 35
+) |>
+  mutate(interp_rent = rentE_24_tract)
+run_section5 <- function(input) {
+  section_env <- new.env(parent = globalenv())
+  section_env$acs_diagnostics <- input
+  for (label in c("compare-source-levels", "diagnostic-change-vars")) {
+    quiet(eval(notebook_chunk(label), section_env))
+  }
+  stopifnot(identical(select(section_env$acs_diagnostics, all_of(names(input))), input))
+  section_env
+}
+section5 <- run_section5(section5_input)
+stopifnot(identical(section5$source_comparison_diagnostics$tr2010_id, tract_id(1:6)),
+          identical(section5$source_level_diagnostics$interp_rent$values$y_value,
+                    c(100, 0, NA, 180, 190, 200)),
+          identical(section5$source_change_diagnostics$interp_rent$values$x_value,
+                    c(1.2, NA, NA, NA, NA, 2.2)),
+          identical(section5$source_change_diagnostics$interp_rent$values$y_value,
+                    c(1, NA, NA, 1.8, NA, 2)),
+          section5$source_level_diagnostics$interp_rent$coverage$n_total == 6,
+          section5$source_level_diagnostics$interp_rent$coverage$n_paired == 4,
+          section5$source_level_diagnostics$interp_rent$coverage$n_ratio == 3,
+          section5$source_change_diagnostics$interp_rent$coverage$n_paired == 2,
+          filter(section5$baseline_coverage, measure == "rentE_16")$n_base_nonpositive == 2,
+          filter(section5$baseline_coverage, measure == "rentE_16")$n_base_missing == 1,
+          all(section5$baseline_coverage$n_total == 6))
+for (input in list(filter(section5_input, !geo_consistent %in% 1),
+                   mutate(section5_input, across(-ends_with("id"),
+                     ~ if (cur_column() == "geo_consistent") .x else NA_real_)))) {
+  edge <- run_section5(input)
+  n_consistent <- sum(input$geo_consistent %in% 1)
+  for (results in list(edge$source_level_diagnostics, edge$source_change_diagnostics)) {
+    for (result in results) {
+      stopifnot(result$coverage$n_total == n_consistent,
+                identical(result$coverage$group, "overall"), result$coverage$n_paired == 0,
+                result$coverage$n_x_missing == n_consistent,
+                result$coverage$n_y_missing == n_consistent,
+                is.na(result$coverage$correlation),
+                all(is.na(select(result$summaries, mean, sd, min, p25, median, p75, max))))
+    }
+  }
+  stopifnot(all(edge$baseline_coverage$n_total == n_consistent),
+            all(edge$baseline_coverage$group == "overall"))
+}
+cat("Section 5 synthetic checks passed: consistent population, source interpolation, changes, and missing/empty cases.\n")
 
 # The actual notebook validation rejects using the preserved block-group source
 # for changes, even when the diagnostic copy has the same incorrect values.
@@ -373,6 +544,7 @@ run_chunk("save-panel")
 run_chunk("reload-panel")
 
 # Parse actual chunks and check all section numbering and overview titles.
+for (file in c("R/merge_helpers.R", "R/merge_diagnostics.R")) invisible(parse(file = here::here(file)))
 lines <- readLines(here::here("04_merge.Rmd"), warn = FALSE)
 starts <- which(startsWith(lines, "```{r"))
 for (start in starts) {
@@ -380,8 +552,7 @@ for (start in starts) {
   parse(text = lines[seq.int(start + 1L, end - 1L)])
 }
 headings <- lines[grepl("^# [0-9]+\\.", lines)]
-stopifnot(any(lines == "write_panel <- FALSE"),
-          identical(sub("^# ([0-9]+)\\..*", "\\1", headings), as.character(1:7)),
+stopifnot(identical(sub("^# ([0-9]+)\\..*", "\\1", headings), as.character(1:7)),
           all(sub("^# ", "", headings) %in% lines))
 for (section in 1:7) {
   subsections <- lines[grepl(paste0("^## ", section, "\\."), lines)]

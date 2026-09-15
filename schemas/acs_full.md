@@ -11,8 +11,8 @@ The unsuffixed `interp_rent` follows that hierarchy too, using native tract
 median rent as its tract-source counterpart.
 Source-comparison columns and diagnostic changes stay outside this output.
 
-`write_panel <- FALSE` is the notebook default. Validation uses the in-memory
-panel; writing and reloading require explicit enablement. Enabled writes retain
+Set `write_panel <- FALSE` to validate without writing. Validation uses the
+in-memory panel; writing and reloading require explicit enablement. Enabled writes retain
 the fixed schema migration below, announced replacement, and saved-value checks.
 See the [Step 4 diagnostic workflow](../README.md#step-4-create-acs-panel-and-compare-revised-measurement-sources).
 
@@ -32,14 +32,15 @@ period-change ("POST") ratios.
 | `geo_consistent` | double | Upstream 0/1 flag attached on available 2010 links; unresolved links remain `NA`. Unexpected numeric values are retained and reported, never recoded to 0/1. |
 | `relationship_class` | character | Available upstream `consistent`, `one_to_one_changed`, `split`, `merge`, or `many_to_many` class; unresolved links are `NA`. Unexpected labels remain visible in QA. |
 | `tr2020_id` | character | Explicit 11-digit Census source key on a consistent link, including different-GEOID pairs; otherwise `NA`. A linked key can lack a Census input record. |
-| `acs_source_24` | character | `"tract"` for `geo_consistent == 1`, `"bg_agg"` for `geo_consistent == 0`, otherwise `NA`. Assignment is independent of measurement availability. |
+| `acs_source_24` | character | Non-missing: `"tract"` for `geo_consistent == 1`, `"bg_agg"` for every other row, including missing/unexpected numeric flags. Assignment is independent of source-record or measurement availability. |
 
 Only agreeing repeated status/class records are collapsed; no dominant partner
 or equal-GEOID inference is used. Omitted merge/many-to-many 2010 partner IDs
 cannot be reconstructed from this crosswalk. All original panel rows remain.
-Missing/unrecognized geographic flags leave every hierarchy-controlled 2024
-field and its canonical changes missing. An unknown class label is reported
-without overriding a valid geographic flag; contradictory known flag/class
+Missing/unrecognized geographic flags remain intact and select block-group
+measurements; their canonical values and changes can therefore be observed.
+An unknown class label is reported without overriding a valid geographic flag;
+contradictory known flag/class
 combinations and invalid/ambiguous links fail validation.
 
 **No availability fallback:** a missing estimate, MOE, CV, flag, or source
@@ -85,7 +86,7 @@ no MOE/CV. `rhuE_16`/`rhuE_24` remain occupied-renter counts.
 
 | column | source | description |
 |---|---|---|
-| `interp_rent` | Selected 2024 source | Numeric double, not suffixed. Native tract `rentE_24_tract` (equal to canonical `rentE_24`) for `geo_consistent == 1`; block-group-aggregated interpolated rent for `geo_consistent == 0`; `NA` for missing/unexpected status. No availability fallback. |
+| `interp_rent` | Selected 2024 source | Numeric double, not suffixed. Native tract `rentE_24_tract` (equal to canonical `rentE_24`) for `geo_consistent == 1`; block-group-aggregated interpolated rent for every other row, including missing/unexpected status. Missingness follows the selected value; no availability fallback. |
 | `pct_miss_rent`, `pct_miss_hval` | 2024 block-group aggregate | Share of weighted units missing rent / value. Rent includes censored top-coded block groups; see `pct_tc_rent`. |
 | `pct_tc_rent` | 2024 block-group aggregate | Share of weighted renter units whose rent is top-coded; the top-coded portion of `pct_miss_rent`. |
 | `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | 2016 | Missing-value flags (0/1). |
@@ -110,7 +111,7 @@ MOE/CV or change CV is added.
 ### Canonical 2024 quality fields
 
 All fields below use double 0/1/NA storage and follow the selected source.
-Missing source records and unassigned sources leave these flags missing.
+Missing selected source records or unavailable source flags leave these flags missing.
 
 | columns | definition |
 |---|---|
@@ -128,7 +129,7 @@ where the 2016 denominator is positive (else `NA`).
 | column | definition |
 |---|---|
 | `rentPOST` | `rentE_24 / rentE_16` |
-| `interp_rentPOST` | Canonical selected `interp_rent / rentE_16`, for positive `rentE_16`. Equals `rentPOST` for consistent tracts, including missingness; changed tracts use block-group interpolation. Missing/unexpected geographic status gives `NA`. |
+| `interp_rentPOST` | Canonical selected `interp_rent / rentE_16`, for positive `rentE_16`. Equals `rentPOST` for consistent tracts, including missingness; every other row uses block-group interpolation. Missing selected values or missing/non-positive baselines give `NA`. |
 | `lqcrentPOST` | `lqcrentE_24 / lqcrentE_16` |
 | `huPOST` | `huE_24 / huE_16` |
 | `rhuPOST` | `rhuE_24 / rhuE_16` |
@@ -186,9 +187,25 @@ Notebook QA reports source counts/shares, missing/unrecognized status counts,
 canonical missingness by source, and exact equality to each selected bundle.
 Median rent, `interp_rent`, and inventory explicitly report selected missing
 values with an observed alternative. `interp_rent` must match the mapped source's
-values and missingness and be missing for unresolved status. Validation also
-checks `interp_rentPOST` against canonical `interp_rent / rentE_16` with the
-positive-baseline rule; it has no unresolved-status exemption.
-Task 1 comparisons retain their original source-specific
-denominators. Full execution and output regeneration remain analyst-run work;
+values and missingness, including on rows with missing/unexpected geographic
+flags. Validation also checks `interp_rentPOST` against canonical
+`interp_rent / rentE_16` with the
+positive-baseline rule. Every row must have a selected-source label.
+Notebook-only `hierarchy_correction_qa` reports, for every mapped field, counts
+of rows not positively flagged consistent, observed block-group values,
+canonical missingness before/after, and observed block-group values incorrectly
+missing canonically before/after. The old rule is reconstructed on current
+inputs for the **before** counts; no saved panel is used as the current result.
+All after-correction losses must be zero, and canonical missingness must equal
+selected block-group missingness. Counts are derived at runtime, without fixed
+empirical row-count assertions. This correction adds no output columns or types.
+
+Section 5 source-level, source-change, and baseline-coverage diagnostics use only
+`geo_consistent == 1` panel rows, including missing measurements/baselines, with
+one `overall` group for that subset. Its interpolated-rent comparison uses
+preserved block-group `interp_rent_24_bg_agg` against native `rentE_24_tract`, and
+the changes each implies over positive, inflation-adjusted `rentE_16`.
+These notebook-only comparisons do not change canonical `interp_rent`,
+`interp_rentPOST`, or the saved schema. Section 6 retains its existing denominators.
+Full execution and output regeneration remain analyst-run work;
 synthetic tests exercise the notebook with temporary inputs and output only.

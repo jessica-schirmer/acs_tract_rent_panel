@@ -183,11 +183,7 @@ select_canonical_2024 <- function(df) {
   if (!all(required %in% names(df)) || !is.double(df$geo_consistent)) {
     stop("Hierarchy: missing source fields or invalid geographic flag storage")
   }
-  df$acs_source_24 <- dplyr::case_when(
-    df$geo_consistent == 1 ~ "tract",
-    df$geo_consistent == 0 ~ "bg_agg",
-    .default = NA_character_
-  )
+  df$acs_source_24 <- dplyr::if_else(df$geo_consistent %in% 1, "tract", "bg_agg")
   for (i in seq_len(nrow(fields))) {
     df[[fields$canonical[i]]] <- dplyr::case_when(
       df$acs_source_24 == "tract" ~ df[[fields$tract[i]]],

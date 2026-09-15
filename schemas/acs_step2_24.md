@@ -10,11 +10,13 @@ California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_a
 
 The production filename replaces `acs_step2_24.feather`; existing data and
 historical parity references retain that legacy name. `04_merge.Rmd` consumes
-this current filename for canonical 2024 measurements where `geo_consistent == 0`
+this current filename for canonical 2024 measurements on every row not positively
+flagged consistent (`!(geo_consistent %in% 1)`), including missing/unexpected flags,
 and for source-specific diagnostics. The separate [2024 tract-source
 product](acs_step2_2024_tract.md) retains `tr2020_id` and supplies canonical values
 where `geo_consistent == 1`. Selection copies whole measurement bundles with no
-availability fallback; unresolved geographic flags leave canonical values missing.
+availability fallback; missing selected values remain missing. Original
+geographic flags and classes remain intact for QA.
 Paired source comparisons still use only consistent links.
 
 Selection is by destination tract county. All source block groups contributing
@@ -101,9 +103,10 @@ Step 4 carries canonical inventory levels and `rhu_inventoryPOST`, separately
 from occupied-renter `rhuPOST`. Its retained `pct_miss_rent`, `pct_tc_rent`, and
 `pct_miss_hval` remain block-group diagnostics on all rows; they do not describe
 selected Census measurement quality. Step 4 uses this product's `interp_rent`
-for canonical interpolated rent on geographically changed tracts. Consistent
-tracts use native tract median gross rent; missing/unexpected status gives `NA`,
-with no availability fallback. `interp_rentPOST` uses the selected canonical
+for canonical interpolated rent on every row not positively flagged consistent,
+including missing/unexpected status. Consistent tracts use native tract median
+gross rent. Missingness follows the selected source, with no availability
+fallback. `interp_rentPOST` uses the selected canonical
 value over positive, inflation-adjusted 2016 median rent. This upstream product's
 interpolation method is unchanged. See the [panel schema](acs_full.md).
 

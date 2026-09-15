@@ -294,10 +294,11 @@ Script: `04_merge.Rmd`
 
 The notebook reads all three current Step 2 products and the Step 3 crosswalk.
 Canonical 2024 estimates and their uncertainty/quality bundles use Census tract
-values for `geo_consistent == 1` and block-group aggregates for `geo_consistent == 0`.
-Missing or unrecognized flags leave the source and canonical values missing;
-all panel rows remain. A missing selected estimate, source record, MOE, CV, or
-flag is never filled from the alternative source. Selection precedes the single
+values for `geo_consistent == 1` and block-group aggregates for every other row,
+including missing or unrecognized numeric flags. The original geographic flags
+and classes remain intact for QA; every row receives a selected-source label.
+A missing selected estimate, source record, MOE, CV, or flag is never filled
+from the alternative source. Selection precedes the single
 set of canonical change calculations.
 
 Inputs:
@@ -309,7 +310,7 @@ Inputs:
 
 Outputs:
 - Notebook-only `acs_diagnostics`, geographic coverage/unmatched keys, source level/change comparisons, and inventory comparisons; no diagnostic Feather is written.
-- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, selected 2024 measures, level-change ratios, share/rate differences, existing CVs, separate inventory levels/change, and geographic/source/quality fields. `write_panel <- FALSE` is the default.
+- Optional `../../../data/acs_full.feather` — the existing 2010-tract panel, with 2016 dollars inflation-adjusted by 1.307, selected 2024 measures, level-change ratios, share/rate differences, existing CVs, separate inventory levels/change, and geographic/source/quality fields. Set `write_panel <- FALSE` to validate without writing.
 
 Schema:
 - `schemas/acs_full.md`
@@ -318,14 +319,21 @@ Steps:
 1. Set up environment (existing packages and canonical/geographic helpers, `R/merge_diagnostics.R`, `here::here()` data path, optional-write control)
 2. Import and prepare survey measures (all three native sources and their bundles, county/key checks, 2016 inflation adjustment, geographic crosswalk validation)
 3. Merge surveys, select canonical 2024 measures, and calculate changes (original full-join key union, explicit consistent links, geography-selected bundles, existing change/CV formulas, separate inventory ratio)
-4. Review geographic coverage and source-selection QA (native/panel denominators, unmatched keys, source counts/shares, missing/unexpected flags, canonical missingness, exact bundle equality)
-5. Compare 2024 sources and implied changes (diagnostic only): median `rentE` and `rhu_inventoryE`, overall/by consistency, with full-denominator coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
+4. Review geographic coverage and source-selection QA (native/panel denominators, unmatched keys, source counts/shares, missing/unexpected flags, canonical missingness, exact bundle equality, per-field correction summary)
+5. Compare 2024 sources and implied changes (diagnostic only): median rent, block-group interpolated rent, and rental inventory on geographically consistent tracts, with subset coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
 6. Compare occupied renter units and rental inventory (diagnostic only): all three native input products, then inventory vs. occupied-renter change for the full block-group panel and consistent Census pairs
 7. Validate the panel and optionally save (key union, source-aware changes, missingness, flags, distributions; fixed schema-addition allowlist and strict shared-schema/saved-value checks)
 
 **Geographic diagnostic eligibility:** the analyst selected only
-`geo_consistent == 1` for paired source/change comparisons, using the explicit
-2010 and 2020 keys even when the GEOIDs differ. Available statuses are attached
+`geo_consistent == 1` for all Section 5 source/change and baseline-coverage
+diagnostics, using the explicit 2010 and 2020 keys even when the GEOIDs differ.
+The single `overall` group denotes that consistent subset, including its rows
+with missing measurements or baselines; no geographic-status groups are reported.
+The `interp_rent` entries in `source_level_diagnostics` and
+`source_change_diagnostics` compare native tract `rentE_24_tract` with preserved
+block-group `interp_rent_24_bg_agg`, and the ratios each implies over positive,
+inflation-adjusted `rentE_16`. Canonical `interp_rent` is not used as the
+block-group source. Available statuses are attached
 without dropping panel tracts; repeated split links must agree before reducing
 them to one status record. Merge/many-to-many 2010 partners are absent from the
 crosswalk, so unresolved panel statuses remain `NA`. Native 2020 coverage reports
@@ -338,8 +346,10 @@ and a missing estimate within an existing source record.
 `m_flag_rhu_inventoryPOST`. Inventory adds vacant for rent and rented, not
 occupied units to occupied renters; it uses the saved upstream estimate directly,
 with no inventory MOE/CV. `acs_source_24`, `geo_consistent`, `relationship_class`,
-and the consistent-link `tr2020_id` provide provenance. Relevant 2024 quality
-flags follow the selected source; unavailable aggregate censoring flags remain missing.
+and the consistent-link `tr2020_id` provide provenance. `acs_source_24` is
+`"tract"` only for flag 1 and `"bg_agg"` otherwise, independently of source-record
+or measure availability. Relevant 2024 quality flags follow the selected source;
+unavailable aggregate censoring flags remain missing.
 
 The analyst chose to keep `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
 under their existing names and values as block-group diagnostics, including on
@@ -347,8 +357,9 @@ Census-selected/unresolved rows. They do not describe selected Census quality;
 downstream quality rules remain unchanged. Canonical `interp_rent` follows the
 geographic hierarchy: native tract median gross rent (`rentE_24_tract`, also
 selected into `rentE_24`) for consistent tracts, and the existing block-group
-interpolation for changed tracts. Missing/unexpected status gives `NA`, with no
-availability fallback. `merge_2024_field_map()` in `R/merge_helpers.R` maps the
+interpolation for all other rows, including missing/unexpected status. Missing
+selected values remain missing, with no availability fallback.
+`merge_2024_field_map()` in `R/merge_helpers.R` maps the
 preserved `interp_rent_24_bg_agg` source and native tract rent to the unsuffixed
 canonical name; `04_merge.Rmd` §3.2 applies selection. No new tract interpolation
 or interpolated-rent MOE/CV is constructed. `interp_rentPOST` divides that
@@ -368,8 +379,8 @@ MOE/CV, geographic allocation, or changed-boundary measurement pairing is added.
 Run `Rscript --vanilla tests/test_merge_diagnostics.R` for synthetic geography,
 missingness/denominator cases, actual notebook chunks using temporary inputs,
 whole-bundle selection, no-fallback cases in both directions, canonical changes,
-hierarchical interpolated-rent levels/changes, inventory, schema migration, and
-guarded save/reload checks. An analyst can run
+hierarchical interpolated-rent levels/changes, all-field correction counts,
+inventory, schema migration, and guarded save/reload checks. An analyst can run
 all diagnostics with writing disabled. Enable `write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
 replacement is announced. Only documented hierarchy/inventory/flag additions
@@ -446,16 +457,32 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   must pass `hierarchy_equality`; inspect median-rent, interpolated-rent, and
   inventory cases with missing selected values and observed alternatives.
   Confirm `interp_rent` equals native tract `rentE_24` for consistent tracts and
-  the preserved block-group interpolation for changed tracts, including matching
-  missingness. Unresolved statuses must have missing `interp_rent` and
-  `interp_rentPOST`; validation checks the latter against the canonical selected
-  value over positive `rentE_16`. Review inventory and rent changes
-  alongside final key uniqueness, row counts, and the saved schema.
+  the preserved block-group interpolation for every other row, including matching
+  missingness. Missing/unexpected geographic flags remain unchanged, while those
+  rows now select block-group measurements. `acs_source_24` must cover every row;
+  the defensive `unassigned` count must be zero. Validation checks
+  `interp_rentPOST` against the canonical selected value over positive `rentE_16`.
+  Review inventory and rent changes alongside final key uniqueness, row counts,
+  unchanged 2016 values, and the saved schema/reload checks.
+- After rerunning Step 4 from setup with the existing Step 2/3 inputs, inspect
+  `hierarchy_correction_qa`: one row per mapped field counts rows not positively
+  flagged consistent, observed block-group values, canonical missingness
+  before/after, and observed block-group values incorrectly missing canonically
+  before/after. **Before** is the old rule reconstructed on this run's inputs;
+  **after** is the corrected canonical result. Every
+  `n_bg_observed_canonical_missing_after` must be zero, and
+  `n_canonical_missing_after` must equal `n_not_consistent - n_bg_observed`.
+  Counts are computed at runtime; previously reported empirical counts are
+  diagnostic evidence, not fixed assertions. The correction requires only
+  Step 4 regeneration; Codex validation uses synthetic inputs and temporary outputs.
 - Review `geography_coverage`, `geography_unmatched`, `alignment_coverage`, and
   `native_tract_measure_coverage` before interpreting paired results. Inspect
   `source_level_diagnostics`, `source_change_diagnostics`, `baseline_coverage`,
   `inventory_level_diagnostics`, and `inventory_change_diagnostics` for coverage,
   undefined denominators, discrepancies, and inventory below occupied units.
+  Section 5 tables should contain only consistent tract keys and one `overall`
+  group; inspect the added `interp_rent` comparisons at both levels and changes.
+  Section 6 retains its native-source and full-panel/consistent-subset denominators.
   Missingness shares use full labeled universes; no empirical threshold is imposed.
 
 Income is retained independently of missing or top-coded rent, following the

@@ -91,9 +91,11 @@ partner IDs are omitted, a complete five-class 2010-panel classification cannot
 be recovered from this file. Census measurement comparisons use only consistent
 pairs, including pairs with different GEOIDs; native-2020 coverage retains all
 five classes. Canonical values use Census tracts for `geo_consistent == 1`
-and block-group aggregates for `geo_consistent == 0`, with no availability
-fallback. Missing/unrecognized numeric flags assign no source and leave
-canonical 2024 values missing without dropping rows. Step 4 reports unexpected
+and block-group aggregates for every other row, including missing/unrecognized
+numeric flags, with no availability fallback. Step 4 retains the original
+flags/classes for QA without recoding missing statuses to 0. Every panel row
+receives a source label, and each canonical value inherits its selected source's
+value and missingness. Step 4 reports unexpected
 class labels without overriding a valid flag, and rejects contradictory known
 classifications or invalid links. The flag, available class, consistent-link
 2020 key, and selected-source label enter the [panel schema](acs_full.md).

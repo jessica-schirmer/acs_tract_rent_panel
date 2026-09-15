@@ -226,10 +226,8 @@ assert_hierarchical_2024 <- function(df) {
   fields <- merge_2024_field_map()
   required <- c("geo_consistent", "acs_source_24", unlist(fields, use.names = FALSE))
   if (!all(required %in% names(df))) stop("Hierarchy QA: missing canonical/source fields")
-  masks <- list(tract = df$geo_consistent %in% 1, bg_agg = df$geo_consistent %in% 0)
-  unresolved <- !df$geo_consistent %in% c(0, 1)
-  if (!all(is.na(df$acs_source_24[unresolved])) ||
-      !identical(df$acs_source_24[masks$tract], rep("tract", sum(masks$tract))) ||
+  masks <- list(tract = df$geo_consistent %in% 1, bg_agg = !(df$geo_consistent %in% 1))
+  if (!identical(df$acs_source_24[masks$tract], rep("tract", sum(masks$tract))) ||
       !identical(df$acs_source_24[masks$bg_agg], rep("bg_agg", sum(masks$bg_agg)))) {
     stop("Hierarchy QA: selected source disagrees with geographic consistency")
   }
@@ -242,9 +240,9 @@ assert_hierarchical_2024 <- function(df) {
       missing_mismatch <- is.na(canonical[mask]) != is.na(selected[mask])
       observed <- mask & !is.na(canonical) & !is.na(selected)
       n_mismatch <- sum(missing_mismatch) + sum(canonical[observed] != selected[observed])
-      if (n_mismatch || any(!is.na(canonical[unresolved]))) {
+      if (n_mismatch) {
         stop("Hierarchy QA: ", fields$canonical[i], " violates ", source,
-             " selection, missingness, or unresolved-status rule")
+             " selection or missingness")
       }
       tibble::tibble(source = source, measure = fields$canonical[i], n_selected = sum(mask),
                      n_selected_missing = sum(mask & is.na(selected)),
@@ -252,6 +250,29 @@ assert_hierarchical_2024 <- function(df) {
                        sum(mask & is.na(selected) & !is.na(other)),
                      n_mismatch = n_mismatch)
     })
+  })
+}
+
+# Reconstruct old-rule missingness on the current inputs; no saved panel is read.
+summarize_hierarchy_correction <- function(df) {
+  fields <- merge_2024_field_map()
+  required <- c("geo_consistent", fields$canonical, fields$bg_agg)
+  if (!all(required %in% names(df))) stop("Hierarchy correction QA: missing canonical/source fields")
+  not_consistent <- !(df$geo_consistent %in% 1)
+  old_bg_selected <- df$geo_consistent %in% 0
+  purrr::map_dfr(seq_len(nrow(fields)), function(i) {
+    bg_observed <- !is.na(df[[fields$bg_agg[i]]])
+    missing_before <- !old_bg_selected | !bg_observed
+    missing_after <- is.na(df[[fields$canonical[i]]])
+    tibble::tibble(
+      measure = fields$canonical[i],
+      n_not_consistent = sum(not_consistent),
+      n_bg_observed = sum(not_consistent & bg_observed),
+      n_canonical_missing_before = sum(not_consistent & missing_before),
+      n_canonical_missing_after = sum(not_consistent & missing_after),
+      n_bg_observed_canonical_missing_before = sum(not_consistent & bg_observed & missing_before),
+      n_bg_observed_canonical_missing_after = sum(not_consistent & bg_observed & missing_after)
+    )
   })
 }
 
