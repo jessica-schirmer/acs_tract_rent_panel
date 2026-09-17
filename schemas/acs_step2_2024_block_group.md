@@ -32,14 +32,18 @@ weights, by measure type (see the §2.5 decision block):
 
 - **Counts** → weighted sums (`wt_renthu` for renter measures, `wt_hu` for
   housing-unit/structure measures, `wt_pop` for population, `wt_hh` for households).
-- **Medians/means** → weighted means of the block-group estimates.
-- **Margins of error** → `sqrt(sum((MOE * rel_wt)^2))` using relative weights.
+- **Median household income** → weighted mean with `hhE * wt_hh`.
+- **Income MOE** → weighted mean with `rhuE * wt_renthu`, retaining its existing
+  weighting despite the different estimate weight.
+- **Count margins of error** → `sqrt(sum((MOE * rel_wt)^2))` using relative weights.
 
-`rentE` / `lqcrentE` are censored (`>= 3500` → `NA`) **before** aggregation.
+Source `rentE` / `lqcrentE` are still censored (`>= 3500` → `NA`) by the shared
+helper. Source rent supplies missingness/top-code diagnostics; no weighted
+rent, lower-quartile rent, or house-value estimate is saved.
 
 ## Aggregated count estimates (weighted sums)
 
-`huE`, `rhuE`, `rhu_lrE`, `rhu_lr2E`, `rhu_baseE`, `hhE`, `popE`, `tot_vacE`,
+`huE`, `rhuE`, `rhu_baseE`, `hhE`, `popE`, `tot_vacE`,
 `tot_vac_baseE`, `pop_blkE`, `pop_hspE`, `pop_aaE`, `pop_raceE`, `pop_ethnE`,
 `sfd_detE`, `sfd_baseE`, `mf5E`, `rhucashE`, `grentcat1E`–`grentcat24E`.
 
@@ -84,7 +88,7 @@ MOE/CV enters this output.
 
 The existing `vac_forrentE` above uses **`wt_hu`** for `pctrvacE`; the separate
 `inventory_vac_forrentE` diagnostic uses **`wt_renthu`** for inventory. Existing
-vacancy rates, occupied `rhuE`, cash/low-rent/bin counts, rent/income calculations,
+vacancy rates, occupied `rhuE`, cash/bin counts, interpolation/income calculations,
 weights, MOEs, CVs, and flags retain their calculations. Inventory is never
 derived from the existing vacancy-rate input or used as a rent denominator.
 
@@ -96,13 +100,16 @@ reported separately by county/vintage and no redistribution of retained weights.
 These checks apply independently when a reference lacks inventory or is absent.
 
 `compare_socal_parity(schema_migration = "2024")` permits only the addition
-`rhu_inventoryE`, reported in `schema_changes`, with no removals. Shared columns
+`rhu_inventoryE` and the fixed removal list: `rhu_lrE`, `rhu_lr2E`, `rentE`,
+`rentM`, `rentCV`, `lqcrentE`, `lqcrentM`, `med_hvalE`, `med_hvalM`, `med_hvalCV`,
+`hu_miss_hval`, and `pct_miss_hval`. Differences are reported in `schema_changes`;
+retired fields are rejected even without a reference. Shared columns
 retain strict order, type, and value checks, including existing income and
 geographic rules. The default `schema_migration = NULL` and save/reload schema
 checks remain strict. Missing references remain **parity not checked**.
 Step 4 carries canonical inventory levels and `rhu_inventoryPOST`, separately
-from occupied-renter `rhuPOST`. Its retained `pct_miss_rent`, `pct_tc_rent`, and
-`pct_miss_hval` remain block-group diagnostics on all rows; they do not describe
+from occupied-renter `rhuPOST`. Its retained `pct_miss_rent` and `pct_tc_rent`
+remain block-group diagnostics on all rows; they do not describe
 selected Census measurement quality. Step 4 uses this product's `interp_rent`
 for canonical interpolated rent on every row not positively flagged consistent,
 including missing/unexpected status. Consistent tracts use native tract median
@@ -111,9 +118,9 @@ fallback. `interp_rentPOST` uses the selected canonical
 value over positive, inflation-adjusted 2016 median rent. This upstream product's
 interpolation method is unchanged. See the [panel schema](acs_full.md).
 
-## Aggregated medians/means (weighted means)
+## Aggregated income (weighted mean)
 
-`rentE`, `lqcrentE`, `med_hhincE`, `med_hvalE`.
+`med_hhincE`.
 
 **Income retention:** `censor_tc_vars()` leaves block-group `med_hhincE` unchanged
 regardless of missing or top-coded rent, preserving source values and missingness
@@ -126,9 +133,12 @@ tract income values and missingness. `med_hhincCV` uses the resulting income
 estimate in its existing formula. See the
 [income-censoring decision and validation](../notes/income_censoring.md).
 
-## Aggregated margins of error (root-sum-of-squares)
+## Aggregated margins of error
 
-`rentM`, `lqcrentM`, `med_hhincM`, `med_hvalM`, `rhuM`, `rhu_baseM`, `tot_vacM`,
+`med_hhincM` retains `weightedMean(med_hhincM, w = rhuE * wt_renthu, na.rm = TRUE)`.
+The count MOEs use root-sum-of-squares:
+
+`rhuM`, `rhu_baseM`, `tot_vacM`,
 `tot_vac_baseM`, `pop_blkM`, `pop_hspM`, `pop_aaM`, `pop_raceM`, `sfd_detM`,
 `sfd_baseM`, `huM`, `popM`.
 
@@ -136,18 +146,31 @@ estimate in its existing formula. See the
 
 | column | type | description |
 |---|---|---|
+
+### Interpolated medians
 | `interp_rent` | numeric | Median rent interpolated within the median gross-rent category; `NA` for open-ended bottom/top categories or no cash-rent units (see §2.6). |
+
+### Aggregated counts
 | `nsfaE` | numeric | Non-single-family **attached** units: `smfE + mf5E` (`sfd_att + duplex + quadplex` plus units in 5+ structures); excludes single-family detached, mobile homes, and other units. |
+
+### Percentages
 | `pctrvacE` | numeric | Rental vacancy rate: `vac_forrentE / (rhuE + vac_forrentE)`; `NA` if denominator ≤ 0. |
 | `pctsvacE` | numeric | For-sale vacancy rate: `vac_forsaleE / (ohuE + vac_forsaleE)`; `NA` if denominator ≤ 0. |
+| `pctrhuE`, `pctvacE`, `pctblkE`, `pcthspE`, `pctaaE`, `pctsfdE` | numeric | Share measures (see `acs_step2_2016_tract.md` for definitions). |
+
+
+### QA/ Diagnostic
+
+#### Missingness/ Partial aggregation
 | `rhu_miss_rent` | numeric | Weighted renter units in block groups missing rent (aggregated). |
-| `hu_miss_hval` | numeric | Weighted housing units in block groups missing median value. |
 | `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups; it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent`. |
 | `pct_tc_rent` | numeric | Share of weighted renter units in the tract whose rent is top-coded (`rentE >= 3500`), computed on the **uncensored** block-group rent in §2.3; the top-coded portion of `pct_miss_rent`. `NA` where tract `rhuE = 0`. |
-| `pct_miss_hval` | numeric | `hu_miss_hval / huE` (share of units missing median value). |
-| `pctrhuE`, `pctvacE`, `pctblkE`, `pcthspE`, `pctaaE`, `pctsfdE` | numeric | Share measures (see `acs_step2_16.md` for definitions). |
+
+#### Margin of errors
 | `pctrhuM`, `pctblkM`, `pcthspM` | numeric | Derived share MOEs. |
-| `rentCV`, `med_hhincCV`, `med_hvalCV`, `pctrhuCV`, `pctblkCV`, `pcthspCV`, `rhuCV`, `huCV`, `popCV` | numeric | Coefficients of variation. |
+
+#### CVs
+| `med_hhincCV`, `pctrhuCV`, `pctblkCV`, `pcthspCV`, `rhuCV`, `huCV`, `popCV` | numeric | Coefficients of variation. |
 
 ## Flag and join-indicator columns
 

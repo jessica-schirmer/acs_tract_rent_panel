@@ -7,7 +7,7 @@ California and nine Bay Area counties configured by `target_counties` in §1.3.
 **Key:** `tr2020_id` (11-digit character, unique and non-missing).
 
 This direct tract-source product uses no crosswalk or allocation. It is separate
-from the [2024 block-group-aggregated product](acs_step2_24.md), which is keyed
+from the [2024 block-group-aggregated product](acs_step2_2024_block_group.md), which is keyed
 by `tr2010_id`. Step 2 processes them separately. Step 4 selects this product
 for canonical measurements through explicit `geo_consistent == 1` links,
 including different-GEOID pairs, and retains native-source and paired diagnostics.
@@ -18,11 +18,11 @@ inventory/change and provenance fields are described in the [panel schema](acs_f
 ## Base columns and censoring
 
 All columns from the [2024 tract input](acs_step1_2024_tract.md) carry through,
-including estimate/MOE pairs, `tr2020_id`, `NAME`, logical `rent_id = TRUE`,
-`rhu_lrE`, and `rhu_lr2E`. Source columns retain their storage types and order.
-The three bedroom-rent pairs (`rent1bdrE/M`, `rent2bdrE/M`, `rent3bdrE/M`) and
-the 2024 low-rent counts (categories 1–18 / 1–20) remain unchanged. B25111/B25113
-measures removed upstream are not reintroduced.
+including estimate/MOE pairs, `tr2020_id`, `NAME`, and logical `rent_id = TRUE`.
+Source columns retain their storage types and order. The three bedroom-rent
+pairs (`rent1bdrE/M`, `rent2bdrE/M`, `rent3bdrE/M`) remain unchanged.
+Retired `rhu_lrE` / `rhu_lr2E` counts are discarded even from older inputs;
+B25111/B25113 measures removed upstream are not reintroduced.
 
 Only `rentE` and `lqcrentE` are censored: values `>= 3500` become `NA` after
 capturing top-code flags. Median house value is flagged at `>= 2000000` without
@@ -37,7 +37,7 @@ are checked independently of parity-reference availability.
 ## Added structure, share, and uncertainty measures
 
 All added estimates, MOEs, and CVs below are numeric. Definitions match the
-[2016 tract path](acs_step2_16.md) and the existing shared helpers.
+[2016 tract path](acs_step2_2016_tract.md) and the existing shared helpers.
 
 | Column | Definition |
 |---|---|
@@ -65,6 +65,9 @@ block-group interpolation, including missing/unexpected geographic flags.
 Original statuses remain intact for QA. Missing selected values are never filled
 from the other source, and `interp_rentPOST` uses the selected value over positive,
 inflation-adjusted 2016 median rent. No tract interpolation is constructed.
+Native rent, lower-quartile rent, house value, their uncertainty, and their flags
+remain in this product. Step 4 no longer emits their separate 2024 panel families;
+it retains native rent internally for `interp_rent` and source comparisons.
 
 ## Added flags
 
@@ -100,7 +103,9 @@ targets only; incomplete targets and missing components are reported separately.
 Native key membership, county coverage, and saved schema/values are also checked.
 
 The optional parity reference is only `acs_step2_2024_tract.feather` in the
-preserved reference directory. `compare_socal_parity(key = "tr2020_id")` uses
-strict schema/order/type/value checks and the existing numeric tolerance,
-without migration, legacy income-correction, or allocation-boundary exceptions.
+preserved reference directory. `compare_socal_parity(key = "tr2020_id",
+schema_migration = "2024_tract")` permits only removal of `rhu_lrE` and `rhu_lr2E`.
+Shared column order/types/values and the numeric tolerance remain strict,
+without legacy income-correction or allocation-boundary exceptions.
+Retired fields are rejected even without a reference.
 Missing references explicitly mean **parity not checked**.

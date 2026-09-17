@@ -155,7 +155,7 @@ assembly_sources <- multiple |>
          wt_pop = 0.5, wt_hh = 0.5, med_hvalE = 800000, vac_forsaleE = 5,
          ohuE = 100, vac_rentedE = c(5, 5, NA_real_))
 count_columns <- c(
-  "huE", "rhu_lrE", "rhu_lr2E", "rhu_baseE", "hhE", "popE", "tot_vacE", "tot_vac_baseE",
+  "huE", "rhu_baseE", "hhE", "popE", "tot_vacE", "tot_vac_baseE",
   "pop_blkE", "pop_hspE", "pop_aaE", "pop_raceE", "pop_ethnE", "sfd_detE", "sfd_baseE",
   "mf_5_9E", "mf_10_19E", "mf_20_49E", "mf_50E", "sfd_attE", "duplexE", "quadplexE", "rhucashE"
 )
@@ -165,6 +165,25 @@ moe_columns <- c("rentM", "lqcrentM", "med_hhincM", "med_hvalM", "rhu_baseM", "t
 for (column in count_columns) assembly_sources[[column]] <- 100
 for (column in moe_columns) assembly_sources[[column]] <- 10
 for (column in paste0("grentcat", 1:24, "E")) assembly_sources[[column]] <- 100 / 24
+
+# Actual import chunks discard retired low-rent columns from older caches only.
+legacy_bg_input <- mutate(assembly_sources, rhu_lrE = 70, rhu_lr2E = 90)
+legacy_16_input <- legacy_bg_input[c(1, 3), ] |>
+  mutate(tr2010_id = tract_ids[1:2]) |>
+  select(-bg2020_id, -starts_with("wt_"))
+legacy_import <- new.env(parent = environment())
+legacy_import$data_dir <- tempdir()
+legacy_import$target_counties <- "037"
+legacy_import$load_data <- function(path, folder = NULL, name) {
+  switch(name,
+    acs_step1_2024_block_group.feather = legacy_bg_input,
+    acs_step1_2016_tract.feather = legacy_16_input,
+    xwalk_bg24_tr10.feather = select(legacy_bg_input, bg2020_id, tr2010_id, starts_with("wt_")))
+}
+run_chunk("import-bg-and-xwalk-2024-bg-aggregated", legacy_import)
+run_chunk("load-restrict-16", legacy_import)
+stopifnot(identical(legacy_import$acs_2024_bg_source, select(legacy_bg_input, -rhu_lrE, -rhu_lr2E)),
+          identical(legacy_import$acs_16, select(legacy_16_input, -rhu_lrE, -rhu_lr2E)))
 
 assemble_24 <- function(include_inventory) {
   env <- new.env(parent = environment())
@@ -268,7 +287,9 @@ stopifnot(
   native_out$pctrhuE[3] == 0, native_out$rentCV[1] == (10 / 1.645) / 3499,
   is.null(native$socal_parity_2024_tract)
 )
-pass_through <- setdiff(names(native_before), c("rentE", "lqcrentE"))
+# Older Step 1 low-rent columns are deliberately present in native_source.
+stopifnot(!any(c("rhu_lrE", "rhu_lr2E") %in% names(native_out)))
+pass_through <- setdiff(names(native_before), c("rentE", "lqcrentE", "rhu_lrE", "rhu_lr2E"))
 stopifnot(identical(native_out[pass_through], native_before[pass_through]))
 all_counties_native <- assemble_2024_tract(counties = NULL)
 stopifnot(setequal(substr(all_counties_native$acs_2024_tract$tr2020_id, 3, 5),
@@ -290,8 +311,8 @@ stopifnot(nrow(native_parity$differences) == 0L,
           "tr2020_id" %in% names(native_parity$tracts),
           !"tr2010_id" %in% names(native_parity$tracts))
 expect_error(assemble_2024_tract(reference = mutate(native_out, med_hhincE = med_hhincE + 1)), "parity failed")
-expect_error(assemble_2024_tract(reference = select(native_out, -rhu_inventoryE)), "column names, order, or types differ")
-expect_error(assemble_2024_tract(reference = with_24$acs_2024_bg_aggregated_interp), "column names, order, or types differ")
+expect_error(assemble_2024_tract(reference = select(native_out, -rhu_inventoryE)), "unapproved schema")
+expect_error(assemble_2024_tract(reference = with_24$acs_2024_bg_aggregated_interp), "unapproved schema")
 cat("Passed: native tract filtering, retained source fields/income, flags, derived measures, inventory, and strict source-specific parity.\n")
 
 saved_env <- with_24
@@ -346,10 +367,15 @@ removed_measures <- c("rentmv1yr", "rentmv5yr", "rentyrblt", "rentyrblt_14_16",
                       "rentyrblt_10_13", "rentyrblt_00_09", "rentyrblt_90_99")
 removed_columns <- as.vector(outer(removed_measures, c("E", "M"), paste0))
 previous_16 <- without_16$acs_16 |> select(-vac_rentedE, -vac_rentedM)
-for (column in removed_columns) previous_16[[column]] <- 1
+for (column in c(removed_columns, "rhu_lrE", "rhu_lr2E")) previous_16[[column]] <- 1
 current_16 <- with_16$acs_16
 current_24 <- with_24$acs_2024_bg_aggregated_interp
 previous_24 <- without_24$acs_2024_bg_aggregated_interp
+cleanup_bg <- c("rhu_lrE", "rhu_lr2E", "rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
+                "med_hvalE", "med_hvalM", "med_hvalCV", "hu_miss_hval", "pct_miss_hval")
+for (column in cleanup_bg) previous_24[[column]] <- 1
+stopifnot(!any(cleanup_bg %in% names(current_24)),
+          all(c("med_hhincE", "med_hhincM", "med_hhincCV", "interp_rent") %in% names(current_24)))
 expect_error(parity(current_16, previous_16), "output column names, order, or types differ")
 expect_error(parity(current_24, previous_24), "output column names, order, or types differ")
 audit_16 <- parity(current_16, previous_16, "2016")
@@ -357,11 +383,13 @@ audit_24 <- parity(current_24, previous_24, "2024")
 stopifnot(nrow(audit_16$differences) == 0L, nrow(audit_24$differences) == 0L,
           setequal(filter(audit_16$schema_changes, change == "added")$variable,
                    c("vac_rentedE", "vac_rentedM", "rhu_inventoryE")),
-          setequal(filter(audit_16$schema_changes, change == "removed")$variable, removed_columns),
-          identical(audit_24$schema_changes$variable, "rhu_inventoryE"),
+          setequal(filter(audit_16$schema_changes, change == "removed")$variable,
+                   c(removed_columns, "rhu_lrE", "rhu_lr2E")),
+          identical(filter(audit_24$schema_changes, change == "added")$variable, "rhu_inventoryE"),
+          setequal(filter(audit_24$schema_changes, change == "removed")$variable, cleanup_bg),
           nrow(parity(current_16, migration = "2016")$schema_changes) == 0L,
           nrow(parity(current_16)$schema_changes) == 0L)
-expect_error(parity(current_16, previous_16, "2024"), "unapproved schema")
+expect_error(parity(current_16, previous_16, "2024"), "retired fields")
 expect_error(parity(current_24, previous_24, "unknown"), "schema_migration must be")
 expect_error(parity(mutate(current_24, rhu_inventoryE = "115"), previous_24, "2024"), "must be numeric")
 expect_error(parity(select(current_16, -vac_rentedE), current_16, "2016"), "unapproved schema")
@@ -370,7 +398,7 @@ for (vintage in c("2016", "2024")) {
   candidate <- if (vintage == "2016") current_16 else current_24
   reference <- if (vintage == "2016") previous_16 else previous_24
   expect_error(parity(mutate(candidate, unexpected = 1), reference, vintage), "unapproved schema")
-  expect_error(parity(select(candidate, -rentM), reference, vintage), "unapproved schema")
+  expect_error(parity(select(candidate, -med_hhincM), reference, vintage), "unapproved schema")
   expect_error(parity(select(candidate, rhuE, everything()), reference, vintage), "order, or types differ")
   expect_error(parity(mutate(candidate, rhuE = as.integer(rhuE)), reference, vintage), "order, or types differ")
   expect_error(parity(mutate(candidate, rhuE = rhuE + 1), reference, vintage), "parity failed")
@@ -378,6 +406,25 @@ for (vintage in c("2016", "2024")) {
   expect_error(parity(candidate[-1, ], reference, vintage), "parity failed")
   expect_error(parity(mutate(candidate, rhu_inventoryE = 0), candidate, vintage), "parity failed")
 }
+
+# Native 2024 permits only low-rent removals, never removal of native dollar estimates.
+old_native <- mutate(native_out, rhu_lrE = 70, rhu_lr2E = 90)
+native_cleanup <- parity(native_out, old_native, "2024_tract", key = "tr2020_id")
+stopifnot(setequal(native_cleanup$schema_changes$variable, c("rhu_lrE", "rhu_lr2E")),
+          nrow(native_cleanup$differences) == 0L)
+for (column in c("rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
+                 "med_hvalE", "med_hvalM", "med_hvalCV", "med_hhincE")) {
+  expect_error(parity(select(native_out, -all_of(column)), old_native, "2024_tract",
+                      key = "tr2020_id"), "unapproved schema")
+}
+for (column in cleanup_bg) {
+  retired <- current_24
+  retired[[column]] <- 1
+  expect_error(parity(retired, previous_24, "2024"), "retired fields")
+  expect_error(parity(retired, NULL, "2024"), "retired fields")
+}
+expect_error(parity(select(current_24, -med_hhincE), previous_24, "2024"), "unapproved schema")
+expect_error(parity(select(current_24, -interp_rent), previous_24, "2024"), "unapproved schema")
 
 # Approved income corrections and boundary classifications still work in migration mode.
 income_reference <- previous_16 |> mutate(med_hhincE = NA_real_, med_hhincCV = NA_real_)
@@ -398,11 +445,50 @@ boundary$rhuE[1] <- boundary$rhuE[1] + 1
 boundary_audit <- parity(boundary, previous_24, "2024", boundary_ids = boundary$tr2010_id[1])
 stopifnot(nrow(boundary_audit$differences) == 1L,
           boundary_audit$differences$classification == "boundary_review")
-for (vintage in c("2016", "2024")) {
+for (vintage in c("2016", "2024", "2024_tract")) {
+  candidate <- switch(vintage, `2016` = current_16, `2024` = current_24, `2024_tract` = native_out)
   output <- capture.output(unchecked <- compare_socal_parity(
-    current_16, NULL, "037", schema_migration = vintage
+    candidate, NULL, "037", schema_migration = vintage
   ))
   stopifnot(is.null(unchecked), any(grepl("PARITY NOT CHECKED", output, fixed = TRUE)))
 }
 expect_error(assert_same_schema(current_24, previous_24, "Strict reload"), "order, or types differ")
 cat("Passed: strict/default parity, narrow schema migration, income/boundary rules, and missing references.\n")
+
+# Exercise Step 1's actual source mapping and reduced schema without an API call.
+step1_lines <- readLines(here::here("01_acs.Rmd"))
+step1_chunk <- function(label, env) {
+  start <- match(paste0("```{r ", label, "}"), step1_lines)
+  stopifnot(!is.na(start))
+  end <- which(seq_along(step1_lines) > start & step1_lines == "```")[1]
+  quiet(eval(parse(text = step1_lines[seq.int(start + 1L, end - 1L)]), env))
+}
+step1 <- new.env(parent = environment())
+step1_chunk("configure-block-group-exclusions", step1)
+step1_chunk("specify-variables", step1)
+source_schema <- function(variables, key, id) {
+  x <- tibble(!!key := id, NAME = "Synthetic ACS geography", rent_id = TRUE)
+  aliases <- names(variables)[!duplicated(variables)]
+  for (column in as.vector(outer(aliases, c("E", "M"), paste0))) x[[column]] <- 10
+  list(data = x, keys = key, variables = variables, flag = "rent_id")
+}
+step1$output_checks <- list(
+  tract_2016 = source_schema(step1$tract_vars, "tr2010_id", "06037000100"),
+  bg_2024 = source_schema(step1$block_group_vars, "bg2020_id", "060370001001"),
+  tract_2024 = source_schema(step1$tract_vars, "tr2020_id", "06037000100")
+)
+step1_chunk("validate-columns", step1)
+for (product in names(step1$output_checks)) {
+  original <- step1$output_checks[[product]]$data
+  stopifnot(all(paste0("grentcat", 1:24, "E") %in% names(original)),
+            all(c("rentE", "lqcrentE", "med_hvalE", "med_hhincE") %in% names(original)))
+  for (column in c("rhu_lrE", "rhu_lr2E")) {
+    step1$output_checks[[product]]$data[[column]] <- 1
+    expect_error(step1_chunk("validate-columns", step1), "Excluded columns present")
+    step1$output_checks[[product]]$data <- original
+  }
+  step1$output_checks[[product]]$data <- select(original, -grentcat1E)
+  expect_error(step1_chunk("validate-columns", step1), "Required columns missing")
+  step1$output_checks[[product]]$data <- original
+}
+cat("Passed: Step 1 mapping/bin contract and retired-field rejection; older Step 2 inputs lose only low-rent columns.\n")

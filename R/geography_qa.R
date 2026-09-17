@@ -57,18 +57,40 @@ assert_same_schema <- function(current, previous, label) {
   invisible(TRUE)
 }
 
+# Fixed cleanup removals; native tract dollar estimates remain valid input/output fields.
+step2_cleanup_columns <- function(product = c("2016", "2024", "2024_tract")) {
+  product <- match.arg(product)
+  c("rhu_lrE", "rhu_lr2E", if (product == "2024") {
+    c("rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
+      "med_hvalE", "med_hvalM", "med_hvalCV", "hu_miss_hval", "pct_miss_hval")
+  })
+}
+
+assert_step2_cleanup <- function(df, product) {
+  present <- intersect(names(df), step2_cleanup_columns(product))
+  if (length(present)) stop("Step 2 cleanup: retired fields present: ", paste(present, collapse = ", "))
+  invisible(TRUE)
+}
+
 # Boundary IDs identify destination tracts receiving sources excluded by the old
 # Southern California source filter. Differences there require analyst review.
 # Optional expected_income is uniquely keyed by key (default tr2010_id), with numeric
 # legacy_med_hhincE, corrected_med_hhincE, legacy_med_hhincCV, and
 # corrected_med_hhincCV columns computed from uncensored inputs/reference MOEs.
 # Only income cells matching both expectations qualify for the correction.
-# Optional schema_migration is "2016" or "2024" for the Step 2 migration only.
+# Optional schema_migration is "2016", "2024" (BG), or "2024_tract" for Step 2.
 # Its fixed allowlist applies to additions/removals; shared columns stay strict.
 compare_socal_parity <- function(current, previous, socal_counties,
                                  boundary_ids = character(), tolerance = 1e-10,
                                  expected_income = NULL, schema_migration = NULL,
                                  key = "tr2010_id") {
+  if (!is.null(schema_migration)) {
+    if (!is.character(schema_migration) || length(schema_migration) != 1L ||
+        is.na(schema_migration) || !schema_migration %in% c("2016", "2024", "2024_tract")) {
+      stop("schema_migration must be NULL, '2016', '2024', or '2024_tract'")
+    }
+    assert_step2_cleanup(current, schema_migration)
+  }
   if (is.null(previous)) {
     cat("PARITY NOT CHECKED: no prior output; supply parity_reference_dir.\n")
     return(invisible(NULL))
@@ -80,16 +102,14 @@ compare_socal_parity <- function(current, previous, socal_counties,
   if (is.null(schema_migration)) {
     assert_same_schema(current, previous, "Southern California parity")
   } else {
-    if (!is.character(schema_migration) || length(schema_migration) != 1L ||
-        is.na(schema_migration) || !schema_migration %in% c("2016", "2024")) {
-      stop("schema_migration must be NULL, '2016', or '2024'")
-    }
     removed_measures <- c("rentmv1yr", "rentmv5yr", "rentyrblt", "rentyrblt_14_16",
                           "rentyrblt_10_13", "rentyrblt_00_09", "rentyrblt_90_99")
-    allowed_added <- c("rhu_inventoryE", if (schema_migration == "2016") c("vac_rentedE", "vac_rentedM"))
-    allowed_removed <- if (schema_migration == "2016") {
+    allowed_added <- if (schema_migration == "2024_tract") character() else {
+      c("rhu_inventoryE", if (schema_migration == "2016") c("vac_rentedE", "vac_rentedM"))
+    }
+    allowed_removed <- c(step2_cleanup_columns(schema_migration), if (schema_migration == "2016") {
       c(paste0(removed_measures, "E"), paste0(removed_measures, "M"))
-    } else character()
+    })
     print(schema_changes, n = Inf)
     if (anyDuplicated(names(current)) || anyDuplicated(names(previous)) ||
         !all(added %in% allowed_added) || !all(removed %in% allowed_removed)) {

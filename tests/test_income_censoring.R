@@ -70,7 +70,7 @@ contributions <- tibble(
   wt_renthu = 0.5, wt_hu = 0.5, wt_pop = 0.5, med_hvalE = 800000
 )
 count_columns <- c(
-  "huE", "rhuE", "rhu_lrE", "rhu_lr2E", "rhu_baseE", "popE", "tot_vacE",
+  "huE", "rhuE", "rhu_baseE", "popE", "tot_vacE",
   "tot_vac_baseE", "pop_blkE", "pop_hspE", "pop_aaE", "pop_raceE", "pop_ethnE",
   "sfd_detE", "sfd_baseE", "mfE", "rhucashE", paste0("grentcat", 1:24, "E")
 )
@@ -87,14 +87,16 @@ corrected_tracts <- contributions |>
   censor_tc_vars() |>
   calc_agg_vars(tr2010_id) |>
   calc_pct_vars() |>
-  calc_cv() |>
+  calc_cv(source = "bg_agg") |>
   arrange(tr2010_id)
 previous_tracts <- contributions |>
   censor_before_income_fix() |>
   calc_agg_vars(tr2010_id) |>
   calc_pct_vars() |>
-  calc_cv() |>
+  calc_cv(source = "bg_agg") |>
   arrange(tr2010_id)
+assert_step2_cleanup(corrected_tracts, "2024")
+stopifnot(all(c("med_hhincE", "med_hhincM", "med_hhincCV") %in% names(corrected_tracts)))
 corrected_income <- setNames(corrected_tracts$med_hhincE, corrected_tracts$tr2010_id)
 previous_income <- setNames(previous_tracts$med_hhincE, previous_tracts$tr2010_id)
 other_tract_columns <- setdiff(names(previous_tracts), c("med_hhincE", "med_hhincCV"))
@@ -279,7 +281,7 @@ expect_parity_error(parity(corrected_16, legacy_16,
 
 # The same tolerance applies to ordinary parity and both sides of an exception.
 close_candidate <- corrected_24 |>
-  mutate(rentE = rentE * (1 + 5e-11),
+  mutate(rhuE = rhuE * (1 + 5e-11),
          med_hhincE = med_hhincE * (1 + 5e-11),
          med_hhincCV = med_hhincCV + 5e-11)
 close_reference <- legacy_24 |>
@@ -287,11 +289,11 @@ close_reference <- legacy_24 |>
          med_hhincCV = med_hhincCV + 5e-11)
 stopifnot(
   "Ordinary finite changes within tolerance pass strictly" =
-    nrow(parity(mutate(legacy_24, rentE = rentE * (1 + 5e-11)), legacy_24)$differences) == 0L,
+    nrow(parity(mutate(legacy_24, rhuE = rhuE * (1 + 5e-11)), legacy_24)$differences) == 0L,
   "Expected values within tolerance verify on both sides" =
     nrow(parity(close_candidate, close_reference, expected_24)$differences) == 4L
 )
-expect_parity_error(parity(mutate(corrected_24, rentE = rentE * (1 + 2e-10)), legacy_24, expected_24))
+expect_parity_error(parity(mutate(corrected_24, rhuE = rhuE * (1 + 2e-10)), legacy_24, expected_24))
 for (column in c("med_hhincE", "med_hhincCV")) {
   too_far <- corrected_24
   too_far[[column]][mixed] <- too_far[[column]][mixed] +

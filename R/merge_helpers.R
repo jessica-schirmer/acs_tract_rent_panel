@@ -87,30 +87,37 @@ merge_df <- function(left_df, right_df) {
 # ---- Variable renaming / selection -------------------------------------------
 
 #' Fixed panel estimate, MOE, and CV columns from the Step 2 schemas
+#' @param source Native tract fields or retained 2024 block-group/panel fields.
 #' @return Character vector used by survey preparation and 2024 bundle selection
-merge_measure_columns <- function() {
+merge_measure_columns <- function(source = c("tract", "bg_agg")) {
+  source <- match.arg(source)
     est_var_list <- c("rentE", "lqcrentE", "popE", "huE", "rhuE",
                       "med_hvalE",
-                     "rhu_lrE", "rhu_lr2E",  "med_hhincE", "pctrhuE", "pctvacE",
+                     "med_hhincE", "pctrhuE", "pctvacE",
                      "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "mf5E",
                      "nsfaE", "smfE", "sfd_detE", "pctrvacE", "pctsvacE", "rhu_inventoryE")
     moe_var_list <- c("rentM", "lqcrentM", "popM", "huM", "rhuM",
                       "med_hvalM",
-                    #  "rhu_lrM", "rhu_lr2M",  "pctvacM", "pcthspM", "pctaaM",
                      "med_hhincM", "pctrhuM", "pctblkM", "pcthspM" )
     cv_var_list <- c("rentCV",  "popCV", "huCV", "rhuCV",
                       "med_hvalCV",
-                    #  "rhu_lrCV", "rhu_lr2CV",  "pctvacCV", "pctaaCV", "lqcrentCV",
                      "med_hhincCV", "pctrhuCV", "pctblkCV" , "pcthspCV")
-  c(est_var_list, moe_var_list, cv_var_list)
+  fields <- c(est_var_list, moe_var_list, cv_var_list)
+  if (source == "bg_agg") {
+    fields <- setdiff(fields, c("rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
+                               "med_hvalE", "med_hvalM", "med_hvalCV"))
+  }
+  fields
 }
 
 #' Append a survey-year suffix to the fixed panel measurement columns
 #' @param df Data frame
 #' @param yr Survey-year suffix
+#' @param source Native tract fields or retained block-group fields.
 #' @return Data frame with renamed measurement columns
-rename_vars <- function(df, yr) {
-  for (i in merge_measure_columns()) {
+rename_vars <- function(df, yr, source = c("tract", "bg_agg")) {
+  source <- match.arg(source)
+  for (i in merge_measure_columns(source)) {
     new_var_name <- paste0(i, "_", yr)
     df <- df |>
       dplyr::rename(!!new_var_name := !!i)
@@ -137,14 +144,12 @@ select_vars <- function(df, yr, var_list) {
 # ---- Hierarchical 2024 measurement ------------------------------------------
 
 merge_quality_columns <- function() {
-  c("m_flag_rent", "m_flag_lqcrent", "m_flag_rhu", "m_flag_med_hval",
-    "zero_flag_rhu", "zero_flag_med_hval",
-    "tc_flag_rent", "tc_flag_lqcrent", "tc_flag_med_hval")
+  c("m_flag_rhu", "zero_flag_rhu", "tc_flag_rent")
 }
 
 # Fixed panel fields from the Step 2 schemas, including source-specific flags.
 merge_2024_field_map <- function() {
-  fields <- c(merge_measure_columns(), merge_quality_columns())
+  fields <- c(merge_measure_columns("bg_agg"), merge_quality_columns())
   tibble::tibble(canonical = c(paste0(fields, "_24"), "interp_rent"),
                  tract = c(paste0(fields, "_24_tract"), "rentE_24_tract"),
                  bg_agg = c(paste0(fields, "_24_bg_agg"), "interp_rent_24_bg_agg"))
@@ -153,27 +158,22 @@ merge_2024_field_map <- function() {
 prepare_2024_source <- function(df, source = c("tract", "bg_agg")) {
   source <- match.arg(source)
   key <- if (source == "tract") "tr2020_id" else "tr2010_id"
-  required <- c(key, merge_measure_columns(),
-                if (source == "tract") merge_quality_columns() else c("tc_flag_rent_24", "interp_rent"))
+  measures <- merge_measure_columns("bg_agg")
+  rent_source <- if (source == "tract") "rentE" else "interp_rent"
+  required <- c(key, measures, rent_source,
+                if (source == "tract") merge_quality_columns() else "tc_flag_rent_24")
   missing <- setdiff(required, names(df))
   if (length(missing)) stop(source, ": missing bundle fields: ", paste(missing, collapse = ", "))
   if (!all(vapply(df[setdiff(required, key)], is.numeric, logical(1)))) {
     stop(source, ": measurement bundles must be numeric")
   }
   if (source == "bg_agg") {
-    for (measure in c("rent", "lqcrent", "rhu", "med_hval")) {
-      df[[paste0("m_flag_", measure)]] <- as.double(is.na(df[[paste0(measure, "E")]]))
-    }
-    for (measure in c("rhu", "med_hval")) {
-      df[[paste0("zero_flag_", measure)]] <- as.double(df[[paste0(measure, "E")]] == 0)
-    }
+    df$m_flag_rhu <- as.double(is.na(df$rhuE))
+    df$zero_flag_rhu <- as.double(df$rhuE == 0)
     df$tc_flag_rent <- df$tc_flag_rent_24
-    df$tc_flag_lqcrent <- rep(NA_real_, nrow(df))
-    df$tc_flag_med_hval <- rep(NA_real_, nrow(df))
   }
   df |>
-    dplyr::select(dplyr::all_of(c(key, merge_measure_columns(), merge_quality_columns(),
-                                 if (source == "bg_agg") "interp_rent"))) |>
+    dplyr::select(dplyr::all_of(c(key, measures, merge_quality_columns(), rent_source))) |>
     dplyr::rename_with(~ paste0(.x, "_24_", source), -dplyr::all_of(key))
 }
 
@@ -203,9 +203,22 @@ panel_schema_additions <- function() {
     setdiff(paste0(merge_quality_columns(), "_24"), "tc_flag_rent_24"))
 }
 
+# Fixed removal allowlist for the obsolete measures and their sole-use companions.
+panel_schema_removals <- function() {
+  c("rhu_lrE_16", "rhu_lrE_24", "rhu_lr2E_16", "rhu_lr2E_24",
+    "rhu_lrPOST", "rhu_lr2POST",
+    "rentE_24", "rentM_24", "rentCV_24", "lqcrentE_24", "lqcrentM_24",
+    "med_hvalE_24", "med_hvalM_24", "med_hvalCV_24",
+    "rentPOST", "lqcrentPOST", "moe_rentPOST", "rentPOSTCV", "m_flag_rentPOST",
+    "pct_miss_hval", "m_flag_rent_24", "m_flag_lqcrent_24", "m_flag_med_hval_24",
+    "zero_flag_med_hval_24", "tc_flag_lqcrent_24", "tc_flag_med_hval_24")
+}
+
 # Uses the shared strict schema checker without relaxing other stages' checks.
 assert_panel_schema <- function(current, previous = NULL) {
   additions <- panel_schema_additions()
+  removals <- panel_schema_removals()
+  if (any(names(current) %in% removals)) stop("Panel schema: retired fields present")
   if (!all(additions %in% names(current)) || anyDuplicated(names(current))) {
     stop("Panel schema: missing required fields or duplicate columns")
   }
@@ -227,10 +240,11 @@ assert_panel_schema <- function(current, previous = NULL) {
     removed <- setdiff(names(previous), names(current))
     print(tibble::tibble(change = c(rep("added", length(added)), rep("removed", length(removed))),
                          variable = c(added, removed)), n = Inf)
-    if (!all(added %in% additions) || length(removed) || anyDuplicated(names(previous))) {
+    if (!all(added %in% additions) || !all(removed %in% removals) || anyDuplicated(names(previous))) {
       stop("Panel schema: unapproved additions/removals")
     }
-    assert_same_schema(current[, !names(current) %in% added, drop = FALSE], previous,
+    assert_same_schema(current[, !names(current) %in% added, drop = FALSE],
+                       previous[, !names(previous) %in% removed, drop = FALSE],
                        "Panel schema shared columns versus prior output")
   }
   invisible(TRUE)
@@ -277,16 +291,12 @@ infl_adj_vars <- function(df, yr, var_list) {
 #'   and missing flags
 calc_change_vars <- function(df) {
   df |>
-    mutate(rentPOST = ifelse(rentE_16>0, rentE_24/rentE_16, NA),
-           interp_rentPOST = ifelse(rentE_16>0, interp_rent/rentE_16, NA),
-            lqcrentPOST = ifelse(lqcrentE_16>0, lqcrentE_24/lqcrentE_16, NA),
+    mutate(interp_rentPOST = ifelse(rentE_16>0, interp_rent/rentE_16, NA),
             # rentPRE = ifelse(rentE_09>0, rentE_16/rentE_09,NA),
             huPOST = ifelse(huE_16>0, huE_24/huE_16,NA),
             rhuPOST = ifelse(rhuE_16>0, rhuE_24/rhuE_16,NA),
             rhu_inventoryPOST = ifelse(rhu_inventoryE_16>0,
                                       rhu_inventoryE_24/rhu_inventoryE_16, NA_real_),
-            rhu_lrPOST = ifelse(rhu_lrE_16>0, rhu_lrE_24/rhu_lrE_16, NA),
-            rhu_lr2POST = ifelse(rhu_lr2E_16>0, rhu_lr2E_24/rhu_lr2E_16, NA),
             # rhucashPOST = ifelse(rhucashE_16>0, rhucashE_24/rhucashE_16,NA),
             med_hhincPOST = ifelse(med_hhincE_16>0, med_hhincE_24/med_hhincE_16,NA),
             # Share / rate changes are percentage-point differences (value_24 - value_16),
@@ -299,8 +309,7 @@ calc_change_vars <- function(df) {
             pctsvacPPC = pctsvacE_24 - pctsvacE_16,
             popPOST = ifelse(popE_16>0, popE_24/popE_16, NA),
             ) |>
-    mutate(m_flag_rentPOST = if_else(is.na(rentPOST), 1, 0),
-           m_flag_rhuPOST = if_else(is.na(rhuPOST), 1, 0),
+    mutate(m_flag_rhuPOST = if_else(is.na(rhuPOST), 1, 0),
            m_flag_rhu_inventoryPOST = if_else(is.na(rhu_inventoryPOST), 1, 0) )
 
 }
@@ -321,16 +330,6 @@ calc_cv_change_vars <- function(df) {
             #     sqrt(pmax(0, (MOE_NUM^2) - (RATIO^2) * (MOE_DENOM^2))) / EST_DENOM,
             #     NA_real_
             # ),
-            moe_rentPOST = if_else(
-                rentE_16 != 0,
-                sqrt(pmax(0, (rentM_24^2) - (rentPOST^2) * (rentM_16^2))) / rentE_16,
-                NA_real_
-            ),
-            # moe_interp_rentPOST = if_else(
-            #     rentE_16 != 0,
-            #     sqrt(pmax(0, (interp_rentM^2) - (interp_rentPOST^2) * (rentM_16^2))) / rentE_16,
-            #     NA_real_
-            # ),
             moe_rhuPOST = if_else(
                 rhuE_16!= 0,
                 sqrt(pmax(0, (rhuM_24^2) - (rhuPOST^2) * (rhuM_16^2))) / rhuE_16,
@@ -341,8 +340,6 @@ calc_cv_change_vars <- function(df) {
                 sqrt(pmax(0, (med_hhincM_24^2) - (med_hhincPOST^2) * (med_hhincM_16^2))) / med_hhincE_16,
                 NA_real_
             ),
-            rentPOSTCV =  (moe_rentPOST/1.645)/rentPOST,
-            # interp_rentPOSTCV =  (moe_interp_rentPOST/1.645)/rentPOST,
             rhuPOSTCV =  (moe_rhuPOST/1.645)/rhuPOST,
             med_hhincPOSTCV = (moe_med_hhincPOST/1.645)/med_hhincPOST,
 

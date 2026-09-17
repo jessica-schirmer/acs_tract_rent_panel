@@ -57,6 +57,9 @@ The block-group list (62 aliases / 59 codes) excludes `rent1bdr`, `rent2bdr`, an
 unavailable at block-group grain. B25111 and B25113 measures are removed from
 both years; `vac_forrent` and `vac_rented` are retained in all three requests.
 
+The retired low-rent counts are not constructed. All gross-rent bins remain
+available for downstream interpolation.
+
 This step only **imports and stores** source data; it performs no row-level
 filtering or sample restriction. Geographic harmonization (aggregating the
 2020–2024 block-group data to 2010 tracts using these crosswalks) happens in
@@ -125,7 +128,7 @@ block_group_unavailable_vars <- c(
 
 ## 1.3 Load helper functions
 
-Reusable helpers (`rent_cat_sum()`, `summ_var()`, `rename_id()`, `save_data()`,
+Reusable helpers (`summ_var()`, `rename_id()`, `save_data()`,
 and the diagnostic helpers `report_n()` / `print_numeric_summary()`) live in
 `R/helpers.R` and are loaded here. Keeping them in one documented file lets every
 notebook in this stage share the same definitions.
@@ -301,31 +304,7 @@ report_n(acs_trt_16, "2016 ACS tracts imported")
 acs_trt_16_n <- nrow(acs_trt_16)
 ```
 
-## 3.2 Derive low-rent housing-unit counts
-
-### Decision: Year-specific low-rent category cutoffs
-
-We build two aggregate "low rent" renter-occupied housing-unit counts by summing
-contiguous gross-rent categories (table B25063). For **2016** we use categories
-**1–17** (`rhu_lrE`) and **1–19** (`rhu_lr2E`).
-
-**Rationale:**
-
-- The gross-rent categories are fixed dollar bins that do not move with
-  inflation, so the dollar value of a given "low rent" threshold drifts upward
-  over time.
-- To keep the *real* rent threshold roughly comparable across vintages, the
-  2020–2024 cutoffs are shifted up by one category (1–18 / 1–20; see §§4.2 and 5.2).
-
-```{r derive-low-rent-16}
-acs_trt_16 <- acs_trt_16 |>
-  mutate(
-    rhu_lrE  = rent_cat_sum(1, 17),
-    rhu_lr2E = rent_cat_sum(1, 19)
-  )
-```
-
-## 3.3 Check missingness and margins of error
+## 3.2 Check missingness and margins of error
 
 Quick data-quality probe on two bellwether estimates (population and median
 gross rent): counts, missingness, mean/range, and mean margin of error.
@@ -337,7 +316,7 @@ out <- map_dfr(vars, ~summ_var(acs_trt_16, .x))
 out
 ```
 
-## 3.4 Rename geographic ID and save
+## 3.3 Rename geographic ID and save
 
 Renames `GEOID` to `tr2010_id` (and tags the table with the `rent_id` join
 flag), then writes the output. **Output:** `acs_step1_2016_tract.feather` — 2012–2016 ACS
@@ -387,31 +366,13 @@ acs_bg_24_n <- nrow(acs_bg_24)
 #          pctblk = calc_pct(pop_blkE, pop_raceE),
 #          pctaa = calc_pct(pop_aaE, pop_raceE),
 #          pcthsp = calc_pct(pop_hspE, pop_raceE),
-#          pctsfd = calc_pct(sfd_detE, sfd_baseE),
-#          rhu_lrE = rent_cat_sum(1,18),
-#          rhu_lr2E = rent_cat_sum(1,20)
+#          pctsfd = calc_pct(sfd_detE, sfd_baseE)
 #          )
 ```
 
-## 4.2 Derive low-rent housing-unit counts
+## 4.2 Check missingness and margins of error
 
-### Decision: Shift low-rent cutoffs up one category for 2020–2024
-
-For **2024** we use gross-rent categories **1–18** (`rhu_lrE`) and **1–20**
-(`rhu_lr2E`) — one category higher than the 2016 cutoffs (Section 3.2) — to hold
-the real (inflation-adjusted) low-rent threshold roughly constant across vintages.
-
-```{r derive-low-rent-bg-24}
-acs_bg_24 <- acs_bg_24 |>
-  mutate(
-    rhu_lrE  = rent_cat_sum(1, 18),
-    rhu_lr2E = rent_cat_sum(1, 20)
-  )
-```
-
-## 4.3 Check missingness and margins of error
-
-Same bellwether data-quality probe as Section 3.3, on the block-group data.
+Same bellwether data-quality probe as Section 3.2, on the block-group data.
 
 ```{r check-missingness-bg-24}
 vars <- c("popE", "rentE")
@@ -420,7 +381,7 @@ out <- map_dfr(vars, ~summ_var(acs_bg_24, .x))
 out
 ```
 
-## 4.4 Rename geographic ID and save
+## 4.3 Rename geographic ID and save
 
 Renames `GEOID` to `bg2020_id` (and tags the `rent_id` flag), then writes the
 output. **Output:** `acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates with one row
@@ -454,20 +415,7 @@ report_n(acs_trt_24, "2024 ACS tracts imported")
 acs_trt_24_n <- nrow(acs_trt_24)
 ```
 
-## 5.2 Derive low-rent housing-unit counts
-
-Use the same 2024 cutoffs as §4.2: gross-rent categories **1–18** (`rhu_lrE`)
-and **1–20** (`rhu_lr2E`).
-
-```{r derive-low-rent-tract-24}
-acs_trt_24 <- acs_trt_24 |>
-  mutate(
-    rhu_lrE  = rent_cat_sum(1, 18),
-    rhu_lr2E = rent_cat_sum(1, 20)
-  )
-```
-
-## 5.3 Check missingness and margins of error
+## 5.2 Check missingness and margins of error
 
 Repeat the population and median-gross-rent data-quality probe on the tract data.
 
@@ -478,7 +426,7 @@ out <- map_dfr(vars, ~summ_var(acs_trt_24, .x))
 out
 ```
 
-## 5.4 Rename geographic ID and save
+## 5.3 Rename geographic ID and save
 
 Rename `GEOID` to `tr2020_id`, preserve `NAME`, and add the logical `rent_id`
 flag. **Output:** `acs_step1_2024_tract.feather` — one row per 2020 CA tract.
@@ -671,11 +619,11 @@ output_checks <- list(
 ## 7.1 Check required and omitted columns
 
 Each ACS output must contain `NAME`, its geographic key, estimate/MOE pairs
-for the distinct requested codes, both derived low-rent estimates, and
-`rent_id`. The three duplicate-code aliases remain configured, but the first
+for the distinct requested codes and `rent_id`. The three duplicate-code aliases remain configured, but the first
 alias per code determines the required returned columns. Both tract outputs
 must include all three bedroom-rent pairs; the block-group output must omit
-them. No output may contain the seven removed B25111/B25113 measure pairs.
+them. No output may contain the seven removed B25111/B25113 measure pairs
+or the retired low-rent counts.
 Crosswalks must retain both keys, all four weights, and `x_id`.
 
 ```{r validate-columns}
@@ -690,13 +638,12 @@ for (output_name in names(output_checks)) {
   df <- check$data
   if (!is.null(check$variables)) {
     returned_aliases <- names(check$variables)[!duplicated(check$variables)]
-    numeric_columns <- c(as.vector(outer(returned_aliases, c("E", "M"), paste0)),
-                         "rhu_lrE", "rhu_lr2E")
+    numeric_columns <- as.vector(outer(returned_aliases, c("E", "M"), paste0))
     required <- c(check$keys, "NAME", numeric_columns, check$flag)
     omitted_aliases <- c(removed_measures,
                         setdiff(names(tract_vars), names(check$variables)))
     omitted <- c(as.vector(outer(omitted_aliases, c("E", "M"), paste0)),
-                 grep("^B251(11|13)_", names(df), value = TRUE))
+                 grep("^B251(11|13)_", names(df), value = TRUE), "rhu_lrE", "rhu_lr2E")
   } else {
     numeric_columns <- weight_columns
     required <- c(check$keys, numeric_columns, check$flag)
@@ -755,8 +702,36 @@ for (output_name in names(output_checks)) {
               all(vapply(df[check$keys], function(x) !anyNA(x) && all(nzchar(x)),
                          logical(1))))
   critical <- if (!is.null(check$variables)) {
-    c(check$keys, "NAME", "popE", "rentE", "vac_forrentE", "vac_rentedE",
+    c(check$keys, "NAME", "popE", "rentE", "rhuE", "rhu_baseE", "vac_forrentE", "vac_rentedE",
       intersect(paste0(block_group_unavailable_vars, "E"), names(df)))
+    # c(
+    #   check$keys,
+    #   "NAME",
+    #   "popE",
+    #   "med_hhincE",
+    #   "rentE",
+    #   "rhuE",
+    #   "rhu_baseE",
+    #   "vac_forrentE",
+    #   "vac_rentedE",
+
+    #   paste0("grentcat", 1:24, "E"),
+
+    #   "sfd_baseE",
+    #   "sfd_detE",
+    #   "sfd_attE",
+    #   "duplexE",
+    #   "quadplexE",
+    #   "mf_5_9E",
+    #   "mf_10_19E",
+    #   "mf_20_49E",
+    #   "mf_50E",
+
+    #   intersect(
+    #     paste0(block_group_unavailable_vars, "E"),
+    #     names(df)
+    #   )
+    # )
   } else {
     c(check$keys, weight_columns)
   }

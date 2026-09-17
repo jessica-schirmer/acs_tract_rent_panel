@@ -20,7 +20,7 @@ and source-specific notebook diagnostics.
 
 All columns from `acs_step1_2016_tract.feather` carry through — see
 [acs_step1_2016_tract.md](acs_step1_2016_tract.md) for the full `<name>E` / `<name>M` measure list, plus
-`tr2010_id`, `NAME`, `rhu_lrE`, `rhu_lr2E`, and `rent_id`. Note that `rentE` and
+`tr2010_id`, `NAME`, and `rent_id`. Note that `rentE` and
 `lqcrentE` are **censored** here: values `>= 3500` are set to `NA` (top-code
 removal). See the §2.4 / §3.2 decision blocks in the notebook.
 
@@ -29,12 +29,18 @@ The revised input removes `rentmv1yr`, `rentmv5yr`, `rentyrblt`,
 (each estimate/MOE pair), and adds `vac_rentedE/M` (B25004_003, rented, not
 occupied). These pass-through changes also apply to this output; the three
 bedroom-rent pairs remain. `compare_socal_parity(schema_migration = "2016")`
-permits only these seven pair removals and the additions `vac_rentedE`,
+permits these seven pair removals, the retired `rhu_lrE` / `rhu_lr2E` counts,
+and the additions `vac_rentedE`,
 `vac_rentedM`, and `rhu_inventoryE` against older snapshots. Actual differences
 are reported in `schema_changes`; shared columns retain strict order, type,
 and value checks, with the existing income-correction rules. The default
 `schema_migration = NULL` and save/reload schema checks remain strict.
 See the [stage-1 migration](../README.md#stage-1-input-migration).
+
+Low-rent counts are discarded even from older Step 1 inputs. Native rent,
+lower-quartile rent, house value, and income estimates/MOEs/CVs remain unchanged.
+The corresponding 2016 panel fields are retained. See the
+[cleanup contract](../docs/measure_cleanup.md).
 
 ## Added rental inventory
 
@@ -49,7 +55,7 @@ substitution is allowed. Missing rent, income, or source MOEs do not affect
 inventory completeness. Required estimate/MOE columns must be numeric, and
 observed contributing estimates must be finite and nonnegative.
 
-The [2024 block-group counterpart](acs_step2_24.md#rental-inventory) allocates each of the
+The [2024 block-group counterpart](acs_step2_2024_block_group.md#rental-inventory) allocates each of the
 same components with `wt_renthu`. A retained link contributes only when
 `wt_renthu > 0`; zero-weight links contribute zero and do not affect completeness.
 A target without positive-weight contributors has zero components and inventory,

@@ -52,23 +52,25 @@ without a block-group record. Native-2020-only tracts never enlarge the panel.
 
 ## Year-suffixed level measures
 
-The analytic measures from each survey carry a `_16` (2012–2016) or `_24`
-(2020–2024) suffix. For each survey the following appear (see
-the [2016](acs_step2_16.md), [2024 aggregate](acs_step2_24.md), and
-[2024 tract](acs_step2_2024_tract.md) schemas for definitions). These measures
-are numeric doubles, with missingness inherited from the selected source:
+Retained analytic measures carry a `_16` (2012–2016) or `_24` (2020–2024)
+suffix. All are numeric doubles. The following are present for **both** surveys;
+2024 values inherit the selected source's value and missingness:
 
-- **Estimates `_{yr}`:** `rentE`, `lqcrentE`, `popE`, `huE`, `rhuE`, `med_hvalE`,
-  `rhu_lrE`, `rhu_lr2E`, `med_hhincE`, `pctrhuE`, `pctvacE`, `pctblkE`, `pcthspE`,
-  `pctaaE`, `pctsfdE`, `mf5E`, `nsfaE`, `smfE`, `sfd_detE`, `pctrvacE`,
-  `pctsvacE`, `rhu_inventoryE`.
-  (`mf5E` = units in 5+ structures, renamed from `mfE`; `nsfaE` =
-  non-single-family attached count; `pctrvacE` / `pctsvacE` = rental / for-sale
-  vacancy rates. These carry no MOE/CV column.)
-- **Margins of error `_{yr}`:** `rentM`, `lqcrentM`, `popM`, `huM`, `rhuM`,
-  `med_hvalM`, `med_hhincM`, `pctrhuM`, `pctblkM`, `pcthspM`.
-- **Coefficients of variation `_{yr}`:** `rentCV`, `popCV`, `huCV`, `rhuCV`,
-  `med_hvalCV`, `med_hhincCV`, `pctrhuCV`, `pctblkCV`, `pcthspCV`.
+- **Estimates:** `popE`, `huE`, `rhuE`, `med_hhincE`, `pctrhuE`, `pctvacE`,
+  `pctblkE`, `pcthspE`, `pctaaE`, `pctsfdE`, `mf5E`, `nsfaE`, `smfE`, `sfd_detE`,
+  `pctrvacE`, `pctsvacE`, `rhu_inventoryE`.
+- **Margins of error:** `popM`, `huM`, `rhuM`, `med_hhincM`, `pctrhuM`,
+  `pctblkM`, `pcthspM`.
+- **Coefficients of variation:** `popCV`, `huCV`, `rhuCV`, `med_hhincCV`,
+  `pctrhuCV`, `pctblkCV`, `pcthspCV`.
+
+**2016-only native dollar fields:** `rentE_16`, `rentM_16`, `rentCV_16`,
+`lqcrentE_16`, `lqcrentM_16`, `med_hvalE_16`, `med_hvalM_16`, `med_hvalCV_16`.
+Their 2024 panel counterparts are retired, along with low-rent levels and
+changes. Native 2024 estimates remain in the [tract product](acs_step2_2024_tract.md);
+`rentE_24_tract` remains notebook-only to supply canonical `interp_rent`.
+Weighted household income and its uncertainty remain part of the hierarchy.
+See the [exact cleanup field list](../docs/measure_cleanup.md).
 
 **Structure counts retained as levels:** `smfE_16`, `smfE_24`, `sfd_detE_16`,
 and `sfd_detE_24` are numeric doubles copied from the documented Step 2 inputs.
@@ -96,15 +98,15 @@ no MOE/CV. `rhuE_16`/`rhuE_24` remain occupied-renter counts.
 
 | column | source | description |
 |---|---|---|
-| `interp_rent` | Selected 2024 source | Numeric double, not suffixed. Native tract `rentE_24_tract` (equal to canonical `rentE_24`) for `geo_consistent == 1`; block-group-aggregated interpolated rent for every other row, including missing/unexpected status. Missingness follows the selected value; no availability fallback. |
-| `pct_miss_rent`, `pct_miss_hval` | 2024 block-group aggregate | Share of weighted units missing rent / value. Rent includes censored top-coded block groups; see `pct_tc_rent`. |
+| `interp_rent` | Selected 2024 source | Numeric double, not suffixed. Native tract `rentE_24_tract` for `geo_consistent == 1`; block-group-aggregated interpolated rent for every other row, including missing/unexpected status. Missingness follows the selected value; no availability fallback. |
+| `pct_miss_rent` | 2024 block-group aggregate | Share of weighted renter units missing source rent, including censored top-coded block groups; see `pct_tc_rent`. |
 | `pct_tc_rent` | 2024 block-group aggregate | Share of weighted renter units whose rent is top-coded; the top-coded portion of `pct_miss_rent`. |
 | `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | 2016 | Missing-value flags (0/1). |
 | `zero_flag_rhu` | 2016 | Zero renter-units flag (0/1). |
 | `tc_flag_rent`, `tc_flag_lqcrent`, `tc_flag_med_hval` | 2016 | Top-code flags (0/1). |
 
-The analyst chose to preserve the existing names and values of `pct_miss_rent`,
-`pct_tc_rent`, and `pct_miss_hval` on all panel rows, including Census-selected
+The analyst chose to preserve the existing names and values of `pct_miss_rent`
+and `pct_tc_rent` on all panel rows, including Census-selected
 and unresolved rows. These diagnostics describe the aggregate source, not quality
 of the selected Census estimate; downstream quality-classification rules remain
 unchanged.
@@ -125,10 +127,9 @@ Missing selected source records or unavailable source flags leave these flags mi
 
 | columns | definition |
 |---|---|
-| `m_flag_rent_24`, `m_flag_lqcrent_24`, `m_flag_rhu_24`, `m_flag_med_hval_24` | Tract source: corresponding upstream missing flags. Aggregate source: `is.na()` of its estimate, calculated before joining. |
-| `zero_flag_rhu_24`, `zero_flag_med_hval_24` | Tract source: upstream zero flags. Aggregate source: its estimate equals zero, with `NA` for missing estimates. |
-| `tc_flag_rent_24` | Tract source: upstream `tc_flag_rent` (tract median meets the censoring threshold). Aggregate source: upstream `tc_flag_rent_24` (a positively renter-weighted contributing block group was top-coded). The aggregate can still have observed rent. |
-| `tc_flag_lqcrent_24`, `tc_flag_med_hval_24` | Upstream tract flags for Census-selected rows; `NA` for aggregate-selected rows because no equivalent flags are supplied. Never inferred from an aggregated estimate. |
+| `m_flag_rhu_24` | Tract source: upstream renter-count missing flag. Aggregate source: `is.na(rhuE)`, calculated before joining. |
+| `zero_flag_rhu_24` | Tract source: upstream zero flags. Aggregate source: its estimate equals zero, with `NA` for missing estimates. |
+| `tc_flag_rent_24` | Tract source: upstream `tc_flag_rent` (tract median meets the censoring threshold). Aggregate source: upstream `tc_flag_rent_24` (a positively renter-weighted contributing block group was top-coded). This source diagnostic does not determine whether interpolated rent is observed. |
 
 ## Change measures
 
@@ -138,13 +139,10 @@ where the 2016 denominator is positive (else `NA`).
 
 | column | definition |
 |---|---|
-| `rentPOST` | `rentE_24 / rentE_16` |
-| `interp_rentPOST` | Canonical selected `interp_rent / rentE_16`, for positive `rentE_16`. Equals `rentPOST` for consistent tracts, including missingness; every other row uses block-group interpolation. Missing selected values or missing/non-positive baselines give `NA`. |
-| `lqcrentPOST` | `lqcrentE_24 / lqcrentE_16` |
+| `interp_rentPOST` | Canonical selected `interp_rent / rentE_16`, for positive `rentE_16`. Uses native tract rent for consistent tracts and block-group interpolation for every other row. Missing selected values or missing/non-positive baselines give `NA`. |
 | `huPOST` | `huE_24 / huE_16` |
 | `rhuPOST` | `rhuE_24 / rhuE_16` |
 | `rhu_inventoryPOST` | `rhu_inventoryE_24 / rhu_inventoryE_16`; separate inventory change, not occupied-renter change |
-| `rhu_lrPOST`, `rhu_lr2POST` | low-rent renter-unit change ratios |
 | `med_hhincPOST` | `med_hhincE_24 / med_hhincE_16` |
 | `popPOST` | `popE_24 / popE_16` |
 
@@ -159,15 +157,15 @@ periods are present (`NA` only if a period is missing).
 | `pctrvacPPC` | `pctrvacE_24 − pctrvacE_16` (rental vacancy rate) |
 | `pctsvacPPC` | `pctsvacE_24 − pctsvacE_16` (for-sale vacancy rate) |
 
-**Change-measure MOE/CV:** `moe_rentPOST`, `moe_rhuPOST`, `moe_med_hhincPOST`
-(ratio-MOE propagation) and `rentPOSTCV`, `rhuPOSTCV`, `med_hhincPOSTCV`.
+**Change-measure MOE/CV:** `moe_rhuPOST`, `moe_med_hhincPOST`
+(ratio-MOE propagation) and `rhuPOSTCV`, `med_hhincPOSTCV`.
 
 These calculations consume the canonical selected 2024 fields. Existing
 uncertainty formulas and upstream MOEs remain unchanged; the documented upstream
-dollar-MOE discrepancy is a separate research decision. Missing selected
+income-MOE weighting discrepancy is a separate research decision. Missing selected
 estimates or uncertainty propagate through the change calculations.
 
-**Change flags (double 0/1):** `m_flag_rentPOST`, `m_flag_rhuPOST`,
+**Change flags (double 0/1):** `m_flag_rhuPOST`,
 `m_flag_rhu_inventoryPOST`; 1 exactly when the corresponding change is missing.
 No inventory change MOE/CV is added.
 
@@ -185,14 +183,14 @@ diagnostics and adds no output columns.
 
 ## Schema migration and validation
 
-`panel_schema_additions()` allows only inventory's two levels, ratio and missing
-flag; the four geographic/provenance columns; the eight newly added 2024
-quality flags above (`tc_flag_rent_24` already existed); and `smfE_16`, `smfE_24`,
-`sfd_detE_16`, and `sfd_detE_24`. Relative to the existing hierarchical panel,
-the structure-count update adds exactly these four level columns. No old columns
-are removed; shared columns retain their order and storage types. New fields are
-required and type-checked even without a prior reference. Observed estimate
-values may change under the hierarchy; the prior file is a schema reference,
+`panel_schema_additions()` allows inventory's two levels, ratio and missing
+flag; the four geographic/provenance columns; `m_flag_rhu_24` and
+`zero_flag_rhu_24` (`tc_flag_rent_24` already existed); and `smfE_16`, `smfE_24`,
+`sfd_detE_16`, and `sfd_detE_24`. `panel_schema_removals()` permits exactly the
+26 retired columns listed in the [cleanup contract](../docs/measure_cleanup.md).
+No other additions/removals are allowed. Shared columns retain their order and
+storage types. Required additions are type-checked and retired fields are
+rejected even without a prior reference. The prior panel is a schema reference,
 not a value-parity target. Save/reload column order/types and values stay strict.
 
 All three inputs require numeric `smfE` and `sfd_detE`, finite and nonnegative
@@ -203,7 +201,7 @@ imposed.
 
 Notebook QA reports source counts/shares, missing/unrecognized status counts,
 canonical missingness by source, and exact equality to each selected bundle.
-Median rent, `interp_rent`, and inventory explicitly report selected missing
+`interp_rent` and inventory explicitly report selected missing
 values with an observed alternative. `interp_rent` must match the mapped source's
 values and missingness, including on rows with missing/unexpected geographic
 flags. Validation also checks `interp_rentPOST` against canonical

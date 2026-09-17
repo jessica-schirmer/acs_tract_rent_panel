@@ -146,8 +146,15 @@ This notebook opts into a fixed vintage-specific allowlist:
 
 | `schema_migration` | Permitted additions | Permitted removals |
 |---|---|---|
-| `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99` |
-| `"2024"` (block-group aggregated only) | `rhu_inventoryE` | None |
+| `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99`; `rhu_lrE`, `rhu_lr2E` |
+| `"2024"` (block-group aggregated only) | `rhu_inventoryE` | Low-rent counts; weighted rent/lower-quartile/value estimates and companions listed below |
+| `"2024_tract"` | None | `rhu_lrE`, `rhu_lr2E` |
+
+The fixed 2024 block-group cleanup removes `rhu_lrE`, `rhu_lr2E`, `rentE`,
+`rentM`, `rentCV`, `lqcrentE`, `lqcrentM`, `med_hvalE`, `med_hvalM`,
+`med_hvalCV`, `hu_miss_hval`, and `pct_miss_hval`. Weighted income remains.
+Native tract estimates and uncertainty remain unchanged. Retired fields are
+rejected even when no parity reference exists.
 
 Actual additions/removals appear in `schema_changes`; unlisted differences fail.
 All shared columns retain the existing value, type, and order comparisons,
@@ -172,8 +179,9 @@ rule as all other columns. Without expectations, the helper remains strict.
 The explicit map below retains the historical reference filenames for the two
 existing products. It does not rename or overwrite those snapshots. The new
 2024 tract product uses only its own optional reference, keyed by `tr2020_id`;
-its schema and values are compared strictly, without schema-migration,
-income-correction, or allocation-boundary exceptions. An absent reference
+only the two low-rent column removals are allowed by `schema_migration = "2024_tract"`.
+Its shared schema and values remain strict, without income-correction or
+allocation-boundary exceptions. An absent reference
 leaves parity unchecked. Pre-censoring tract income is validated independently
 in §4.4 even when no reference exists.
 
@@ -200,9 +208,16 @@ names(prior_outputs) <- names(parity_reference_files)
 
 ## 2.1 Import block-group ACS and crosswalk
 
+### Decision: Discard retired low-rent counts from older inputs
+
+All three ACS input paths drop `rhu_lrE` and `rhu_lr2E` if an older cache still
+contains them. These counts are no longer constructed in Step 1. Source rent
+estimates and every gross-rent bin remain available; no source rows are removed.
+
 ```{r import-bg-and-xwalk-2024-bg-aggregated}
 # Load 2024 ACS block group data
-acs_2024_bg_source <- load_data(data_dir, NULL, "acs_step1_2024_block_group.feather")
+acs_2024_bg_source <- load_data(data_dir, NULL, "acs_step1_2024_block_group.feather") |>
+  select(-any_of(step2_cleanup_columns("2016")))
 report_n(acs_2024_bg_source, "2024 ACS block-group sources loaded")
 
 # acs_2024_bg_source <- acs_2024_bg_source |>
@@ -351,7 +366,7 @@ rm(xwalk, xwalk_sources, xwalk_join, xwalk_join_filt, acs_2024_bg_source, acs_so
 ### Decision: Relative weights for margin-of-error aggregation
 
 Count estimates are aggregated with the NHGIS allocation weights directly, but
-margins of error are combined as a weighted root-sum-of-squares. For that we need
+count margins of error are combined as a weighted root-sum-of-squares. For that we need
 each block group's *relative* contribution to its tract total — `rel_wt_*` —
 computed as the block group's weighted count over the tract's weighted total
 (separately by population, housing units, and renter-occupied housing units).
@@ -413,9 +428,10 @@ table(tc_diagnostics_2024_bg_aggregated$tc_flag_rent_24)
 ### Decision: Censor top-coded rent to missing
 
 The ACS top-codes median gross rent (and the lower contract-rent quartile) at
-$3,500. Top-coded values are not true medians, so we set rent and `lqcrent`
-values `>= 3500` to `NA` before aggregating. A tract-level top-code flag
-(`tc_flag_rent_24`, built in §2.3) records where this occurred.
+$3,500. The shared censoring helper still sets these source values `>= 3500`
+to `NA`. Censored source rent supplies the retained missing-rent diagnostics;
+no weighted rent or lower-quartile estimate is constructed. A tract-level
+top-code flag (`tc_flag_rent_24`, built in §2.3) records where censoring occurred.
 
 ### Decision: Retain income independently of rent censoring
 
@@ -485,11 +501,15 @@ weight appropriate to each measure:
   types, gross-rent categories): weighted **sums** — renter measures use
   `wt_renthu`, housing-unit/structure measures use `wt_hu`, population measures
   use `wt_pop`, household measures use `wt_hh`.
-- **Medians/means** (median rent, lower-quartile rent, median income, median
-  value): weighted **means** of the block-group estimates, weighted by the
-  corresponding weighted count.
-- **Margins of error**: combined as `sqrt(sum((MOE * rel_wt)^2))` using the
-  relative weights from §2.3.
+- **Median household income**: retain the weighted mean with `hhE * wt_hh`.
+  Its MOE retains the existing weighted mean with `rhuE * wt_renthu`; the
+  differing estimate/MOE weights are unchanged by this cleanup.
+- **Count margins of error**: combined as `sqrt(sum((MOE * rel_wt)^2))` using
+  the relative weights from §2.3.
+
+Weighted gross rent, lower-quartile rent, and house value, their MOEs/CVs, and
+house-value missingness diagnostics are no longer produced. This removal does
+not change the income calculation, native tract measures, or rent bins.
 
 This produces one row per 2010 tract.
 
@@ -613,12 +633,12 @@ print(inventory_reconciliation_2024_bg_aggregated, width = Inf)
 
 ### Decision: Interpolated median rent within the median gross-rent category
 
-As an alternative to the weighted median rent, we compute an interpolated median
-by locating the gross-rent category that contains the tract's median renter
+We compute the block-group product's rent measure from its distribution,
+locating the gross-rent category that contains the tract's median renter
 household and linearly interpolating within that category's dollar bounds. The
 bottom (`<$100`) and top (`$3,500+`) categories are open-ended, so tracts whose
-median falls there (or with no cash-rent units) get `NA`. The two rent measures
-correlate ~0.94 (checked in §2.7).
+median falls there (or with no cash-rent units) get `NA`. This construction is
+unchanged by removal of the weighted-average rent estimate.
 
 ### Decision: Vacancy rates and the non-single-family-attached count
 
@@ -660,7 +680,7 @@ summary(acs_2024_bg_aggregated$pct_miss_rent)
 acs_2024_bg_aggregated <- calc_pct_vars(acs_2024_bg_aggregated)
 
 # Calculate MOE, CV
-acs_2024_bg_aggregated <- calc_cv(acs_2024_bg_aggregated)
+acs_2024_bg_aggregated <- calc_cv(acs_2024_bg_aggregated, source = "bg_agg")
 
 # Build the combined non-single-family-attached count and the rental / for-sale
 # vacancy rates (see decision block above)
@@ -688,9 +708,6 @@ acs_2024_bg_aggregated_interp <- merge_df(acs_2024_bg_aggregated_tc, interp_rent
 table(acs_2024_bg_aggregated_interp$merge)
 assert_complete_tract_join(acs_2024_bg_aggregated_interp, target_tract_ids_2024_bg_aggregated, "Interpolated rent join")
 summary(acs_2024_bg_aggregated_interp$interp_rent, useNA = "ifany")
-summary(acs_2024_bg_aggregated_interp$rentE, useNA = "ifany")
-cor(acs_2024_bg_aggregated_interp$interp_rent, acs_2024_bg_aggregated_interp$rentE, use = "complete.obs")
-# correlation between weighted rent and interpolated rent is .94
 ```
 
 ## 2.8 Save 2020–2024 block-group-aggregated output
@@ -702,8 +719,8 @@ the production filename `acs_step2_24.feather`; the legacy file is retained.
 
 Before writing, assert county containment/coverage and keyed inventory
 completeness, component totals, and range. Compare every shared output column
-to the prior Southern California records, permitting only the inventory addition
-under `schema_migration = "2024"`. `socal_parity_2024_bg_aggregated` reports cell
+to the prior Southern California records, permitting the inventory addition
+and fixed cleanup removals under `schema_migration = "2024"`. `socal_parity_2024_bg_aggregated` reports cell
 differences and added/removed keys separately for unaffected and boundary tracts.
 Each changed cell is classified as `verified_income_correction`,
 `boundary_review`, or `unexpected`, with counts in `difference_summary` and all
@@ -739,32 +756,27 @@ save_data(acs_2024_bg_aggregated_interp, data_dir, "acs_step2_2024_block_group_a
 
 ```{r check-vars-2024-bg-aggregated}
 # Check CV
-# check_vars <- c("rentE", "rhuE", "huE", "popE", "med_hhincE", "med_hvalE", "pctblkE", "pct_miss_rent")
-check_vars <- c("rentE", "rhuE", "pct_miss_rent")
+check_vars <- c("med_hhincE", "rhuE", "pct_miss_rent")
 out_2024_bg_aggregated <- map_dfr(check_vars, ~summ_var(acs_2024_bg_aggregated, .x))
 out_2024_bg_aggregated
 
 
-# check_vars <- c("rentE", "rhuE", "huE", "popE", "med_hhincE", "med_hvalE", "pctblkE", "pct_miss_rent")
 check_vars <- c("rentE", "rhuE", "rhucashE", "grentcat1E", "grentcat24E")
 out_2024_bg_aggregated <- map_dfr(check_vars, ~summ_var(acs_2024_bg_allocations, .x))
 out_2024_bg_aggregated
 
 # # Check CV
-# check_vars <- c("rentCV", "med_hhincCV", "med_hvalCV", "pctblkCV", "huCV", "rhuCV", "popCV")
 # out_2024_bg_aggregated <- map_dfr(check_vars, ~summ_var(acs_2024_bg_aggregated, .x))
 # out_2024_bg_aggregated
 
 # # Check % missing, % top-coded
-# # check_vars <- c("pct_miss_rent", "pct_tc_rent")
-# check_vars <- c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "pct_tc_hval")
 
 # out_2024_bg_aggregated <- map_dfr(check_vars, ~summ_var(acs_2024_bg_aggregated, .x))
 # out_2024_bg_aggregated
 
 # Check % missing
 
-check_vars <- c("pct_miss_rent", "pct_tc_rent", "rentE", "tc_flag_rent_24")
+check_vars <- c("pct_miss_rent", "pct_tc_rent", "tc_flag_rent_24")
 
 out_2024_bg_aggregated <- map_dfr(check_vars, ~summ_var(acs_2024_bg_aggregated_tc, .x))
 out_2024_bg_aggregated
@@ -820,33 +832,7 @@ median rent. Retained for provenance; intentionally left commented out_2024_bg_a
 #   )
 
 
-# m_vars <- acs_2024_bg_aggregated_tc |>
-#     mutate(trt_rhuE= rhuE,
-#             trt_rentE= rentE,
-#             trt_rhu_miss_rent= rhu_miss_rent) |>
-#     select(tr2010_id, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_24)
 
-# # Merge tract flags to block groups
-# acs_bg_join <- merge_df(acs_2024_bg_allocations, m_vars, "tr2010_id")
-# table(acs_bg_join$merge)
-# table(acs_bg_join$tc_flag_rent_24, useNA = "ifany")
-
-# # Create missing rent flag
-# acs_bg_join <- acs_bg_join |>
-#     mutate(m_flag_rent = if_else(is.na(rentE), 1, 0)) |>
-#     select(tr2010_id, bg2020_id, rhuE, rentE, wt_renthu, rel_wt_rhu, trt_rhu_miss_rent, trt_rhuE, trt_rentE,  pct_miss_rent, tc_flag_rent_24, m_flag_rent)
-# table(acs_bg_join$m_flag_rent)
-
-# # Check weighed median calculation
-# rent_samp <- c(2065, 1419)
-# rent_wt <- c(160, 107)
-# result <- weightedMean(rent_samp, rent_wt)
-# print(result)
-
-# rent_samp <- c(2065, 1419)
-# rent_wt <- c(160, 107)
-# result <- weightedMedian(rent_samp, rent_wt)
-# print(result)
 ```
 
 # 3. Prepare 2012–2016 ACS tract measures
@@ -855,7 +841,8 @@ median rent. Retained for provenance; intentionally left commented out_2024_bg_a
 
 ```{r load-restrict-16}
 # Load 2016 ACS tract data
-acs_16 <- load_data(data_dir, NULL, "acs_step1_2016_tract.feather")
+acs_16 <- load_data(data_dir, NULL, "acs_step1_2016_tract.feather") |>
+  select(-any_of(step2_cleanup_columns("2016")))
 report_n(acs_16, "2016 ACS tracts loaded")
 assert_unique_key(acs_16, "tr2010_id", "Statewide 2016 ACS")
 
@@ -1089,16 +1076,17 @@ summary(acs_2024_bg_aggregated$med_hhincE)
 `acs_step1_2024_tract.feather` is keyed by `tr2020_id`, as documented in the
 [upstream schema](schemas/acs_step1_2024_tract.md). Select the same configured
 counties as the other products, preserving one row per source tract. There is
-no crosswalk or allocation in this path. The retained bedroom-rent pairs and
-the 2024 low-rent counts (categories 1–18 / 1–20) carry through from Step 1.
+no crosswalk or allocation in this path. Native dollar estimates, their MOEs,
+and the retained bedroom-rent pairs carry through from Step 1.
 
 ```{r load-restrict-2024-tract}
-acs_2024_tract <- load_data(data_dir, NULL, "acs_step1_2024_tract.feather")
+acs_2024_tract <- load_data(data_dir, NULL, "acs_step1_2024_tract.feather") |>
+  select(-any_of(step2_cleanup_columns("2016")))
 report_n(acs_2024_tract, "2024 tract-source ACS tracts loaded")
 assert_unique_key(acs_2024_tract, "tr2020_id", "Statewide 2024 ACS tracts")
 tract_fields_2024_tract <- c(
   "rent1bdrE", "rent1bdrM", "rent2bdrE", "rent2bdrM", "rent3bdrE", "rent3bdrM",
-  "vac_rentedE", "vac_rentedM", "rhu_lrE", "rhu_lr2E", "rent_id"
+  "vac_rentedE", "vac_rentedM", "rent_id"
 )
 stopifnot("2024 tract-source input must retain its documented tract fields" =
             all(tract_fields_2024_tract %in% names(acs_2024_tract)))
@@ -1258,7 +1246,7 @@ assert_rental_inventory(acs_2024_tract, inventory_2024_tract,
                         "2024 tract-source inventory before save", key = "tr2020_id")
 socal_parity_2024_tract <- compare_socal_parity(
   acs_2024_tract, prior_outputs[["2024_tract"]], southern_california_counties,
-  key = "tr2020_id"
+  key = "tr2020_id", schema_migration = "2024_tract"
 )
 ```
 
@@ -1303,19 +1291,21 @@ assert_same_schema(acs_2024_bg_aggregated_out, acs_2024_bg_aggregated_interp, "S
 assert_tract_keys(acs_2024_tract_out, target_tract_ids_2024_tract,
                   "Saved 2024 tract-source keys", key = "tr2020_id")
 assert_same_schema(acs_2024_tract_out, acs_2024_tract, "Saved 2024 tract-source schema")
+assert_step2_cleanup(acs16_out, "2016")
+assert_step2_cleanup(acs_2024_bg_aggregated_out, "2024")
+assert_step2_cleanup(acs_2024_tract_out, "2024_tract")
 ```
 
 ## 5.2 Check missingness on critical variables
 
-Expected: no missing geographic key in any product. Missingness in `rentE` reflects censored
+Expected: no missing geographic key in any product. Native tract `rentE` reflects censored
 top-codes and tracts without cash-renting units; we report counts rather than
-impose a threshold.
+impose a threshold. Block-group rent missingness is reported for `interp_rent`.
 
 ```{r validate-missingness-step2}
 cat("acs_step2_2016_tract missing tr2010_id:", sum(is.na(acs16_out$tr2010_id)), "\n")
 cat("acs_step2_2016_tract missing rentE:    ", sum(is.na(acs16_out$rentE)), "\n")
 cat("acs_step2_2024_block_group_aggregated missing tr2010_id:", sum(is.na(acs_2024_bg_aggregated_out$tr2010_id)), "\n")
-cat("acs_step2_2024_block_group_aggregated missing rentE:    ", sum(is.na(acs_2024_bg_aggregated_out$rentE)), "\n")
 cat("acs_step2_2024_block_group_aggregated missing interp_rent:", sum(is.na(acs_2024_bg_aggregated_out$interp_rent)), "\n")
 cat("acs_step2_2024_tract missing tr2020_id:", sum(is.na(acs_2024_tract_out$tr2020_id)), "\n")
 cat("acs_step2_2024_tract missing rentE:", sum(is.na(acs_2024_tract_out$rentE)), "\n")
@@ -1380,12 +1370,12 @@ for (column in c("pctrvacE", "pctsvacE")) {
 All three products must contain every configured county and no other destination
 county. Both tract-source raw diagnostics count tracts; the block-group diagnostic counts
 allocated renter-occupied units, so sources split across destinations are apportioned
-with their original weights. Final missing-rent counts include censored
-top-codes. Review county differences without imposing an empirical missingness
+with their original weights. Final native-rent missing counts include censored
+top-codes; the block-group product reports missing distribution-based `interp_rent`. Review county differences without imposing an empirical missingness
 threshold. Income is retained independently of rent censoring; compare restored
 income values and downstream measures using the
 [income acceptance checks](notes/income_censoring.md#analyst-run-acceptance-checks).
-The existing dollar-MOE behavior is preserved; its research ambiguity remains a
+The existing income-MOE behavior is preserved; its research ambiguity remains a
 separate decision.
 
 ```{r validate-county-rent-step2}
@@ -1397,15 +1387,18 @@ print(rent_raw_qa_16, n = Inf, width = Inf)
 print(rent_allocation_qa_2024_bg_aggregated, n = Inf, width = Inf)
 print(rent_raw_qa_2024_tract, n = Inf, width = Inf)
 bind_rows(
-  acs16_out |> transmute(county = substr(tr2010_id, 3, 5), rentE, product = "2016_tract"),
+  acs16_out |> transmute(county = substr(tr2010_id, 3, 5), rent_value = rentE,
+                         rent_measure = "native rentE", product = "2016_tract"),
   acs_2024_bg_aggregated_out |>
-    transmute(county = substr(tr2010_id, 3, 5), rentE, product = "2024_bg_aggregated"),
+    transmute(county = substr(tr2010_id, 3, 5), rent_value = interp_rent,
+              rent_measure = "interp_rent", product = "2024_bg_aggregated"),
   acs_2024_tract_out |>
-    transmute(county = substr(tr2020_id, 3, 5), rentE, product = "2024_tract")
+    transmute(county = substr(tr2020_id, 3, 5), rent_value = rentE,
+              rent_measure = "native rentE", product = "2024_tract")
 ) |>
-  group_by(product, county) |>
-  summarise(tracts = n(), missing_rent = sum(is.na(rentE)),
-            missing_share = mean(is.na(rentE)), .groups = "drop") |>
+  group_by(product, rent_measure, county) |>
+  summarise(tracts = n(), missing_rent = sum(is.na(rent_value)),
+            missing_share = mean(is.na(rent_value)), .groups = "drop") |>
   print(n = Inf)
 
 rent_share_qa_2024_bg_aggregated <- acs_2024_bg_aggregated_out |>

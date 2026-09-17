@@ -9,22 +9,6 @@
 
 # ---- ACS estimate helpers ----------------------------------------------------
 
-#' Sum a contiguous span of ACS gross-rent category counts
-#'
-#' Adds the estimate columns `grentcat{start}E` ... `grentcat{end}E` row-wise.
-#' Used to build aggregate "low rent" housing-unit counts from the Census
-#' gross-rent distribution (table B25063). Intended for use inside `mutate()`,
-#' where the data frame is available to `across()`.
-#'
-#' @param start Integer. First gross-rent category to include.
-#' @param end Integer. Last gross-rent category to include.
-#' @return Numeric vector: row-wise sum of the selected category estimates.
-#' @details `agg_rent_cat = sum(grentcat{start}E, grentcat{start+1}E, ..., grentcat{end}E)`
-rent_cat_sum <- function(start, end) {
-  rowSums(across(any_of(paste0("grentcat", start:end, "E"))), na.rm = TRUE)
-}
-
-
 #' Summary statistics for a single ACS estimate column
 #'
 #' Reports the estimate's count, missingness, and distribution, and — when the

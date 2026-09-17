@@ -5,8 +5,11 @@ merge_relationship_classes <- c(
   "consistent", "one_to_one_changed", "split", "merge", "many_to_many"
 )
 
-assert_merge_measures <- function(df, key, label) {
-  required <- c(key, "rentE", "rhuE", "rhu_inventoryE", "smfE", "sfd_detE")
+assert_merge_measures <- function(df, key, label, source = c("tract", "bg_agg")) {
+  source <- match.arg(source)
+  required <- c(key, if (source == "tract") "rentE" else "interp_rent",
+                "rhuE", "rhu_inventoryE", "smfE", "sfd_detE")
+  assert_step2_cleanup(df, if (source == "bg_agg") "2024" else "2016")
   if (!all(required %in% names(df))) stop(label, ": missing documented input fields")
   assert_unique_key(df, key, label)
   if (!is.character(df[[key]]) || !all(grepl("^06[0-9]{9}$", df[[key]]))) {
@@ -284,8 +287,8 @@ summarize_source_selection <- function(df) {
     dplyr::mutate(share = diagnostic_ratio(n_tracts, rep(nrow(df), dplyr::n())))
   stopifnot(sum(counts$n_tracts) == nrow(df))
   missingness <- summarize_diagnostic_measures(
-    df, c("rentE_24", "interp_rent", "rhuE_24", "rhu_inventoryE_24", "med_hhincE_24",
-          "rentPOST", "interp_rentPOST", "rhu_inventoryPOST"), "acs_source_24", c("tract", "bg_agg")
+    df, c("interp_rent", "rhuE_24", "rhu_inventoryE_24", "med_hhincE_24",
+          "interp_rentPOST", "rhu_inventoryPOST"), "acs_source_24", c("tract", "bg_agg")
   ) |>
     dplyr::mutate(group = dplyr::recode(group, status_missing = "unassigned"),
                   share_missing = diagnostic_ratio(n_missing, n_total))

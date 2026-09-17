@@ -42,13 +42,15 @@ is introduced. The three duplicate-code request aliases (`grent_3`, `grent_20`,
 | `bg2020_id` | character | 12-digit block-group GEOID (renamed from `GEOID`). Table key. |
 | `NAME` | character | Census long name for the block group. |
 
-## Derived and flag columns
+## Flag columns
 
 | column | type | description |
 |---|---|---|
-| `rhu_lrE` | numeric | Low-rent renter housing units: row sum of `grentcat1E`–`grentcat18E`. Cutoff at category **18** (~$1,000–1,249) for the 2024 vintage — one bin higher than the 2016 file. |
-| `rhu_lr2E` | numeric | Wider low-rent count: row sum of `grentcat1E`–`grentcat20E` (~$1,500–1,999). |
 | `rent_id` | logical | Join flag, constant `TRUE`. |
+
+The derived low-rent counts `rhu_lrE` and `rhu_lr2E` are retired and must be
+absent. All source estimates/MOEs and all 24 gross-rent bins remain unchanged;
+see the [cleanup contract](../docs/measure_cleanup.md).
 
 **Downstream:** `02_assemble.Rmd` continues to aggregate this block-group table
 to 2010 tracts using `xwalk_bg24_tr10.feather`. See `01_acs.Rmd` §§4.1 and 6.1.

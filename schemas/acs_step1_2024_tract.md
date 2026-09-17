@@ -14,7 +14,7 @@ distinct analytic measure appears as **two columns**:
 - `<name>E` — the ACS point estimate
 - `<name>M` — the 90% margin of error
 
-Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
+Plus the non-suffixed identifier/label and flag columns at the bottom.
 The three duplicate-code aliases (`grent_3`, `grent_20`, `grent_26`) stay in the
 request mapping; tidycensus returns these codes under their first aliases
 (`grentcat1`, `grentcat18`, `grentcat24`), without separate duplicate pairs.
@@ -78,17 +78,15 @@ only the [block-group output](acs_step1_2024_block_group.md) excludes them.
 | `vac_rented` | B25004_003 | Vacant units rented, not occupied |
 | `vac_forsale` | B25004_004 | Vacant units for sale only (available for-sale units) |
 
-## Derived and flag columns
+## Flag columns
 
 | column | type | description |
 |---|---|---|
-| `rhu_lrE` | numeric | Low-rent renter housing units: row sum of `grentcat1E`–`grentcat18E`. Cutoff at category 18 (~$1,000–1,249) for the 2024 vintage. |
-| `rhu_lr2E` | numeric | Wider low-rent count: row sum of `grentcat1E`–`grentcat20E` (~$1,500–1,999). |
 | `rent_id` | logical | Join flag, constant `TRUE` (marks rows sourced from an ACS rent table). |
 
-**Note on year-specific cutoffs:** The two 2024 outputs share categories
-1–18 / 1–20. The [2016 tract output](acs_step1_2016_tract.md) uses categories
-1–17 / 1–19. See `01_acs.Rmd` §§3.2, 4.2, and 5.2.
+The derived low-rent counts `rhu_lrE` and `rhu_lr2E` are retired and must be
+absent. All source estimates/MOEs and all 24 gross-rent bins remain unchanged;
+see the [cleanup contract](../docs/measure_cleanup.md).
 
 **Downstream:** `02_assemble.Rmd` §4 restricts this input to the configured target
 counties and constructs the [2024 tract-source output](acs_step2_2024_tract.md),

@@ -381,7 +381,6 @@ calc_pct_tc_m <- function(df, id) {
       rhuE_tot    = sum(rhuE * wt_renthu, na.rm = TRUE),
       rhu_m_rent = sum(is.na(rentE) * rhuE * wt_renthu, na.rm = TRUE),
       rhu_tc_rent = sum((!is.na(rhuE) & rhuE!=0 & !is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
-    #   hu_tc_hval = sum((!is.na(med_hvalE) & med_hvalE >= 2000000) * huE * wt_hu, na.rm = TRUE),
       .groups = "drop"
     )
 
@@ -414,25 +413,18 @@ censor_tc_vars <- function(df) {
 #'
 #' @param df
 #' @param id geographic id to aggregate
-#' @return Calculate weight sum/ median
+#' @return Weighted counts, income, uncertainty, and rent-quality diagnostics
 calc_agg_vars <- function(df, id) {
   df |>
     group_by({{id}}) |>
     summarise(
       # Count missing values FIRST using original data
       rhu_miss_rent = sum(if_else(is.na(rentE), rhuE * wt_renthu, 0), na.rm = TRUE),
-      hu_miss_hval = sum(if_else(is.na(med_hvalE), huE * wt_hu, 0), na.rm = TRUE),
 
-      # Calculate weighted medians/means BEFORE aggregating the weight variables
-      rentE_agg = weightedMean(rentE, w = rhuE * wt_renthu, na.rm = TRUE),
-      lqcrentE_agg = weightedMean(lqcrentE, w = rhuE * wt_renthu, na.rm = TRUE),
+      # Retain weighted income BEFORE aggregating its weight variables
       med_hhincE_agg = weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
-      med_hvalE_agg = weightedMean(med_hvalE, w = huE * wt_hu, na.rm = TRUE),
 
-      rentM_agg = weightedMean(rentM, w = rhuE * wt_renthu, na.rm = TRUE),
-      lqcrentM_agg = weightedMean(lqcrentM, w = rhuE * wt_renthu, na.rm = TRUE),
       med_hhincM_agg = weightedMean(med_hhincM, w = rhuE * wt_renthu, na.rm = TRUE),
-      med_hvalM_agg = weightedMean(med_hvalM, w = huE * wt_hu, na.rm = TRUE),
 
       # MOE calculations using row-level data
       rhuM_agg = if (sum(rhuE * wt_renthu, na.rm = TRUE) != 0) sqrt(sum((rhuM * rel_wt_rhu)^2, na.rm = TRUE)) else NA,
@@ -451,8 +443,6 @@ calc_agg_vars <- function(df, id) {
       # Now aggregate counts (labeled with _agg)
       huE_agg     = sum(huE * wt_hu, na.rm = TRUE),
       rhuE_agg    = sum(rhuE * wt_renthu, na.rm = TRUE),
-      rhu_lrE_agg = sum(rhu_lrE * wt_renthu, na.rm = TRUE),
-      rhu_lr2E_agg = sum(rhu_lr2E * wt_renthu, na.rm = TRUE),
       rhu_baseE_agg    = sum(rhu_baseE * wt_renthu, na.rm = TRUE),
       hhE_agg     = sum(hhE * wt_hh, na.rm = TRUE),
       popE_agg    = sum(popE * wt_pop, na.rm = TRUE),
@@ -479,14 +469,8 @@ calc_agg_vars <- function(df, id) {
     ) |>
     # Rename everything back to original names
     rename(
-      rentE = rentE_agg,
-      lqcrentE = lqcrentE_agg,
       med_hhincE = med_hhincE_agg,
-      med_hvalE = med_hvalE_agg,
-      rentM = rentM_agg,
-      lqcrentM = lqcrentM_agg,
       med_hhincM = med_hhincM_agg,
-      med_hvalM = med_hvalM_agg,
 
       rhuM = rhuM_agg,
       rhu_baseM = rhu_baseM_agg,
@@ -503,8 +487,6 @@ calc_agg_vars <- function(df, id) {
 
       huE = huE_agg,
       rhuE = rhuE_agg,
-      rhu_lrE = rhu_lrE_agg,
-      rhu_lr2E = rhu_lr2E_agg,
       rhu_baseE = rhu_baseE_agg,
       hhE = hhE_agg,
       popE = popE_agg,
@@ -597,9 +579,7 @@ calc_interp_rent <- function(df) {
 #' @return dataframe with % missing calculations
 calc_missing_vars <- function(df) {
   df |>
-    mutate(pct_miss_rent = if_else(rhuE > 0, rhu_miss_rent / rhuE, NA_real_),
-           pct_miss_hval = if_else(huE > 0,  hu_miss_hval / huE, NA_real_)
-         )
+    mutate(pct_miss_rent = if_else(rhuE > 0, rhu_miss_rent / rhuE, NA_real_))
 }
 
 #' Calculate % vars
@@ -624,9 +604,11 @@ calc_pct_vars <- function(df) {
 #' Calculate comb MOE, CV
 #'
 #' @param df
+#' @param source Tracts retain native rent/value CVs; block-group aggregates do not.
 #' @return dataframe with CV calculations
-calc_cv <- function(df) {
-  df |>
+calc_cv <- function(df, source = c("tract", "bg_agg")) {
+  source <- match.arg(source)
+  df <- df |>
     mutate(
             # TEMPLATE: MOE FOR RATIO
             # MOE_RATIO = if_else(
@@ -649,9 +631,12 @@ calc_cv <- function(df) {
                 sqrt(pmax(0, (pop_hspM^2) - (pcthspE^2) * (pop_raceM^2))) / pop_raceE,
                 NA_real_
             ),
-           rentCV = (rentM/1.645)/rentE,
-           med_hhincCV = (med_hhincM/1.645)/med_hhincE,
-           med_hvalCV = (med_hvalM/1.645)/med_hvalE,
+    )
+  if (source == "tract") df <- mutate(df, rentCV = (rentM/1.645)/rentE)
+  df <- mutate(df, med_hhincCV = (med_hhincM/1.645)/med_hhincE)
+  if (source == "tract") df <- mutate(df, med_hvalCV = (med_hvalM/1.645)/med_hvalE)
+  df |>
+    mutate(
         #    pctrhuCV = (moe_pctrhu/1.645)/pctrhu,
         #    pctblkCV = (moe_pctblk/1.645)/pctblk,
            pctrhuCV = if_else(pctrhuE!=0, (pctrhuM/1.645)/pctrhuE, NA),

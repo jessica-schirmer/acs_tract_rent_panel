@@ -67,6 +67,12 @@ tracts for `geo_consistent == 1` and block-group aggregates otherwise, including
 missing/unexpected numeric flags. Original geographic statuses remain intact for
 QA. Source availability never changes assignment.
 
+The cleaned panel omits low-rent counts and the discontinued 2024 weighted
+rent, lower-quartile rent, and house-value families. Native tract estimates
+remain in Step 2 tract products; 2016 native panel levels and uncertainty are
+preserved. Weighted household income, its uncertainty/change measures, and the
+canonical rent hierarchy remain unchanged. See [cleanup details](docs/measure_cleanup.md).
+
 # 1. Set up environment
 
 ## 1.1 Load packages
@@ -124,11 +130,11 @@ prior_panel <- if (isTRUE(write_panel) && file.exists(prior_panel_path)) {
 
 Load the 2024 block-group-aggregated measures, suffix canonical variables with `_24`, and
 keep the analytic variable set plus a few extra quality/derived columns
-(`pct_miss_rent`, `pct_tc_rent`, `pct_miss_hval`, `tc_flag_rent_24`, `interp_rent`).
+(`pct_miss_rent`, `pct_tc_rent`, `tc_flag_rent_24`, `interp_rent`).
 `pct_tc_rent` is the top-coded portion of `pct_miss_rent` (see §2.3/§2.6 of
 `02_assemble.Rmd`). The analytic set also carries the structure counts `mf5E`,
 `nsfaE`, `smfE`, and `sfd_detE`, and the rental / for-sale vacancy rates
-`pctrvacE` / `pctsvacE`. The shared `merge_measure_columns()` list gives these
+`pctrvacE` / `pctsvacE`. The source-specific `merge_measure_columns("bg_agg")` list gives these
 fields year suffixes and retains them through selection. Preserve all mapped
 estimate/MOE/CV/quality bundles with `_24_bg_agg` suffixes
 before canonical selection in §3.2, including the input interpolated rent as
@@ -152,17 +158,16 @@ and no change measure, quality flag, MOE, or CV is added for these two counts.
 # Load 2020-2024 ACS data
 acs_24_bg_agg <- load_data(data_dir, NULL, "acs_step2_2024_block_group_aggregated.feather")
 report_n(acs_24_bg_agg, "2024 block-group-aggregated measures loaded")
-assert_merge_measures(acs_24_bg_agg, "tr2010_id", "2024 block-group panel input")
+assert_merge_measures(acs_24_bg_agg, "tr2010_id", "2024 block-group panel input", source = "bg_agg")
 input_keys_24_bg_agg <- acs_24_bg_agg$tr2010_id
 acs_24_bg_agg_diagnostic <- prepare_2024_source(acs_24_bg_agg, "bg_agg")
 
 # Rename variables
-acs_24_bg_agg <- rename_vars(acs_24_bg_agg, "24")
+acs_24_bg_agg <- rename_vars(acs_24_bg_agg, "24", source = "bg_agg")
 
 # Select variables
 # var_list <- c("pct_miss_rent", "pct_tc_rent")
-# var_list <- c("pct_miss_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent", "interp_rentCV", "interp_rentM")
-var_list <- c("pct_miss_rent", "pct_tc_rent", "pct_miss_hval", "tc_flag_rent_24", "interp_rent")
+var_list <- c("pct_miss_rent", "pct_tc_rent", "tc_flag_rent_24", "interp_rent")
 acs_24_bg_agg <- select_vars(acs_24_bg_agg, "24", var_list)
 
 # Apply inflation adjustment
@@ -175,8 +180,8 @@ This source retains native 2020 geography and the documented post-censoring
 `rentE`, occupied-renter `rhuE`, and `rhu_inventoryE`, together with the native
 `smfE` and `sfd_detE` structure counts. All mapped bundles are kept
 under explicit `_24_tract` names for selection and diagnostics. Census tract `rentE` is a
-direct median; the block-group counterpart is a weighted mean of block-group
-medians. Use the upstream estimates without changing censoring. Native tract
+direct median; the retained block-group rent measure is distribution-based
+`interp_rent`. Use the upstream estimates without changing censoring. Native tract
 `rentE_24_tract` also serves as the tract-source counterpart for canonical
 `interp_rent`; no new tract interpolation is constructed.
 
@@ -392,16 +397,16 @@ a censored estimate has an observed source MOE.
 The same field map selects `smfE_24` and `sfd_detE_24` from their respective
 `_24_tract` or `_24_bg_agg` copies, preserving the selected counts and missingness.
 
-Aggregate missing/zero flags are calculated on its own estimates before joining,
-using existing 0/1 conventions. `tc_flag_rent_24` means a top-coded tract median
-for Census-selected rows, and any positively renter-weighted top-coded
-block-group contribution for aggregate-selected rows. The latter can coexist
-with observed aggregate rent. No aggregate lower-quartile-rent or house-value
-censoring flags exist upstream, so their selected flags remain `NA`.
+Aggregate renter-count missing/zero flags are calculated on its own `rhuE`
+before joining, using existing 0/1 conventions. `tc_flag_rent_24` means a
+top-coded tract median for Census-selected rows, and any positively
+renter-weighted top-coded block-group contribution for aggregate-selected rows.
+It remains a source top-code diagnostic; it does not determine interpolation
+availability. Flags solely describing the retired 2024 estimates are removed.
 
 ### Decision: Preserve block-group-specific companions
 
-The analyst chose to retain `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
+The analyst chose to retain `pct_miss_rent` and `pct_tc_rent`
 under their existing names and values as block-group diagnostics, including on
 Census-selected or unresolved rows. They describe the aggregate source, not
 quality of the selected Census estimate. Downstream quality rules remain
@@ -410,7 +415,7 @@ unchanged.
 ### Decision: Apply the geographic hierarchy to interpolated rent
 
 Canonical `interp_rent` uses the native tract median gross rent
-(`rentE_24_tract`, also selected into `rentE_24`) for `geo_consistent == 1` and
+(`rentE_24_tract`) for `geo_consistent == 1` and
 the existing block-group interpolation (`interp_rent_24_bg_agg`) for every other
 row, including missing/unexpected status. Missing selected values never fall
 back to the alternative. The native tract median is the intended tract
@@ -436,9 +441,8 @@ Dollar- and count-denominated change ("POST") variables are the ratio of the
 denominator is positive (otherwise `NA`).
 
 `interp_rentPOST` uses the canonical selected `interp_rent / rentE_16` with
-that same positive-baseline rule. It equals `rentPOST` for consistent tracts,
-including matching missingness; all other rows use block-group interpolated
-rent in the numerator. The 2016 baseline remains the inflation-adjusted median
+that same positive-baseline rule. Consistent tracts use native tract rent;
+all other rows use block-group interpolated rent in the numerator. The 2016 baseline remains the inflation-adjusted median
 gross rent.
 
 Share and rate change variables are instead **percentage-point differences**
@@ -455,7 +459,7 @@ baselines. Inventory includes vacant for rent and rented, not occupied units;
 `rhuPOST` continues to measure occupied renter units only. No inventory MOE/CV
 is available upstream or constructed here.
 
-`m_flag_rentPOST`, `m_flag_rhuPOST`, and `m_flag_rhu_inventoryPOST` mark missing
+`m_flag_rhuPOST` and `m_flag_rhu_inventoryPOST` mark missing
 changes. Coefficients of
 variation for the key (level) change variables come from ratio-MOE propagation in
 `calc_cv_change_vars()`; the share / rate `*PPC` differences carry no CV.
@@ -464,7 +468,6 @@ variation for the key (level) change variables come from ratio-MOE propagation i
 # Calculate change variables
 acs_full <- calc_change_vars(acs_full)
 
-table(acs_full$m_flag_rentPOST)
 table(acs_full$m_flag_rhuPOST)
 table(acs_full$m_flag_rhu_inventoryPOST)
 
@@ -496,11 +499,6 @@ summary(acs_full$rhuCV_24)
 
 print("Summary Stats: CV, 2016 Median rent ")
 summary(acs_full$rentCV_16)
-print("Summary Stats: CV, 2024 Median rent ")
-summary(acs_full$rentCV_24)
-
-print("Summary Stats: CV, Rent change")
-summary(acs_full$rentPOSTCV)
 print("Summary Stats: CV, Rental housing unit change")
 summary(acs_full$rhuPOSTCV)
 
@@ -514,7 +512,6 @@ summary(acs_full$med_hhincCV_24)
 print("Summary Stats: CV, Median income change")
 summary(acs_full$med_hhincPOSTCV)
 
-diagnostic_correlation(acs_full$interp_rentPOST, acs_full$rentPOST)
 ```
 
 # 4. Review geographic coverage and source-selection QA
@@ -605,9 +602,9 @@ the corrected canonical values, not a saved panel. Counts are derived at runtime
 For every field, observed block-group values missing canonically must fall to
 zero, and remaining canonical missingness must equal block-group missingness.
 
-The upstream dollar-MOE aggregation discrepancy documented in
-`notes/2024_block_group_rent_weighting_audit.md` remains a separate research
-decision; this notebook uses the selected saved MOEs and existing change formulas.
+Weighted income retains its existing source MOE calculation and change
+formulas. Retired rent/value uncertainty is no longer selected or propagated;
+no uncertainty measure is invented for interpolated rent.
 
 ```{r source-selection-qa}
 source_selection_qa <- summarize_source_selection(acs_diagnostics)
@@ -615,7 +612,7 @@ print(source_selection_qa$counts, n = Inf, width = Inf)
 print(source_selection_qa$geography$status, n = Inf, width = Inf)
 print(source_selection_qa$missingness, n = Inf, width = Inf)
 hierarchy_equality <- assert_hierarchical_2024(acs_diagnostics)
-print(filter(hierarchy_equality, measure %in% c("rentE_24", "interp_rent", "rhu_inventoryE_24")),
+print(filter(hierarchy_equality, measure %in% c("interp_rent", "rhu_inventoryE_24")),
       n = Inf, width = Inf)
 cat("All mapped bundles passed source equality; full checks in hierarchy_equality.\n")
 hierarchy_correction_qa <- summarize_hierarchy_correction(acs_diagnostics)
@@ -633,7 +630,7 @@ if (any(!acs_full$geo_consistent %in% c(0, 1))) {
 
 # 5. Compare 2024 sources and implied changes (diagnostic only)
 
-## 5.1 Compare median rent, interpolated rent, and rental inventory levels
+## 5.1 Compare interpolated rent and rental inventory levels
 
 ### Decision: Restrict source comparisons to geographically consistent tracts
 
@@ -666,7 +663,6 @@ assert_tract_keys(source_comparison_diagnostics,
                   acs_diagnostics$tr2010_id[acs_diagnostics$geo_consistent %in% 1],
                   "Section 5 retains all consistent panel tracts")
 source_level_diagnostics <- list(
-  rent = compare_diagnostic_measures(source_comparison_diagnostics, "rentE_24_tract", "rentE_24_bg_agg"),
   interp_rent = compare_diagnostic_measures(source_comparison_diagnostics, "rentE_24_tract", "interp_rent_24_bg_agg"),
   inventory = compare_diagnostic_measures(source_comparison_diagnostics, "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg")
 )
@@ -680,9 +676,9 @@ walk(source_level_diagnostics, function(result) {
 
 ### Decision: Preserve the established level-change definition in diagnostics
 
-Diagnostic rent, interpolated-rent, inventory, and occupied-renter changes are
-2024/2016 ratios, defined only for positive observed baselines. Both rent
-comparisons use the same already-adjusted `rentE_16`: the new comparison pairs
+Diagnostic interpolated-rent, inventory, and occupied-renter changes are
+2024/2016 ratios, defined only for positive observed baselines. The rent
+comparison uses the same already-adjusted `rentE_16` for both sources, pairing
 `rentE_24_tract / rentE_16` with `interp_rent_24_bg_agg / rentE_16`. Counts receive
 no inflation adjustment and use their own 2016 baselines. All Section 5 change
 comparisons and baseline-coverage tables use the consistent subset.
@@ -696,7 +692,6 @@ no inventory or interpolated-rent MOE/CV is constructed.
 acs_diagnostics <- acs_diagnostics |>
   mutate(
     diag_rentPOST_24_tract = diagnostic_ratio(rentE_24_tract, rentE_16),
-    diag_rentPOST_24_bg_agg = diagnostic_ratio(rentE_24_bg_agg, rentE_16),
     diag_rhu_inventoryPOST_24_tract = diagnostic_ratio(rhu_inventoryE_24_tract, rhu_inventoryE_16),
     diag_rhu_inventoryPOST_24_bg_agg = diagnostic_ratio(rhu_inventoryE_24_bg_agg, rhu_inventoryE_16),
     diag_rhuPOST_24_tract = diagnostic_ratio(rhuE_24_tract, rhuE_16),
@@ -720,7 +715,6 @@ baseline_coverage <- imap_dfr(
 stopifnot(with(baseline_coverage, all(n_base_missing + n_base_nonpositive + n_base_positive == n_total)))
 print(baseline_coverage, n = Inf, width = Inf)
 source_change_diagnostics <- list(
-  rent = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rentPOST_24_tract", "diag_rentPOST_24_bg_agg"),
   interp_rent = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rentPOST_24_tract", "diag_interp_rentPOST_24_bg_agg"),
   inventory = compare_diagnostic_measures(source_comparison_diagnostics, "diag_rhu_inventoryPOST_24_tract", "diag_rhu_inventoryPOST_24_bg_agg")
 )
@@ -802,7 +796,7 @@ stopifnot("Diagnostic work must preserve every canonical column and value" =
             identical(select(acs_diagnostics, all_of(names(acs_full))), acs_full))
 for (source in c("tract", "bg_agg")) {
   mask <- acs_full$acs_source_24 %in% source
-  for (measure in c("rent", "rhu", "rhu_inventory")) {
+  for (measure in c("rhu", "rhu_inventory")) {
     stopifnot("Canonical change must equal the selected diagnostic change" =
       isTRUE(all.equal(acs_full[[paste0(measure, "POST")]][mask],
                       acs_diagnostics[[paste0("diag_", measure, "POST_24_", source)]][mask])))
@@ -841,8 +835,6 @@ in the numeric summaries in §7.4.
 ```{r validate-missingness-panel}
 cat("acs_full missing tr2010_id:    ", sum(is.na(acs_out$tr2010_id)), "\n")
 cat("acs_full missing rentE_16:     ", sum(is.na(acs_out$rentE_16)), "\n")
-cat("acs_full missing rentE_24:     ", sum(is.na(acs_out$rentE_24)), "\n")
-cat("acs_full missing rentPOST:     ", sum(is.na(acs_out$rentPOST)), "\n")
 cat("acs_full missing inventory 2016:", sum(is.na(acs_out$rhu_inventoryE_16)), "\n")
 cat("acs_full missing inventory 2024:", sum(is.na(acs_out$rhu_inventoryE_24)), "\n")
 cat("acs_full missing inventory change:", sum(is.na(acs_out$rhu_inventoryPOST)), "\n")
@@ -854,7 +846,7 @@ for (column in c("smfE_16", "smfE_24", "sfd_detE_16", "sfd_detE_24")) {
   cat("acs_full missing", column, ":", sum(is.na(acs_out[[column]])), "\n")
 }
 print(summarize_diagnostic_measures(
-  acs_diagnostics, c("rentE_24_tract", "rentE_24_bg_agg", "interp_rent_24_bg_agg", "rhu_inventoryE_16",
+  acs_diagnostics, c("rentE_24_tract", "interp_rent_24_bg_agg", "rhu_inventoryE_16",
                      "rhu_inventoryE_24_tract", "rhu_inventoryE_24_bg_agg")
 ), n = Inf, width = Inf)
 ```
@@ -892,8 +884,9 @@ Only canonical columns, documented provenance/flags, and retained block-group
 companions in `acs_full` are eligible for saving. Set
 `write_panel <- TRUE` in §1.3 and rerun from setup to enable a write after reviewing
 diagnostics. A fixed allowlist permits only documented hierarchy/inventory/flag
-additions and the four `smfE` / `sfd_detE` levels;
-shared column order/types remain strict. A missing prior reference is
+additions and the four `smfE` / `sfd_detE` levels, plus the explicit cleanup
+removals in `panel_schema_removals()`. Retired fields are rejected even without
+a prior reference; shared column order/types remain strict. A missing prior reference is
 reported as not checked. Replacement is announced. The reload branch runs only
 after this run writes the file, and verifies keys, schema, and every saved value.
 

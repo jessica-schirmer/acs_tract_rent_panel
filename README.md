@@ -62,7 +62,7 @@ Schema:
 Steps:
 1. Set up environment (packages, explicit block-group exclusions, helper functions from `R/helpers.R`, relative data paths)
 2. Define the target ACS variables to extract
-3. Import and prepare the 2012-2016 ACS tract data (download, derive low-rent counts, check MOE, rename ID, save)
+3. Import and prepare the 2012-2016 ACS tract data (download, check MOE, rename ID, save)
 4. Import and prepare the 2020-2024 ACS block-group data (using the available subset)
 5. Import and prepare the 2020-2024 ACS tract data (using the full tract list)
 6. Import and prepare the geographic crosswalks (bg2020->tr2010, tr2000->tr2010)
@@ -84,8 +84,8 @@ three requests. Other mappings, including renter-occupied units, the rental
 distribution, and for-sale vacancy, are preserved. The three duplicate-code
 aliases (`grent_3`, `grent_20`, `grent_26`) remain configured; tidycensus wide
 output uses each code's first alias, so request counts are not column counts.
-The 2016 low-rent cutoffs remain categories 1–17 / 1–19; both 2024 outputs use
-1–18 / 1–20. Stage 2 consumes both 2024 inputs separately: block groups are
+The derived low-rent counts are retired in all three products; every source
+rent bin remains. Stage 2 consumes both 2024 inputs separately: block groups are
 aggregated to 2010 tracts, and the tract source retains its native 2020 geography.
 
 ### Stage-1 input migration
@@ -113,12 +113,23 @@ missingness threshold is imposed.
 
 **Stage-2 parity compatibility is implemented through a narrow allowlist.**
 `compare_socal_parity()` stays strict by default (`schema_migration = NULL`).
-The notebook opts into fixed migrations for the two existing products:
+The notebook opts into fixed migrations for all three products:
 
 | Vintage / `schema_migration` | Permitted additions relative to older references | Permitted removals |
 |---|---|---|
-| 2016 / `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99` |
-| 2024 block-group aggregated / `"2024"` | `rhu_inventoryE` | None |
+| 2016 / `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99`; `rhu_lrE`, `rhu_lr2E` |
+| 2024 block-group aggregated / `"2024"` | `rhu_inventoryE` | The 12 cleanup fields listed below |
+| 2024 native tract / `"2024_tract"` | None | `rhu_lrE`, `rhu_lr2E` |
+
+The block-group removal list is `rhu_lrE`, `rhu_lr2E`, `rentE`, `rentM`, `rentCV`,
+`lqcrentE`, `lqcrentM`, `med_hvalE`, `med_hvalM`, `med_hvalCV`, `hu_miss_hval`, and
+`pct_miss_hval`. Weighted median household income, its MOE/CV, and its panel
+change measures are retained. Native tract dollar estimates and uncertainty
+remain in their Step 2 products; the existing 2016 native panel fields remain.
+Step 2 drops obsolete low-rent columns from older inputs and rejects retired
+output fields even when no reference exists. See the
+[cleanup record](docs/measure_cleanup.md) for the exact panel removals and
+separate analysis-consumer migration needs.
 
 Actual additions/removals appear in `schema_changes`; unlisted differences fail.
 Shared columns retain strict order, storage type/class, and value checks,
@@ -126,8 +137,7 @@ including the existing income-correction and geographic classifications.
 Inventory is validated independently before saving and after reloading even
 when absent from a reference. Save/reload schema checks remain strict for every
 column. Preserve all reference snapshots; a missing reference remains **parity
-not checked**. The removed source measures have no direct downstream calculation
-references. Step 4 selects canonical 2024 bundles by geography and adds separate inventory
+not checked**. Step 4 selects canonical 2024 bundles by geography and adds separate inventory
 levels/change; `rhuPOST` remains occupied-renter change.
 
 
@@ -146,13 +156,13 @@ Inputs:
 Outputs:
 - `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020-2024 ACS block-group measures aggregated to 2010 tracts (`tr2010_id`), with inventory, interpolated rent, missing/top-coded-rent shares, structure, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_2016_tract.feather` — 2012-2016 ACS tract measures (`tr2010_id`), with inventory, revised Step 1 pass-through columns including `vac_rentedE/M`, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
-- `../../../data/acs_step2_2024_tract.feather` — 2020-2024 ACS tract-source measures (`tr2020_id`), with direct inventory, retained bedroom-rent pairs and 2024 low-rent counts, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_2024_tract.feather` — 2020-2024 ACS tract-source measures (`tr2020_id`), with direct inventory, retained native dollar and bedroom-rent pairs, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
 
 All three outputs cover the configured Southern California and Bay Area counties.
 
 Schema:
-- `schemas/acs_step2_16.md`
-- `schemas/acs_step2_24.md`
+- `schemas/acs_step2_2016_tract.md`
+- `schemas/acs_step2_2024_block_group.md`
 - [2024 tract-source schema](schemas/acs_step2_2024_tract.md)
 
 Steps:
@@ -180,8 +190,8 @@ and unrelated columns. The separate `inventory_rhuE`, `inventory_vac_forrentE`,
 `inventory_vac_rentedE`, contributing/missing counts, and `inventory_incomplete`
 stay in the notebook. Block-group-aggregated `vac_forrentE` continues to use **`wt_hu`**
 for vacancy rates; inventory's diagnostic vacancy components use **`wt_renthu`**.
-Occupied-renter counts and rent denominators, cash/low-rent/bin measures,
-censoring, income, other weights, flags, MOEs, and CVs keep their calculations.
+Occupied-renter counts and rent denominators, cash/bin measures,
+censoring, income, retained weights, flags, MOEs, and CVs keep their calculations.
 No inventory MOE/CV is added. The 2000-to-2010 tract crosswalk remains outside
 Step 2's input contract. The two 2024 products are not compared or reconciled in
 Step 2; Step 4 compares their measurements on geographically consistent links.
@@ -197,15 +207,15 @@ Step 2; Step 4 compares their measurements on geographically consistent links.
 Preserve existing data files. The notebook writes only the three current output
 names; it does not refresh the legacy filenames. Objects and diagnostics use
 `2024_bg_aggregated` / `2024_tract` to distinguish sources while ACS columns keep
-their existing names. Existing schema document paths are retained for link stability.
+their retained names. Schema links use the current descriptive filenames.
 
 The explicit `parity_reference_files` map in §1.4 keeps historical reference
 filenames `acs_step2_16.feather` and `acs_step2_24.feather` under the preserved
 reference directory. The new tract product uses only its own optional
 `acs_step2_2024_tract.feather` reference. Missing references mean **parity not
 checked**, and are never replaced with another product. Its comparison uses
-`key = "tr2020_id"` with strict schema/value checks and no income or boundary
-exceptions. Pre-censoring source income and its existing CV formula are checked
+`key = "tr2020_id"` and `schema_migration = "2024_tract"`, permitting only the
+two low-rent removals; shared schema/values remain strict, without income or boundary exceptions. Pre-censoring source income and its existing CV formula are checked
 independently of reference availability. Shared QA helpers retain
 `key = "tr2010_id"` as their default.
 
@@ -320,9 +330,9 @@ Steps:
 2. Import and prepare survey measures (all three native sources and their bundles, county/key checks, 2016 inflation adjustment, geographic crosswalk validation)
 3. Merge surveys, select canonical 2024 measures, and calculate changes (original full-join key union, explicit consistent links, geography-selected bundles, existing change/CV formulas, separate inventory ratio)
 4. Review geographic coverage and source-selection QA (native/panel denominators, unmatched keys, source counts/shares, missing/unexpected flags, canonical missingness, exact bundle equality, per-field correction summary)
-5. Compare 2024 sources and implied changes (diagnostic only): median rent, block-group interpolated rent, and rental inventory on geographically consistent tracts, with subset coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
+5. Compare 2024 sources and implied changes (diagnostic only): native versus block-group interpolated rent, and rental inventory on geographically consistent tracts, with subset coverage, source summaries, paired differences, absolute differences, positive-denominator ratios, and Pearson correlations
 6. Compare occupied renter units and rental inventory (diagnostic only): all three native input products, then inventory vs. occupied-renter change for the full block-group panel and consistent Census pairs
-7. Validate the panel and optionally save (key union, source-aware changes, missingness, flags, distributions; fixed schema-addition allowlist and strict shared-schema/saved-value checks)
+7. Validate the panel and optionally save (key union, source-aware changes, missingness, flags, distributions; fixed schema-addition/removal allowlists and strict shared-schema/saved-value checks)
 
 **Geographic diagnostic eligibility:** the analyst selected only
 `geo_consistent == 1` for all Section 5 source/change and baseline-coverage
@@ -348,8 +358,8 @@ occupied units to occupied renters; it uses the saved upstream estimate directly
 with no inventory MOE/CV. `acs_source_24`, `geo_consistent`, `relationship_class`,
 and the consistent-link `tr2020_id` provide provenance. `acs_source_24` is
 `"tract"` only for flag 1 and `"bg_agg"` otherwise, independently of source-record
-or measure availability. Relevant 2024 quality flags follow the selected source;
-unavailable aggregate censoring flags remain missing.
+or measure availability. Retained renter-count missing/zero flags and the rent
+top-code flag follow the selected source. Flags solely tied to retired fields are removed.
 
 **Structure counts retained as levels:** the panel adds `smfE_16`, `smfE_24`,
 `sfd_detE_16`, and `sfd_detE_24`. Small multifamily `smfE` is the upstream sum
@@ -362,12 +372,11 @@ no new change measures, flags, MOEs, CVs, or inflation adjustment. Input checks
 require numeric, finite, nonnegative observed counts; Section 7 reports each
 level's missingness and numeric distribution.
 
-The analyst chose to keep `pct_miss_rent`, `pct_tc_rent`, and `pct_miss_hval`
+The analyst chose to keep `pct_miss_rent` and `pct_tc_rent`
 under their existing names and values as block-group diagnostics, including on
 Census-selected/unresolved rows. They do not describe selected Census quality;
 downstream quality rules remain unchanged. Canonical `interp_rent` follows the
-geographic hierarchy: native tract median gross rent (`rentE_24_tract`, also
-selected into `rentE_24`) for consistent tracts, and the existing block-group
+geographic hierarchy: native tract median gross rent (`rentE_24_tract`) for consistent tracts, and the existing block-group
 interpolation for all other rows, including missing/unexpected status. Missing
 selected values remain missing, with no availability fallback.
 `merge_2024_field_map()` in `R/merge_helpers.R` maps the
@@ -396,7 +405,7 @@ checks. An analyst can run all diagnostics with writing disabled. Enable
 `write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
 replacement is announced. Only documented hierarchy/inventory/flag additions
-and the four `smfE` / `sfd_detE` levels are permitted against a prior panel;
+and the four `smfE` / `sfd_detE` levels, plus the fixed cleanup removals, are permitted against a prior panel;
 shared column order/types and saved-value
 checks remain strict. No prior reference is reported as not checked.
 
@@ -467,9 +476,9 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   levels/change. Source-comparison fields remain in notebook diagnostics.
 - Review `source_selection_qa` for assigned-source counts/shares, missing and
   unexpected geographic flags, and canonical missingness. Every mapped bundle
-  must pass `hierarchy_equality`; inspect median-rent, interpolated-rent, and
+  must pass `hierarchy_equality`; inspect interpolated-rent and
   inventory cases with missing selected values and observed alternatives.
-  Confirm `interp_rent` equals native tract `rentE_24` for consistent tracts and
+  Confirm `interp_rent` equals native tract `rentE_24_tract` for consistent tracts and
   the preserved block-group interpolation for every other row, including matching
   missingness. Missing/unexpected geographic flags remain unchanged, while those
   rows now select block-group measurements. `acs_source_24` must cover every row;
@@ -477,7 +486,7 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   `interp_rentPOST` against the canonical selected value over positive `rentE_16`.
   Review inventory and rent changes alongside final key uniqueness, row counts,
   unchanged 2016 values, and the saved schema/reload checks.
-- After rerunning Step 4 from setup with the existing Step 2/3 inputs, inspect
+- After rerunning Step 4 from setup with cleaned Step 2 inputs and the existing Step 3 crosswalk, inspect
   `hierarchy_correction_qa`: one row per mapped field counts rows not positively
   flagged consistent, observed block-group values, canonical missingness
   before/after, and observed block-group values incorrectly missing canonically
@@ -486,8 +495,8 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   `n_bg_observed_canonical_missing_after` must be zero, and
   `n_canonical_missing_after` must equal `n_not_consistent - n_bg_observed`.
   Counts are computed at runtime; previously reported empirical counts are
-  diagnostic evidence, not fixed assertions. The correction requires only
-  Step 4 regeneration; Codex validation uses synthetic inputs and temporary outputs.
+  diagnostic evidence, not fixed assertions. The hierarchy correction itself needs only
+  Step 4; this cleanup also requires regenerated Step 1/2 products. Codex validation uses synthetic inputs and temporary outputs.
 - Review `geography_coverage`, `geography_unmatched`, `alignment_coverage`, and
   `native_tract_measure_coverage` before interpreting paired results. Inspect
   `source_level_diagnostics`, `source_change_diagnostics`, `baseline_coverage`,
@@ -500,7 +509,8 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
 
 Income is retained independently of missing or top-coded rent, following the
 analyst decision; see the [income correction and acceptance checks](notes/income_censoring.md).
-The inspection's dollar-MOE discrepancy remains a separate research decision;
-its executable behavior is unchanged. This cleaning-stage
+The retained income-MOE weighting discrepancy remains a separate research decision;
+its executable behavior is unchanged. Other retired dollar-MOE findings remain
+historical evidence, not current output contracts. This cleaning-stage
 expansion does not expand downstream analysis filters or supporting data. See
 the stage's interface in [the shared pipeline document](../../PIPELINE.md).

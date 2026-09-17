@@ -14,7 +14,7 @@ distinct analytic measure appears as **two columns**:
 - `<name>E` — the ACS point estimate
 - `<name>M` — the 90% margin of error
 
-Plus the non-suffixed identifier/label and derived/flag columns at the bottom.
+Plus the non-suffixed identifier/label and flag columns at the bottom.
 The three duplicate-code aliases (`grent_3`, `grent_20`, `grent_26`) stay in the
 request mapping; tidycensus returns these codes under their first aliases
 (`grentcat1`, `grentcat18`, `grentcat24`), without separate duplicate pairs.
@@ -78,24 +78,20 @@ only the [block-group output](acs_step1_2024_block_group.md) excludes them.
 | `vac_rented` | B25004_003 | Vacant units rented, not occupied |
 | `vac_forsale` | B25004_004 | Vacant units for sale only (available for-sale units) |
 
-## Derived and flag columns
+## Flag columns
 
 | column | type | description |
 |---|---|---|
-| `rhu_lrE` | numeric | Low-rent renter housing units: row sum of `grentcat1E`–`grentcat17E`. Cutoff at category 17 (~$900–999) for the 2016 vintage. |
-| `rhu_lr2E` | numeric | Wider low-rent count: row sum of `grentcat1E`–`grentcat19E` (~$1,250–1,499). |
 | `rent_id` | logical | Join flag, constant `TRUE` (marks rows sourced from an ACS rent table). |
 
-**Note on year-specific cutoffs:** `rhu_lrE` / `rhu_lr2E` use categories 1–17 /
-1–19 here; both 2024 outputs
-([block group](acs_step1_2024_block_group.md) and [tract](acs_step1_2024_tract.md))
-shift these up one bin (1–18 / 1–20) to hold the real rent threshold roughly
-constant. See `01_acs.Rmd` §§3.2, 4.2, and 5.2.
+The derived low-rent counts `rhu_lrE` and `rhu_lr2E` are retired and must be
+absent. All source estimates/MOEs and all 24 gross-rent bins remain unchanged;
+see the [cleanup contract](../docs/measure_cleanup.md).
 
 **Downstream:** Stage 2 passes through this revised schema and adds
 `rhu_inventoryE = rhuE + vac_forrentE + vac_rentedE`, propagating any missing
 required estimate. Its explicit `schema_migration = "2016"` parity mode permits
-only the seven removed measure pairs and additions `vac_rentedE/M` and
+only the seven removed measure pairs, the two low-rent counts, and additions `vac_rentedE/M` and
 `rhu_inventoryE` against older snapshots; shared columns remain strictly checked.
 See the [migration and parity compatibility](../README.md#stage-1-input-migration).
 Generate this file from the revised stage 1; retain the old cache as historical data.
