@@ -60,13 +60,13 @@ Schema:
 - `schemas/xwalk_tr00_tr10.md`
 
 Steps:
-1. Set up environment (packages, explicit block-group exclusions, helper functions from `R/helpers.R`, relative data paths)
+1. Set up environment (packages, explicit block-group exclusions, shared helpers and `R/acs_input_qa.R`, relative data paths)
 2. Define the target ACS variables to extract
 3. Import and prepare the 2012-2016 ACS tract data (download, check MOE, rename ID, save)
-4. Import and prepare the 2020-2024 ACS block-group data (using the available subset)
+4. Import and prepare the 2020-2024 ACS block-group data (using the available subset; validate keys, request-derived fields, and numeric types before saving)
 5. Import and prepare the 2020-2024 ACS tract data (using the full tract list)
-6. Import and prepare the geographic crosswalks (bg2020->tr2010, tr2000->tr2010)
-7. Validate all five saved outputs (required/omitted columns, row preservation, key uniqueness, missingness, flag encoding, numeric distributions)
+6. Import and prepare the geographic crosswalks (bg2020->tr2010, tr2000->tr2010; validate BG allocation pairs/weights and report statewide ACS/crosswalk coverage)
+7. Validate all five saved outputs (required/omitted columns, row preservation, key uniqueness, missingness, flag encoding, numeric distributions; exact BG/crosswalk readback)
 
 Both tract requests share `tract_vars` (**65 aliases / 62 distinct Census
 codes**). The 2024 block-group request uses `block_group_vars` (**62 aliases /
@@ -110,6 +110,34 @@ keys are unique and non-missing; flags are logical, non-missing, constant
 `TRUE`; and estimate missingness/numeric distributions have been reviewed.
 Crosswalk weights must be finite and in [0, 1]. No empirical ACS row count or
 missingness threshold is imposed.
+
+**Step 1 BG input hardening:** §4 asserts a nonmissing, unique, character
+12-digit BG key immediately after wide extraction and again before saving.
+Required estimate/MOE columns are derived from `block_group_vars`, using the
+first alias per Census code; all must be numeric. Numeric `NA`/`NaN` estimates
+remain valid source missingness. §6.1 explicitly reads crosswalk GEOIDs as
+character, checks their 12-/11-digit formats and pair uniqueness, and requires
+all four allocation weights to be numeric, finite, and within `[0,1]`. Each
+source's weights across all destinations must sum to one within the existing
+`1e-6` tolerance. Failures stop before the crosswalk is saved; weights and links
+are never adjusted.
+
+After the next full Step 1 run, inspect `xbg_weight_sums` and the separate
+`bg_coverage_24$acs_only` / `$crosswalk_only` tables in §6.1. The printed coverage
+summary counts distinct BGs, groups discrepancies by source state/county, and
+shows at most ten IDs in each direction; `$crosswalk_only_links` retains full
+unmatched links and weights for review. Statewide coverage differences remain
+diagnostic, including cross-state sources; they neither filter inputs nor
+determine target-tract completeness. Failed structural or weight-sum assertions
+remain fatal independently of coverage. Step 2 contributor logic is unchanged.
+
+Confirm both exact-readback checks pass in §7.6: row counts, keys and row order,
+column names/order, storage types/classes, and every value must equal the
+validated in-memory inputs. Crosswalk weights compare exactly, with no numeric
+tolerance. Continue reviewing ACS missingness and numeric distributions in §7.
+Run `Rscript --vanilla tests/test_acs_input_qa.R` for inexpensive notebook parsing,
+synthetic input/coverage failures, and temporary CSV/Feather round trips. These
+tests do not call the API or regenerate canonical data.
 
 **Stage-2 parity compatibility is implemented through a narrow allowlist.**
 `compare_socal_parity()` stays strict by default (`schema_migration = NULL`).

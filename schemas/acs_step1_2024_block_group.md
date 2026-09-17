@@ -52,6 +52,23 @@ The derived low-rent counts `rhu_lrE` and `rhu_lr2E` are retired and must be
 absent. All source estimates/MOEs and all 24 gross-rent bins remain unchanged;
 see the [cleanup contract](../docs/measure_cleanup.md).
 
+## Step 1 validation
+
+Immediately after wide extraction and before saving, `01_acs.Rmd` §4 requires
+a nonmissing, unique, character 12-digit BG key, character `NAME`, and numeric
+estimate/MOE columns derived from the first alias per distinct code in
+`block_group_vars`. Duplicate BG rows/column names, missing required columns,
+and wrong types fail. The saved `rent_id` flag must be logical, nonmissing, and
+`TRUE`. Numeric `NA`/`NaN` source estimates remain valid for Step 2 completeness
+handling; no estimate-missingness threshold is imposed.
+
+Section 6.1 reports ACS-only and crosswalk-only BGs separately by source
+state/county, with complete ID tables retained in the notebook. These statewide
+coverage differences are diagnostic and do not filter this output. Section 7.6
+requires exact Feather readback of row counts, keys/row order, column names/order,
+storage types/classes, and values against the validated in-memory extract.
+These checks add no output columns or measures.
+
 **Downstream:** `02_assemble.Rmd` continues to aggregate this block-group table
 to 2010 tracts using `xwalk_bg24_tr10.feather`. See `01_acs.Rmd` §§4.1 and 6.1.
 The separate [2024 tract input](acs_step1_2024_tract.md) is consumed by the

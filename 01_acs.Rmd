@@ -49,7 +49,7 @@ This notebook:
 4. Import and prepare 2020–2024 ACS block-group data
 5. Import and prepare 2020–2024 ACS tract data
 6. Import and prepare geographic crosswalks
-7. Validate outputs
+7. Validate outputs (including exact block-group/crosswalk readback)
 
 Both tract downloads share `tract_vars` (65 aliases / 62 distinct Census codes).
 The block-group list (62 aliases / 59 codes) excludes `rent1bdr`, `rent2bdr`, and
@@ -74,6 +74,12 @@ schema migration for the existing 2016 and block-group products permits
 the agreed additions/removals against older parity references while retaining
 strict checks on shared columns; see [README.md](README.md). This notebook's
 extraction and storage contracts remain unchanged.
+
+The block-group extract and allocation crosswalk pass structural assertions
+before saving. Section 6.1 reports statewide ACS-only and crosswalk-only block
+groups for analyst review; these coverage differences do not establish tract
+completeness. Section 7.6 compares both saved inputs exactly with their validated
+in-memory objects, including every allocation weight.
 
 # 1. Set up environment
 
@@ -132,9 +138,12 @@ Reusable helpers (`summ_var()`, `rename_id()`, `save_data()`,
 and the diagnostic helpers `report_n()` / `print_numeric_summary()`) live in
 `R/helpers.R` and are loaded here. Keeping them in one documented file lets every
 notebook in this stage share the same definitions.
+Step 1 input assertions, coverage diagnostics, and exact readback checks live
+in `R/acs_input_qa.R`.
 
 ```{r load-helpers}
 source(here::here("R", "helpers.R"))
+source(here::here("R", "acs_input_qa.R"))
 ```
 
 ## 1.4 Set data paths
@@ -344,6 +353,15 @@ crosswalk loaded in Section 6.1. Aggregation to 2010 tracts happens downstream i
 tract list is downloaded separately in §5. Expected: one row per CA 2020-vintage
 block group (~25,000+).
 
+### Decision: Validate the wide extract without rejecting missing estimates
+
+Immediately after extraction, require one row per nonmissing, character,
+12-digit BG GEOID. Required numeric estimate/MOE columns come from the first
+alias of each distinct code in `block_group_vars`, so the checks track the
+current request and its exclusions. Duplicate rows or columns, missing required
+columns, and wrong storage types stop execution. Legitimate numeric `NA`/`NaN`
+estimates remain unchanged for Step 2 completeness handling.
+
 ```{r download-acs-bg-24}
 acs_bg_24 <- get_acs(geography = "block group",
                        state = "CA",
@@ -352,6 +370,7 @@ acs_bg_24 <- get_acs(geography = "block group",
                        output = "wide",
                        survey = "acs5")
 
+assert_acs_bg_input(acs_bg_24, block_group_vars, key = "GEOID", require_flag = FALSE)
 report_n(acs_bg_24, "2024 ACS block groups imported")
 acs_bg_24_n <- nrow(acs_bg_24)
 
@@ -389,6 +408,8 @@ per 2020 CA block group, consumed by `02_assemble.Rmd`.
 
 ```{r save-acs-bg-24}
 acs_bg_24 <- rename_id(acs_bg_24, bg2020_id, GEOID)
+assert_acs_bg_input(acs_bg_24, block_group_vars)
+stopifnot("BG rows changed before saving" = nrow(acs_bg_24) == acs_bg_24_n)
 
 report_n(acs_bg_24, "2024 ACS block groups saved")
 save_data(acs_bg_24, data_dir, "acs_step1_2024_block_group.feather")
@@ -457,13 +478,42 @@ Because a single block group can split across multiple tracts (and vice versa),
 the crosswalk is intentionally **many-to-many**: the unique row key is the
 (`bg2020_id`, `tr2010_id`) pair, not either ID alone.
 
+### Decision: Validate original allocation links and full-source weight sums
+
+Read both GEOIDs explicitly as character to retain leading zeros. Require
+12-digit BG and 11-digit tract IDs, unique allocation pairs, and all four
+numeric weights finite and in `[0,1]`. Cross-state IDs are permitted. Before
+saving, each source's weights across **all** destinations must sum to one within
+the existing Step 2 tolerance of `1e-6`. Failed reconciliation stops execution;
+no links or weights are changed, dropped, or renormalized. Retain the validated
+`xwalk_bg_24` object for exact readback comparison in §7.6.
+
+### Decision: Keep statewide coverage differences diagnostic
+
+Report ACS BGs absent from the crosswalk and crosswalk BGs absent from ACS
+separately, using distinct BGs rather than allocation-row counts. Summaries by
+source state/county and up to ten example IDs per direction keep the display
+compact. Full ID tables and unmatched crosswalk links/weights remain available
+in `bg_coverage_24`. Coverage differences alone do not stop Step 1 or filter
+either input; Step 2 handles contributor completeness for its target tracts.
+
 ```{r import-xwalk-bg-tr}
 xwalk <- read_csv(file.path(raw_dir, "nhgis", "nhgis_bg2020_tr2010_06",
-                            "nhgis_bg2020_tr2010_06.csv")) |>
+                            "nhgis_bg2020_tr2010_06.csv"),
+                  col_types = cols(bg2020ge = col_character(),
+                                   tr2010ge = col_character())) |>
   mutate(x_id = TRUE)
 
 report_n(xwalk, "bg2020->tr2010 crosswalk imported")
 xbg_n <- nrow(xwalk)
+
+# Rename IDs and retain the validated object through final readback.
+xwalk_bg_24 <- xwalk |>
+  rename(bg2020_id = bg2020ge,
+         tr2010_id = tr2010ge) |>
+  select(bg2020_id, tr2010_id, all_of(bg_allocation_weight_columns()), x_id)
+stopifnot("Crosswalk rows changed before saving" = nrow(xwalk_bg_24) == xbg_n)
+xbg_weight_sums <- assert_bg_crosswalk(xwalk_bg_24)
 
 # Missing-data check on the weight columns
 xwalk |>
@@ -500,15 +550,18 @@ cat(sprintf(
   formatC(n_distinct(xwalk$tr2010ge), format = "d", big.mark = ",")
 ))
 
-# Rename to pipeline ID names and keep only key + weight columns
-xwalk <- xwalk |>
-  rename(bg2020_id = bg2020ge,
-         tr2010_id = tr2010ge) |>
-  select(c(bg2020_id, tr2010_id, wt_pop, wt_hh, wt_hu, wt_renthu, x_id))
+bg_coverage_24 <- bg_coverage_diagnostics(acs_bg_24, xwalk_bg_24)
+cat("Statewide ACS/crosswalk coverage (diagnostic only):\n")
+print(bg_coverage_24$summary, n = Inf)
+print(bg_coverage_24$by_county, n = Inf)
+cat("ACS-only BG examples (up to 10; all IDs in bg_coverage_24$acs_only):\n")
+print(head(bg_coverage_24$acs_only, 10L))
+cat("Crosswalk-only BG examples (up to 10; all IDs in bg_coverage_24$crosswalk_only):\n")
+print(head(bg_coverage_24$crosswalk_only, 10L))
 
 # Output: xwalk_bg24_tr10.feather — 2020 block group -> 2010 tract weights
-report_n(xwalk, "bg2020->tr2010 crosswalk saved")
-xwalk |>
+report_n(xwalk_bg_24, "bg2020->tr2010 crosswalk saved")
+xwalk_bg_24 |>
   arrow::write_feather(paste0(data_dir, "xwalk_bg24_tr10.feather"))
 
 rm(xwalk)
@@ -584,6 +637,8 @@ columns, row preservation from import through save/reload, key uniqueness,
 critical missingness, logical flags, and numeric distributions. These checks
 run when the analyst executes the notebook. Assertions stop on contract
 violations; reported estimate missingness and unusual values require review.
+For the two block-group allocation inputs, §7.6 also revalidates structure and
+requires exact equality with the in-memory objects validated before saving.
 
 ```{r reload-outputs}
 acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step1_2016_tract.feather"))
@@ -631,14 +686,13 @@ removed_measures <- c(
   "rentyrblt", "rentyrblt_14_16", "rentyrblt_10_13",
   "rentyrblt_00_09", "rentyrblt_90_99", "rentmv1yr", "rentmv5yr"
 )
-weight_columns <- c("wt_pop", "wt_hh", "wt_hu", "wt_renthu")
+weight_columns <- bg_allocation_weight_columns()
 
 for (output_name in names(output_checks)) {
   check <- output_checks[[output_name]]
   df <- check$data
   if (!is.null(check$variables)) {
-    returned_aliases <- names(check$variables)[!duplicated(check$variables)]
-    numeric_columns <- as.vector(outer(returned_aliases, c("E", "M"), paste0))
+    numeric_columns <- acs_request_columns(check$variables)
     required <- c(check$keys, "NAME", numeric_columns, check$flag)
     omitted_aliases <- c(removed_measures,
                         setdiff(names(tract_vars), names(check$variables)))
@@ -780,4 +834,20 @@ for (output_name in names(output_checks)) {
     print(unusual[unusual > 0])
   }
 }
+```
+
+## 7.6 Verify exact block-group and crosswalk readback
+
+Both inputs must retain the validated row count, geographic keys and row order,
+column names/order, storage types/classes, and every value (including missing
+estimates). Every crosswalk weight must match exactly after Feather reload;
+the `1e-6` source-sum tolerance does **not** permit serialization differences.
+Recheck BG structure and full-source weight reconciliation on the reloaded data.
+
+```{r validate-bg-readback}
+assert_step1_readback(acs24_bg_out, acs_bg_24, "bg2020_id", "2024 ACS block groups")
+assert_step1_readback(xbg_out, xwalk_bg_24, c("bg2020_id", "tr2010_id"),
+                      "BG-to-2010-tract crosswalk")
+assert_acs_bg_input(acs24_bg_out, block_group_vars)
+xbg_reloaded_weight_sums <- assert_bg_crosswalk(xbg_out)
 ```
