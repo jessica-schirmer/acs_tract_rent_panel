@@ -50,24 +50,22 @@ See `README.md` for stage details and `PIPELINE.md` for upstream/downstream data
 - Be explicit about factor levels, missing values, date parsing, and type conversion.
 
 ## Documentation Sync
-Treat documentation as part of the deliverable. When code changes, update the
-affected docs in the same change:
 
-- **README.md** — update when a notebook is added, removed, renamed, reordered,
-  or its inputs, outputs, or pipeline-stage description changes.
-- **`schemas/`** — update when an output structure changes, including columns,
-  dtypes, key variables, or value encodings.
-- **Notebook Overview** — update when sections, inputs, or outputs change; its
-  step list must match the numbered top-level headings.
-- **PIPELINE.md** — update when a stage's inputs, outputs, or relationship to
-  upstream/downstream stages changes.
-- **renv.lock** — update when an approved dependency is added or its required
-  version changes.
+Treat documentation as part of the deliverable. When code changes, update affected docs in the same change. Documentation is **not append-only**: remove or consolidate material that is obsolete, duplicated, historical, or no longer needed to understand the current pipeline.
 
-Documentation updates required to keep existing documentation synchronized with
-an authorized code change are implicitly authorized. Ask before introducing a
-new project-wide convention, changing substantive research definitions, or
-substantially reorganizing documentation beyond what the implementation requires.
+* **`README.md`** — update when notebooks, inputs, outputs, responsibilities, or workflow descriptions change.
+* **`schemas/`** — update when a persisted output contract changes. Keep schemas concise and self-contained: document grain/key, provenance, non-obvious construction/missingness rules, persisted columns, and validation guarantees.
+Schema standard: New and materially revised persisted-dataset schemas must follow schemas/SCHEMA_TEMPLATE.md. Schemas should be concise, self-contained descriptions of the current dataset contract. List every persisted column locally, but summarize shared rules once rather than repeating them. Omit template sections that genuinely do not apply.
+* **Notebook Overview / prose** — keep the Overview synchronized with headings, inputs, and outputs. Document current workflow and non-obvious decisions; remove stale commented code, completed investigations, retired-variable explanations, task history, and redundant schema/test detail.
+* **`PIPELINE.md`** — update when cross-stage inputs, outputs, responsibilities, or dependencies change.
+* **`renv.lock`** — update when an approved dependency or required version changes.
+
+Use the appropriate location: current workflow → notebook/README; dataset contract → schema; cross-stage flow → `PIPELINE.md`; substantive analytic decisions/results → `ANALYSIS_NOTES.md`; implementation history → changelog/session notes/git history.
+
+When editing documentation, reread the affected section and remove nearby material made redundant by the change. Documentation sync includes deletion and consolidation of superseded material. Ask before introducing a new project-wide convention, changing substantive research definitions, or substantially reorganizing documentation.
+
+
+
 
 ## Workflow Rules
 - Resolve routine implementation choices from existing code, documentation,
