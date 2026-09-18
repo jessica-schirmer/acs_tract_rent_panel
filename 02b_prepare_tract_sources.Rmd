@@ -27,28 +27,27 @@ knitr::opts_chunk$set(
 
 - `../../../data/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
 - `../../../data/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract.
-- Optional prior outputs in `../../../data/parity_reference` (§1.4) — separate
-  schema and Southern California parity references for each product, including
-  the product-specific filenames listed below.
+- Optional parity snapshots (§1.4):
+  `../../../data/parity_reference/acs_step2_16.feather` and
+  `../../../data/parity_reference/acs_step2_2024_tract.feather`.
 
 **Outputs:**
 
-- `../../../data/acs_step2_2016_tract.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area), with rental inventory (`rhu_inventoryE`), revised Step 1 pass-through columns, top-code/missing/zero flags, share, vacancy-rate, and CV measures.
-- `../../../data/acs_step2_2024_tract.feather` — 2020–2024 ACS tract-source measures on `tr2020_id` (Southern California + Bay Area), with direct rental inventory, retained bedroom-rent pairs, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_2016_tract.feather` — 2012–2016 measures on `tr2010_id`
+  ([schema](schemas/acs_step2_2016_tract.md)).
+- `../../../data/acs_step2_2024_tract.feather` — 2020–2024 measures on `tr2020_id`
+  ([schema](schemas/acs_step2_2024_tract.md)).
 
+Both outputs cover Southern California and Bay Area target counties and include
+rental inventory, quality flags, structure counts, shares, vacancy rates, and
+CVs for `04_merge.Rmd`.
 
-This notebook:
+**Steps:**
 
 1. Set up environment
 2. Prepare 2012–2016 ACS tract measures
 3. Prepare 2020–2024 ACS tract-source measures
 4. Validate outputs
-
-Either Step 2 notebook can run first. [02a_aggregate_2024_block_groups.Rmd](02a_aggregate_2024_block_groups.Rmd) produces the
-block-group aggregate; [02b_prepare_tract_sources.Rmd](02b_prepare_tract_sources.Rmd) produces both native tract tables.
-Both use `step2_target_counties()` in `R/geography_qa.R` (§1.3).
-`04_merge.Rmd` consumes all three unchanged products for its hierarchical panel
-and source diagnostics. No inventory MOE or CV is introduced.
 
 # 1. Set up environment
 
@@ -72,12 +71,6 @@ library(forcats)
 
 ## 1.2 Load helper functions
 
-This stage's helpers — feather I/O, the merge/filter helpers, the weighting and
-aggregation functions, flagging functions, and diagnostic helpers — live in
-`R/assemble_helpers.R`. That file is self-contained for this notebook (it carries
-its own `summ_var()`, distinct from the one used by `01_acs.Rmd`).
-Shared geographic, key, schema, and parity diagnostics live in `R/geography_qa.R`.
-
 ```{r load-helpers}
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -94,64 +87,22 @@ southern_california_counties <- county_config$southern_california_counties
 bay_area_counties <- county_config$bay_area_counties
 target_counties <- county_config$target_counties
 
-# Point to a preserved prior-output directory for repeatable analyst parity runs.
 parity_reference_dir <- "../../../data/parity_reference"
 ```
 
 ## 1.4 Read prior outputs for parity checks
 
-Prior outputs are read from `parity_reference_dir`, configured as
-`../../../data/parity_reference`, before any output is saved. Preserve these
-snapshots for repeated comparisons; saving candidates in `data_dir` does not
-replace them. A missing reference is reported as **parity not checked**, never
-as a pass. Reference and candidate must use the same statewide inputs and
-measurement code, apart from the approved income correction and schema migration
-below. Differences use a numeric tolerance of
-`1e-10 * max(1, abs(prior), abs(candidate))`; shared column names, order, and
-types must match exactly. Only `rhu_inventoryE` is joined from inventory
-diagnostics into the Feathers.
+### Decision: Preserve a separate parity reference for each product
 
-### Decision: Permit only the agreed Step 2 schema migration
+Set `parity_reference_dir` to a preserved snapshot directory. The filename map
+below keeps references separate from candidate outputs; saving candidates does
+not replace them. A missing reference means **parity not checked**.
 
-`compare_socal_parity()` remains strict by default (`schema_migration = NULL`).
-This notebook opts into a fixed vintage-specific allowlist:
-
-| `schema_migration` | Permitted additions | Permitted removals |
-|---|---|---|
-| `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99`; `rhu_lrE`, `rhu_lr2E` |
-| `"2024_tract"` | None | `rhu_lrE`, `rhu_lr2E` |
-
-Native tract estimates and uncertainty remain unchanged. Retired fields are
-rejected even when no parity reference exists.
-
-Actual additions/removals appear in `schema_changes`; unlisted differences fail.
-All shared columns retain the existing value, type, and order comparisons,
-including the income and geographic classifications below. Inventory is validated
-independently before saving and after reloading (§4.6), even when no reference
-contains it. Save/reload schema comparison remains strict for every column.
-
-### Decision: Verify the approved income correction against preserved references
-
-The geographic parity check compares every shared output column. Only a changed
-`med_hhincE` or `med_hhincCV` cell whose reference **and** candidate values match
-the legacy and corrected expectations qualifies as `verified_income_correction`.
-Expectations use 2016 inputs before censoring (§2.2), with the former
-missing/top-coded-rent income exclusion applied only to the legacy estimate.
-Both expected CVs use the reference `med_hhincM` and the existing
-`(med_hhincM / 1.645) / med_hhincE` formula. Candidate MOEs remain subject to
-ordinary parity. Missing values and numeric tolerance follow the same comparison
-rule as all other columns. Without expectations, the helper remains strict.
-
-### Decision: Keep source-specific references and preserve historical snapshots
-
-The explicit map below retains the historical `acs_step2_16.feather` reference for the 2016
-product. It does not rename or overwrite those snapshots. The new
-2024 tract product uses only its own optional reference, keyed by `tr2020_id`;
-only the two low-rent column removals are allowed by `schema_migration = "2024_tract"`.
-Its shared schema and values remain strict, without income-correction or
-allocation-boundary exceptions. An absent reference
-leaves parity unchecked. Pre-censoring tract income is validated independently
-in §3.4 even when no reference exists.
+Use the same statewide inputs and measurement code, apart from the 2016 income
+correction verified in §2.4 and the fixed schema-migration allowances documented
+in the [2016](schemas/acs_step2_2016_tract.md) and
+[2024](schemas/acs_step2_2024_tract.md) output schemas. Comparisons cover shared
+columns and Southern California tract membership and values.
 
 ```{r load-parity-references}
 parity_reference_files <- c(
@@ -166,13 +117,11 @@ prior_outputs <- read_step2_parity_references(parity_reference_dir, parity_refer
 ## 2.1 Load and restrict to the target counties
 
 ```{r load-restrict-16}
-# Load 2016 ACS tract data
 acs_16 <- load_data(data_dir, NULL, "acs_step1_2016_tract.feather") |>
   select(-any_of(step2_cleanup_columns("2016")))
 report_n(acs_16, "2016 ACS tracts loaded")
 assert_unique_key(acs_16, "tr2010_id", "Statewide 2016 ACS")
 
-## Use the same destination county set as the 2024 allocation.
 n_before <- nrow(acs_16)
 acs_16 <- select_target_counties(acs_16, tr2010_id, target_counties)
 report_drop(acs_16, n_before, "tracts outside the target counties")
@@ -184,8 +133,6 @@ rent_raw_qa_16 <- acs_16 |>
             raw_missing_share = mean(is.na(rentE)),
             topcoded_share = sum(rentE >= 3500, na.rm = TRUE) / n(), .groups = "drop")
 
-# Check % missing
-
 check_vars <- c("rhuE", "rentE")
 
 out <- map_dfr(check_vars, ~summ_var(acs_16, .x))
@@ -194,30 +141,20 @@ out
 
 ## 2.2 Flag and censor top-coded, missing, and zero values
 
-### Decision: Flag then censor top-coded, missing, and zero values
+### Decision: Preserve top-code information and income when censoring rent
 
-For the 2016 tract data we record data-quality flags before censoring so the
-information is preserved on the output:
+Capture top-code flags before setting `rentE` and `lqcrentE` values `>= 3500`
+to `NA`, so top-codes remain distinguishable from source missingness. Create
+missing flags afterward, including censored values. House value is flagged at
+`>= 2000000` without censoring its estimate; bedroom rents pass through.
 
-- **Top-coded** (`tc_flag_*`): rent / `lqcrent` `>= 3500`, median value `>= 2,000,000`.
-- **Missing** (`m_flag_*`): `NA` on the listed estimates.
-- **Zero** (`zero_flag_*`): zero renter-occupied units / cash-rent units / median value.
+Retain source household income estimates, MOEs, and missingness independently
+of rent availability. The optional pre-censoring expectations below support
+the 2016 income/CV parity check in §2.4.
 
-Top-coded rent is then censored to `NA` (as in [02a_aggregate_2024_block_groups.Rmd §2.4](02a_aggregate_2024_block_groups.Rmd)). The missing-rent rate is
-interpreted alongside `zero_flag_rhu`: tracts with no renter-occupied housing
-units have no occupied-renter rent to measure. They may still have positive
-vacant rental inventory; inventory completeness is checked separately.
-
-The income-retention decision in [02a_aggregate_2024_block_groups.Rmd §2.4](02a_aggregate_2024_block_groups.Rmd) applies directly to each 2016 tract:
-`med_hhincE` retains its source value or missingness regardless of rent censoring.
-There is no intervening income aggregation for this vintage. `med_hhincCV` uses
-the retained income estimate in its existing formula; see the
-[income-censoring decision and validation](notes/income_censoring.md).
-
-Capture the source income before censoring for the corrected expectation, and
-apply the former rent exclusion only to the legacy expectation. As in [02a_aggregate_2024_block_groups.Rmd §2.4](02a_aggregate_2024_block_groups.Rmd),
-the reference-MOE join must preserve one row per destination tract. These
-expectations validate income and CV changes without altering output columns.
+Interpret missing rent alongside `zero_flag_rhu`: a tract with no occupied
+renter units has no occupied-renter rent to measure, but can have positive
+vacant rental inventory.
 
 ```{r income-expectations-16}
 expected_income_16 <- NULL
@@ -240,51 +177,38 @@ if (!is.null(prior_outputs[["16"]])) {
 ```
 
 ```{r flag-censor-16}
-# Flag top-coded values
 tc_vars <- c("rentE", "lqcrentE", "med_hvalE")
 acs_16 <- flag_tc_vars(acs_16, tc_vars)
 
-# how many tracts have top_coded rent
 table(acs_16$tc_flag_rent, useNA = "ifany")
 table(acs_16$tc_flag_lqcrent, useNA = "ifany")
 table(acs_16$tc_flag_med_hval, useNA = "ifany")
 
-
-# Censor top-coded
 summary(acs_16$rentE)
 acs_16 <- censor_tc_vars(acs_16)
 summary(acs_16$rentE)
 
-# Flag missing values
 missing_vars <- c("rentE", "lqcrentE", "rhuE", "rhucashE", "med_hvalE")
 acs_16 <- flag_missing_vars(acs_16, missing_vars)
 
-# Print summary of missing values
 check_missing_vars(acs_16, missing_vars)
 
-# Flag zero values
 zero_vars <- c("rhuE", "rhucashE", "med_hvalE")
 acs_16 <- flag_zero_vars(acs_16, zero_vars)
 table(acs_16$zero_flag_rhu, useNA = "ifany")
 table(acs_16$zero_flag_med_hval, useNA = "ifany")
 
-# How many tract groups missing rent have no renter-occupied housing units?
 table(acs_16$m_flag_rent)
-table(acs_16$m_flag_rent, acs_16$zero_flag_rhu) # 60% of tracts missing rent (42 of 70) have no renter-occupied housing units, so real missing rate is .7%, vs. earlier 1.7%
+table(acs_16$m_flag_rent, acs_16$zero_flag_rhu)
 ```
 
 ## 2.3 Build structure-type, percentage, CV, and rental-inventory measures
 
-### Decision: Same vacancy / non-single-family measures as the 2024 block-group path
-
-`mf5E`, `nsfaE`, `pctrvacE`, and `pctsvacE` are built here with the same
-definitions used for the 2024 block-group product ([02a_aggregate_2024_block_groups.Rmd §2.6](02a_aggregate_2024_block_groups.Rmd)). For the
-2016 tract data the source counts (`vac_forrentE`, `vac_forsaleE`, `ohuE`,
-`rhuE`) are already present on the tract table, so no extra aggregation is needed.
+Build structure and vacancy measures from native tract counts. `nsfaE` includes
+attached single-family and multifamily units, excluding detached, mobile, and
+other units.
 
 ```{r structure-pct-cv-16}
-# Sum multifamily categories (mf5E = 5+ units; renamed from mfE so the cutoff is
-# explicit and consistent with the 2024 output)
 acs_16 <- acs_16 |>
     mutate(mf5E = mf_5_9E + mf_10_19E + mf_20_49E + mf_50E,
            smfE = sfd_attE + duplexE + quadplexE
@@ -293,16 +217,11 @@ acs_16 <- acs_16 |>
 summary(acs_16$mf5E)
 summary(acs_16$smfE)
 summary(acs_16$sfd_detE)
-# summary(acs_2024_bg_allocations$huE)
 
-# Calculate % vars
 acs_16 <- calc_pct_vars(acs_16)
 
-# Calculate MOE, CV
 acs_16 <- calc_cv(acs_16)
 
-# Non-single-family-attached count and rental / for-sale vacancy rates
-# (defined as in 02a_aggregate_2024_block_groups.Rmd, §2.6)
 acs_16 <- acs_16 |>
   mutate(
     nsfaE    = smfE + mf5E,
@@ -312,17 +231,15 @@ acs_16 <- acs_16 |>
                        vac_forsaleE / (ohuE + vac_forsaleE), NA_real_)
   )
 
-# Check new vacancy-rate / structure measures (rates expected within [0, 1])
 map_dfr(c("pctrvacE", "pctsvacE", "nsfaE", "mf5E"), ~summ_var(acs_16, .x))
 ```
 
-### Decision: Sum the three 2016 tract inventory components directly
+### Decision: Require complete native-tract inventory components
 
-The source already has one row per 2010 tract. Use unit weights to compute
-`rhu_inventoryE = rhuE + vac_forrentE + vac_rentedE`. Any missing required
-estimate produces `NA`; missing MOEs, rent, or income have no effect. Retain
-the Step 1 pass-through columns, including `vac_rentedE/M`, and join only the
-inventory estimate from the separate diagnostics. No inventory MOE/CV is added.
+Each tract contributes once, with unit weight. Inventory adds renter-occupied
+(`rhuE`), vacant-for-rent (`vac_forrentE`), and rented but unoccupied
+(`vac_rentedE`) units. Any missing component yields `NA`, preventing partial
+totals; missing rent, income, or MOEs do not affect completeness.
 
 ```{r rental-inventory-16}
 inventory_16 <- calc_rental_inventory(acs_16, tr2010_id)
@@ -354,21 +271,12 @@ print(inventory_reconciliation_16, width = Inf)
 
 ## 2.4 Save 2012–2016 tract output
 
-**Output:** `acs_step2_2016_tract.feather` — 2012–2016 ACS tract measures (Southern California + Bay Area),
-including `rhu_inventoryE` and the revised Step 1 pass-through columns. It
-replaces the production filename `acs_step2_16.feather`; the legacy file is
-retained. `04_merge.Rmd` consumes this filename for its canonical baseline and
-separate inventory diagnostics.
-
-All previously included Southern California 2016 records must retain parity
-on shared columns except individually verified income/CV corrections from §2.2.
-Only the additions/removals listed in §1.4 are permitted under
-`schema_migration = "2016"`, with actual changes in `schema_changes`. Validate
-inventory independently against its source-component diagnostics before writing.
-The complete
-differences remain visible in `socal_parity_16`, using the same classifications
-as [02a_aggregate_2024_block_groups.Rmd §2.8](02a_aggregate_2024_block_groups.Rmd). Unexplained income changes, other column changes, and membership changes
-fail; this vintage has no allocation-boundary exception.
+Review `socal_parity_16$schema_changes`, `$difference_summary`, and `$differences`
+before saving. Only income/CV differences matching both source-derived reference
+and candidate expectations (§2.2) qualify as `verified_income_correction`.
+The expectations reconstruct the reference's rent-dependent income exclusion
+solely for parity. Other shared-value or tract-membership differences stop
+execution; no allocation-boundary exceptions apply.
 
 ```{r acceptance-16}
 assert_tract_keys(acs_16, target_tract_ids_16, "2016 assembled tracts")
@@ -383,7 +291,6 @@ socal_parity_16 <- compare_socal_parity(
 ```{r save-16}
 report_n(acs_16, "2016 tract measures to save")
 
-# # Save file
 cat("Writing/replacing", file.path(data_dir, "acs_step2_2016_tract.feather"), "\n")
 save_data(acs_16, data_dir, "acs_step2_2016_tract.feather")
 ```
@@ -398,11 +305,9 @@ summary(acs_16$med_hhincE)
 
 ### Decision: Retain the source's 2020 tract geography
 
-`acs_step1_2024_tract.feather` is keyed by `tr2020_id`, as documented in the
-[upstream schema](schemas/acs_step1_2024_tract.md). Select the same configured
-counties as the other products, preserving one row per source tract. There is
-no crosswalk or allocation in this path. Native dollar estimates, their MOEs,
-and the retained bedroom-rent pairs carry through from Step 1.
+Keep `tr2020_id` so source estimates retain their native 2020 geography. Select
+the configured counties without crosswalking or aggregating; geographic
+matching is handled by `04_merge.Rmd`.
 
 ```{r load-restrict-2024-tract}
 acs_2024_tract <- load_data(data_dir, NULL, "acs_step1_2024_tract.feather") |>
@@ -434,19 +339,9 @@ map_dfr(c("rhuE", "rentE"), ~summ_var(acs_2024_tract, .x))
 
 ## 3.2 Flag and censor top-coded, missing, and zero values
 
-### Decision: Apply the established tract flags and retain source income
-
-Use the existing tract flag lists and 2024 thresholds from [02a_aggregate_2024_block_groups.Rmd §2.4](02a_aggregate_2024_block_groups.Rmd): flag rent and
-lower-quartile rent at `>= 3500`, and median house value at `>= 2000000`.
-Capture top-code flags before censoring rent/lower-quartile rent to `NA`, then
-construct the missing and zero flags as in §2.2. House value receives its flag
-without censoring its estimate; bedroom-rent pairs remain unchanged.
-
-Household income retains its source estimate, MOE, and missingness independently
-of rent censoring. Preserve those inputs for the direct income/CV checks in
-§3.4. This new product has no historical rent-dependent income correction to
-permit in parity; any future reference comparison uses strict equality within
-the existing numeric tolerance.
+Apply the flagging/censoring order in §2.2. Preserve source income estimates
+and MOEs before censoring for the independent income/CV checks in §3.4; these
+run even when the parity reference is missing.
 
 ```{r income-source-2024-tract}
 source_income_2024_tract <- acs_2024_tract |>
@@ -479,13 +374,8 @@ table(acs_2024_tract$m_flag_rent, acs_2024_tract$zero_flag_rhu, useNA = "ifany")
 
 ## 3.3 Build structure-type, percentage, CV, and rental-inventory measures
 
-### Decision: Apply the existing tract-derived measure definitions
-
-Build `mf5E`, `smfE`, `nsfaE`, the percentage measures, and existing MOEs/CVs
-as in §2.3. Rental and for-sale vacancy rates use the same occupied-plus-vacant
-denominators and remain missing when their denominators are non-positive.
-The direct tract path does not construct block-group missing-rent shares or
-interpolated rent.
+Apply the structure, rate, uncertainty, and inventory definitions in §2.3 to
+the native 2020 tract counts.
 
 ```{r structure-pct-cv-2024-tract}
 acs_2024_tract <- acs_2024_tract |>
@@ -503,15 +393,6 @@ acs_2024_tract <- acs_2024_tract |>
   )
 map_dfr(c("pctrvacE", "pctsvacE", "nsfaE", "mf5E"), ~summ_var(acs_2024_tract, .x))
 ```
-
-### Decision: Sum the three 2024 tract inventory components directly
-
-Each unique 2020 tract contributes its own three estimates with unit weight:
-`rhu_inventoryE = rhuE + vac_forrentE + vac_rentedE`. Any required estimate
-missing as `NA` or `NaN` makes inventory `NA`; missing MOEs, rent, or income do
-not. The existing helper validates source types, keys, and observed counts.
-Component totals and completeness flags stay in the diagnostic table; join only
-the inventory estimate onto the output, without changing its other columns.
 
 ```{r rental-inventory-2024-tract}
 inventory_2024_tract <- calc_rental_inventory(acs_2024_tract, tr2020_id)
@@ -548,12 +429,12 @@ print(inventory_reconciliation_2024_tract, width = Inf)
 
 ## 3.4 Validate and save 2020–2024 tract-source output
 
-**Output:** `acs_step2_2024_tract.feather` — 2020–2024 ACS measures on native
-2020 tracts in the target counties. See the
-[output schema](schemas/acs_step2_2024_tract.md). Validate key membership,
-county coverage, direct income retention, inventory, and the optional
-source-specific parity reference before writing. These checks do not compare
-this product with the block-group-aggregated product or the 2016 tracts.
+Review `socal_parity_2024_tract` against its own `tr2020_id` reference. Apart
+from the fixed schema allowance in §1.4, shared values and tract membership
+must retain parity; the 2016 income exception does not apply.
+
+After saving both products, run §4 for exact readback and inventory
+reconciliation, even when parity is unchecked.
 
 ```{r acceptance-2024-tract}
 assert_tract_keys(acs_2024_tract, target_tract_ids_2024_tract,
@@ -583,10 +464,8 @@ save_data(acs_2024_tract, data_dir, "acs_step2_2024_tract.feather")
 
 # 4. Validate outputs
 
-Re-loads the two saved native tract outputs separately and checks key uniqueness, missingness on
-critical variables, the encoding of the flag columns, and the distribution of
-every numeric column. Inventory completeness and reconciliation repeat the
-pre-save checks using the saved estimates and separate source diagnostics.
+Reload both native tract outputs and check them against the in-memory results
+and source inventory diagnostics.
 
 ```{r reload-step2}
 acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2016_tract.feather"))
@@ -594,9 +473,6 @@ acs_2024_tract_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2024_tract
 ```
 
 ## 4.1 Check key uniqueness and duplicates
-
-Expected: 2016 tracts are unique on `tr2010_id`; 2024 tracts are unique on
-`tr2020_id`. Each retains its input-derived target membership.
 
 ```{r validate-keys-step2}
 cat("acs_step2_2016_tract:", nrow(acs16_out), "rows |",
@@ -613,8 +489,8 @@ assert_step2_cleanup(acs_2024_tract_out, "2024_tract")
 
 ## 4.2 Check missingness on critical variables
 
-Expected: no missing geographic keys. Native `rentE` reflects censored top-codes
-and tracts without cash-renting units; report counts without imposing a threshold.
+Interpret missing `rentE` using the flags and renter counts (§2.2); no empirical
+missingness threshold is imposed.
 
 ```{r validate-missingness-step2}
 cat("acs_step2_2016_tract missing tr2010_id:", sum(is.na(acs16_out$tr2010_id)), "\n")
@@ -627,11 +503,8 @@ cat("acs_step2_2024_tract missing rhu_inventoryE:", sum(is.na(acs_2024_tract_out
 
 ## 4.3 Check flag-variable encoding
 
-The data-quality flags (`m_flag_*`, `zero_flag_*`, `tc_flag_*`) use numeric 0/1
-values. The existing helpers store these as doubles; top-code and zero flags
-retain `NA` when their source estimate is missing, while missing flags are
-always observed. Geographic keys remain character and join indicators retain
-their existing string/logical encodings.
+Expect numeric 0/1 flags. Top-code and zero flags can be `NA` for missing source
+estimates; missing flags are always observed.
 
 ```{r validate-flags-step2}
 flag_cols_16 <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs16_out), value = TRUE)
@@ -655,9 +528,7 @@ stopifnot("2024 tract-source rent_id must remain logical TRUE" =
 
 ## 4.4 Summarize numeric variable distributions
 
-Mean, min, and max for every numeric column in each output. Watch for impossible
-values (negative counts, shares outside [0, 1], or rents far outside plausible
-ranges).
+Inspect negative counts, shares outside [0, 1], and implausible rents.
 
 ```{r validate-numeric-step2}
 print_numeric_summary(acs16_out, "acs_step2_2016_tract")
@@ -671,14 +542,10 @@ for (column in c("pctrvacE", "pctsvacE")) {
 
 ## 4.5 Check county coverage and missing/top-coded rent
 
-Both outputs must contain every configured county and no other county.
-The raw diagnostics count tracts; final native-rent missing counts include
-censored top-codes. Review county differences without imposing an empirical
-missingness threshold. Income is retained independently of rent censoring; compare restored
-income values and downstream measures using the
-[income acceptance checks](notes/income_censoring.md#analyst-run-acceptance-checks).
-The existing income-MOE behavior is preserved; its research ambiguity remains a
-separate decision.
+Review county coverage and compare raw missing/top-coded tract counts with
+post-censoring missing rent. Use the
+[income acceptance checks](notes/income_censoring.md#analyst-run-acceptance-checks)
+to review income retention and downstream measures.
 
 ```{r validate-county-rent-step2}
 report_tract_counties(acs16_out, target_counties, "Saved 2016 counties")
@@ -701,16 +568,11 @@ bind_rows(
 
 ## 4.6 Check inventory completeness and reconciliation
 
-Missing inventory must agree exactly with `inventory_incomplete` by tract key.
-Every complete inventory must be finite, nonnegative, and equal to the sum of
-its three separately aggregated components. Zero-contributor targets must have
-zero components and inventory. These checks apply whether or not a parity
-reference exists or contains inventory; no partial total is accepted.
-
-Report affected source IDs, missing components, target IDs, and county counts
-for each product. Reconcile source-first and target-first inventory over
-**complete targets only**. Each native tract has unit weight. Incomplete targets
-are reported separately; complete-target totals do not estimate the entire sample.
+Inspect `inventory_missing_sources_*` and `inventory_county_qa_*` for affected
+tracts and missing components. Every native tract has one contributor, including
+tracts with all-zero components. Reconciliation compares source-first and
+target-first inventory over **complete targets only**; these totals do not
+estimate inventory for the entire sample.
 
 ```{r validate-rental-inventory-step2}
 assert_rental_inventory(acs16_out, inventory_16, "Saved 2016 inventory")
