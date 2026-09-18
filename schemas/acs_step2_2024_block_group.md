@@ -47,12 +47,48 @@ rent, lower-quartile rent, or house-value estimate is saved.
 `tot_vac_baseE`, `pop_blkE`, `pop_hspE`, `pop_aaE`, `pop_raceE`, `pop_ethnE`,
 `sfd_detE`, `sfd_baseE`, `mf5E`, `rhucashE`, `grentcat1E`–`grentcat24E`.
 
+**Missingness encoding:** every additive count, including the supplemental
+counts below and `rhu_miss_rent`, uses only strictly positive weights. Any required
+`NA` or `NaN` yields `NA_real_`; observed zeros are valid. Zero-weight missing
+values do not affect completeness. A target with zero expected contributors for
+that family has numeric zero. Counts retain double storage, fractional values,
+existing names/order, and their existing measure-to-weight mappings. No QA
+columns enter the production Feather.
+
 `mf5E` (units in 5+ structures) is renamed from `mfE` after aggregation. 
 
 The following are weight-aggregated (`wt_hu`) **in the notebook** rather than by
 `calc_agg_vars()`, then joined onto the tract table:
 `vac_forrentE`, `vac_forsaleE`, `ohuE`, `smfE` (small multifamily:
 `sfd_attE + duplexE + quadplexE`).
+
+## Contributor and completeness contract
+
+Before the ACS join, `bg_reference_2024` freezes all original target links and
+four weights, the target universe, and positive-weight contributors by family.
+The notebook rechecks keyed pairs and exact weights after joining and immediately
+before aggregation. ACS row presence is distinct from estimate missingness.
+Missing/duplicate/substituted/unexpected links, missing required ACS rows,
+changed weights, lost targets, invalid observed contributing counts, or disagreement
+with diagnostics stop execution. Full-source weight checks retain their `1e-6`
+tolerance; retained weights are never renormalized.
+
+Unmatched all-zero links are retained and reported separately. A target represented
+entirely by these links survives with zero additive counts and inventory. All-zero
+links grant no boundary parity exception. Empty
+contributor status always derives from the original reference. Target/family and
+target/measure diagnostics retain expected/matched counts, missing links/required
+values, completeness, zero-contributor status, and complete investigation tables
+outside the output. Complete groups reconcile numerically; incomplete aggregates
+must be missing before save and after readback.
+
+Parity's optional `expected_count_corrections = NULL` remains strict by default.
+`02a` supplies source-derived keyed legacy/corrected expectations for eligible
+counts and natural dependent cells using unchanged downstream formulas. Both
+sides must match for `verified_count_correction`; unexplained differences retain
+the existing failure/geographic-review rules. Schema and income checks remain.
+Pre-censoring rent-quality diagnostics/flags, income, relative weights, and MOEs
+retain partial-source behavior pending Pass 3; formulas are not changed here.
 
 ## Rental inventory
 
@@ -87,9 +123,9 @@ are joined one-to-one onto the production table; **inventory is the only added
 MOE/CV enters this output.
 
 The existing `vac_forrentE` above uses **`wt_hu`** for `pctrvacE`; the separate
-`inventory_vac_forrentE` diagnostic uses **`wt_renthu`** for inventory. Existing
-vacancy rates, occupied `rhuE`, cash/bin counts, interpolation/income calculations,
-weights, MOEs, CVs, and flags retain their calculations. Inventory is never
+`inventory_vac_forrentE` diagnostic uses **`wt_renthu`** for inventory. Vacancy-rate, interpolation/income, MOE/CV, weight, and flag formulas are
+unchanged; occupied `rhuE` and other additive counts now use the strict
+completeness rule below, with natural propagation through dependent formulas. Inventory is never
 derived from the existing vacancy-rate input or used as a rent denominator.
 
 Before saving and after reloading (§3.6), keyed output missingness must equal
@@ -116,7 +152,8 @@ including missing/unexpected status. Consistent tracts use native tract median
 gross rent. Missingness follows the selected source, with no availability
 fallback. `interp_rentPOST` uses the selected canonical
 value over positive, inflation-adjusted 2016 median rent. This upstream product's
-interpolation method is unchanged. See the [panel schema](acs_full.md).
+interpolation method is unchanged and can remain observed with a missing bin
+after the median category; a stricter all-bin gate is deferred to Pass 3. See the [panel schema](acs_full.md).
 
 ## Aggregated income (weighted mean)
 
@@ -162,8 +199,8 @@ The count MOEs use root-sum-of-squares:
 ### QA/ Diagnostic
 
 #### Missingness/ Partial aggregation
-| `rhu_miss_rent` | numeric | Weighted renter units in block groups missing rent (aggregated). |
-| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups; it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent`. |
+| `rhu_miss_rent` | numeric (double) | Strict `wt_renthu` sum of `if_else(is.na(rentE), rhuE, 0)` after censoring. Missing renter counts matter only for sources with missing/censored rent. |
+| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups; the decomposition `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` is asserted only when required counts are complete. Other cases remain in notebook Pass 3 diagnostics. |
 | `pct_tc_rent` | numeric | Share of weighted renter units in the tract whose rent is top-coded (`rentE >= 3500`), computed on the **uncensored** block-group rent in §2.3; the top-coded portion of `pct_miss_rent`. `NA` where tract `rhuE = 0`. |
 
 #### Margin of errors

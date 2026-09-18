@@ -45,7 +45,7 @@ This notebook:
 Either Step 2 notebook can run first. [02a_aggregate_2024_block_groups.Rmd](02a_aggregate_2024_block_groups.Rmd) produces the
 block-group aggregate; [02b_prepare_tract_sources.Rmd](02b_prepare_tract_sources.Rmd) produces both native tract tables.
 Both use `step2_target_counties()` in `R/geography_qa.R` (§1.3).
-`04_merge.Rmd` consumes all three unchanged products for its hierarchical panel
+`04_merge.Rmd` consumes all three products with unchanged schemas for its hierarchical panel
 and source diagnostics. No inventory MOE or CV is introduced.
 
 # 1. Set up environment
@@ -75,10 +75,13 @@ aggregation functions, flagging functions, and diagnostic helpers — live in
 `R/assemble_helpers.R`. That file is self-contained for this notebook (it carries
 its own `summ_var()`, distinct from the one used by `01_acs.Rmd`).
 Shared geographic, key, schema, and parity diagnostics live in `R/geography_qa.R`.
+BG contributor references, count completeness, reconciliation, and source-derived
+count parity expectations live in `R/bg_aggregation_qa.R`.
 
 ```{r load-helpers}
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
+source(here::here("R", "bg_aggregation_qa.R"))
 ```
 
 ## 1.3 Set data directory and target counties
@@ -103,7 +106,7 @@ Prior outputs are read from `parity_reference_dir`, configured as
 snapshots for repeated comparisons; saving candidates in `data_dir` does not
 replace them. A missing reference is reported as **parity not checked**, never
 as a pass. Reference and candidate must use the same statewide inputs and
-measurement code, apart from the approved income correction and schema migration
+measurement code, apart from the approved income/count corrections and schema migration
 below. Differences use a numeric tolerance of
 `1e-10 * max(1, abs(prior), abs(candidate))`; shared column names, order, and
 types must match exactly. Only `rhu_inventoryE` is joined from inventory
@@ -196,26 +199,28 @@ crosswalk rounding). Retained fractions may sum to less than one when other
 destinations lie outside the sample. **Do not renormalize them.** Relative MOE
 weights in §2.3 retain their existing, separate definition.
 
-### Decision: Exclude unmatched links only when all allocation weights are zero
+### Decision: Retain unmatched all-zero links as noncontributing rows
 
-The crosswalk includes a link from Nevada block group `320030057033` to
-San Bernardino tract `06071010300` with all four weights exactly zero. That
-source is absent from the California ACS cache, but the link contributes no
-population, households, housing units, or renter units.
+An unmatched link is exempt from ACS row-presence requirements only when all
+four weights are exactly zero. Retain and report these original rows, including
+Nevada links absent from the California cache. This preserves targets represented
+entirely by exempt links. Missing estimates on these rows do not affect any
+family's completeness. Any positive weight, however small, requires an ACS row.
 
-Report unmatched IDs and weights, then exclude only unmatched links whose four
-weights are finite and exactly zero. Matched zero-weight links remain. Any
-unmatched positive weight, however small, or missing/invalid weight still fails
-validation. Remove the excluded pairs from both the join and its crosswalk
-reference so the unchanged-weight check in §2.3 compares the same allocations.
-Destination tract coverage must remain unchanged; no weights are renormalized.
+After validating full-source weights, construct `bg_reference_2024` once from
+all original target links. Its locked bindings contain the keyed pairs, four
+unchanged weights, target universe, and positive-weight contributors by family.
+Never remove links from this reference. Compare pairs and weights immediately
+after the join and before aggregation; duplicate, substituted, missing or
+unexpected pairs, changed weights, missing required ACS rows, and lost targets
+stop execution. `.acs_present` records row presence separately from estimates.
+The complete unmatched all-zero table remains in `zero_weight_unmatched`.
 
 ```{r merge-and-restrict-2024-bg-aggregated}
 assert_unique_key(acs_2024_bg_source, "bg2020_id", "Statewide 2024 ACS block groups")
 assert_unique_key(xwalk, c("bg2020_id", "tr2010_id"), "Crosswalk allocation pairs")
 xwalk_target <- select_target_counties(xwalk, tr2010_id, target_counties)
 report_drop(xwalk_target, nrow(xwalk), "allocations to non-target destination tracts")
-target_tract_ids_2024_bg_aggregated <- unique(xwalk_target$tr2010_id)
 source_ids <- distinct(xwalk_target, bg2020_id)
 
 # Retain all destinations for these sources only to audit original weight sums.
@@ -243,52 +248,36 @@ stopifnot("Full source weights must sum to one" = all(abs(source_weight_qa_2024_
           "Retained weights cannot exceed original weights" =
             all(source_weight_qa_2024_bg_aggregated$retained <= source_weight_qa_2024_bg_aggregated$full + 1e-6))
 
+# Freeze original target links only after the full-source audit, before joining ACS.
+bg_reference_2024 <- new_bg_aggregation_reference(xwalk_target)
+target_tract_ids_2024_bg_aggregated <- bg_reference_2024$targets
+
 # Coverage diagnostic only: this does not select the allocation sample.
 sources_without_xwalk <- select_target_counties(acs_2024_bg_source, bg2020_id, target_counties) |>
   anti_join(distinct(xwalk, bg2020_id), by = "bg2020_id")
 report_n(sources_without_xwalk, "Target-county ACS sources missing from the crosswalk (expected 0)")
 stopifnot(nrow(sources_without_xwalk) == 0L)
 
-acs_sources <- semi_join(acs_2024_bg_source, source_ids, by = "bg2020_id")
+acs_sources <- semi_join(acs_2024_bg_source, source_ids, by = "bg2020_id") |>
+  mutate(.acs_present = TRUE)
 report_drop(acs_sources, nrow(acs_2024_bg_source), "ACS sources with no target destination")
-xwalk_join <- merge_df(xwalk_target, acs_sources, "bg2020_id")
+xwalk_join <- merge_df(xwalk_target, acs_sources, "bg2020_id") |>
+  mutate(.acs_present = coalesce(.acs_present, FALSE))
+join_contributor_qa_2024 <- bg_aggregation_diagnostics(xwalk_join, bg_reference_2024, measures = NULL)
+zero_weight_unmatched <- join_contributor_qa_2024$zero_weight_unmatched
+print(head(zero_weight_unmatched, 10L), width = Inf)
+report_n(zero_weight_unmatched, "Unmatched all-zero links retained as noncontributing rows")
 table(xwalk_join$merge)
 stopifnot("Crosswalk join must not multiply allocation pairs" =
             nrow(xwalk_join) == nrow(xwalk_target))
 
-xwalk_join_filt <- xwalk_join |>
-  filter(merge == "left_only")
-print(select(xwalk_join_filt, bg2020_id, tr2010_id, all_of(weight_cols)),
-      n = Inf, width = Inf)
-zero_weight_unmatched <- xwalk_join_filt |>
-  filter(if_all(all_of(weight_cols), ~ is.finite(.x) & .x == 0)) |>
-  select(bg2020_id, tr2010_id, all_of(weight_cols))
-
-n_before <- nrow(xwalk_target)
-xwalk_target <- anti_join(xwalk_target, zero_weight_unmatched,
-                          by = c("bg2020_id", "tr2010_id"))
-report_drop(xwalk_target, n_before, "unmatched zero-weight allocations from the reference")
-n_before <- nrow(xwalk_join)
-xwalk_join <- anti_join(xwalk_join, zero_weight_unmatched,
-                        by = c("bg2020_id", "tr2010_id"))
-report_drop(xwalk_join, n_before, "unmatched zero-weight allocations from the join")
-stopifnot("Every retained target allocation must match one ACS source" =
-            all(xwalk_join$merge == "both"),
-          "Retained join and crosswalk must have the same row count" =
-            nrow(xwalk_join) == nrow(xwalk_target),
-          "Excluding zero-weight links must preserve target tract coverage" =
-            setequal(xwalk_target$tr2010_id, target_tract_ids_2024_bg_aggregated))
-assert_unique_key(xwalk_join, c("bg2020_id", "tr2010_id"), "Matched allocation pairs")
-
-n_before <- nrow(xwalk_join)
-acs_2024_bg_allocations <- xwalk_join |>
-  dplyr::filter(merge == "both") |>
-  select(-c(merge))
-report_drop(acs_2024_bg_allocations, n_before, "unmatched target allocations (expected 0)")
+acs_2024_bg_allocations <- xwalk_join |> select(-merge)
+report_n(acs_2024_bg_allocations, "Retained target allocations (expected original link count)")
 
 # Record newly included sources for the Southern California parity audit.
 socal_boundary_contributions_2024_bg_aggregated <- acs_2024_bg_allocations |>
   select_target_counties(tr2010_id, southern_california_counties) |>
+  filter(if_any(all_of(weight_cols), ~ .x > 0)) |>
   filter(substr(bg2020_id, 1, 2) != "06" |
            !substr(bg2020_id, 3, 5) %in% southern_california_counties) |>
   transmute(tr2010_id, bg2020_id, across(all_of(weight_cols)),
@@ -309,7 +298,7 @@ check_tc_vars <- c("rentE")
 check_tc_out_2024_bg_aggregated <- map_dfr(check_tc_vars, ~check_tc(acs_2024_bg_allocations, .x))
 check_tc_out_2024_bg_aggregated
 
-rm(xwalk, xwalk_sources, xwalk_join, xwalk_join_filt, acs_2024_bg_source, acs_sources)
+rm(xwalk, xwalk_sources, xwalk_join, acs_2024_bg_source, acs_sources)
 ```
 
 ## 2.3 Compute relative weights and top-code diagnostics
@@ -336,12 +325,7 @@ can no longer be distinguished from genuine non-response.
 # Calc the relative weight for count variables
 acs_2024_bg_allocations <- calc_rel_wt(acs_2024_bg_allocations, tr2010_id)
 
-# Allocation pairs and raw fractions must remain identical after selection/join.
-allocation_columns <- c("bg2020_id", "tr2010_id", weight_cols)
-stopifnot("Original allocation weights must be preserved exactly" = identical(
-  acs_2024_bg_allocations |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id),
-  xwalk_target |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id)
-))
+assert_bg_contributors(acs_2024_bg_allocations, bg_reference_2024)
 
 # Calculate top-coded vars
 tc_diagnostics_2024_bg_aggregated <- calc_pct_tc_m(acs_2024_bg_allocations, tr2010_id)
@@ -462,9 +446,40 @@ Weighted gross rent, lower-quartile rent, and house value, their MOEs/CVs, and
 house-value missingness diagnostics are no longer produced. This removal does
 not change the income calculation, native tract measures, or rent bins.
 
-This produces one row per 2010 tract.
+### Decision: Require every positive-weight source count for each measure
+
+`strict_weighted_sum()` selects strictly positive weights. Any required `NA` or
+`NaN` makes that measure `NA_real_`; observed zeros remain valid. Zero-weight
+missing values are ignored, and a reference-confirmed empty contributor set
+sums to numeric zero. Apply this to ordinary and supplemental counts, including
+all 24 bins. Preserve source structure additions and the `mfE` to `mf5E` rename.
+For `rhu_miss_rent`, the source count remains `if_else(is.na(rentE), rhuE, 0)`
+after censoring: missing `rhuE` matters only where rent is missing/censored.
+
+`bg_count_qa_2024` retains complete target/family and target/measure tables with
+expected/matched contributor counts, missing links/required values, completeness,
+and reference-derived zero-contributor status, plus missing source details.
+Print county/family summaries and at most ten incomplete examples. Recompute
+and compare diagnostics against the aggregation frame to reject tampering or
+stale diagnostics. Complete groups reconcile numerically; incomplete groups
+must have missing aggregates, both before saving and after readback.
+
+This produces one row per original target tract without adding output columns.
 
 ```{r aggregate-to-tracts-2024-bg-aggregated}
+# Reconcile keyed pairs/weights and measure-specific completeness immediately before sums.
+bg_count_qa_2024 <- bg_aggregation_diagnostics(acs_2024_bg_allocations, bg_reference_2024)
+bg_county_family_qa_2024 <- bg_count_qa_2024$family |>
+  mutate(county = substr(tr2010_id, 3, 5)) |>
+  group_by(county, family) |>
+  summarise(targets = n(), expected = sum(n_expected), matched = sum(n_matched),
+            missing_links = sum(n_missing_links), missing_values = sum(n_missing_values),
+            incomplete = sum(!complete), zero_contributors = sum(zero_contributors), .groups = "drop")
+print(bg_county_family_qa_2024, n = Inf, width = Inf)
+print(head(filter(bg_count_qa_2024$measure, !complete), 10L), width = Inf)
+print(head(bg_count_qa_2024$missing_sources, 10L), width = Inf)
+assert_bg_diagnostics(acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024)
+
 # Calculate aggregate vars
 n_bg <- nrow(acs_2024_bg_allocations)
 acs_2024_bg_aggregated <- calc_agg_vars(acs_2024_bg_allocations, tr2010_id)
@@ -472,16 +487,6 @@ cat(sprintf("Aggregated %s block-group rows to %s tract rows\n",
             formatC(n_bg, format = "d", big.mark = ","),
             formatC(nrow(acs_2024_bg_aggregated), format = "d", big.mark = ",")))
 assert_tract_keys(acs_2024_bg_aggregated, target_tract_ids_2024_bg_aggregated, "2024 block-group-aggregated aggregated tracts")
-allocated_counts_2024_bg_aggregated <- acs_2024_bg_allocations |>
-  group_by(tr2010_id) |>
-  summarise(popE = sum(popE * wt_pop, na.rm = TRUE),
-            hhE = sum(hhE * wt_hh, na.rm = TRUE),
-            huE = sum(huE * wt_hu, na.rm = TRUE),
-            rhuE = sum(rhuE * wt_renthu, na.rm = TRUE), .groups = "drop")
-stopifnot("Tract counts must conserve their source contributions" = isTRUE(all.equal(
-  acs_2024_bg_aggregated |> select(all_of(names(allocated_counts_2024_bg_aggregated))) |> arrange(tr2010_id),
-  allocated_counts_2024_bg_aggregated |> arrange(tr2010_id), tolerance = 1e-10
-)))
 ```
 
 ### Decision: Rename the 5+ multifamily count to `mf5E`
@@ -513,10 +518,10 @@ acs_2024_bg_aggregated <- acs_2024_bg_aggregated |>
 vac_owner_2024_bg_aggregated <- acs_2024_bg_allocations |>
   group_by(tr2010_id) |>
   summarise(
-    vac_forrentE = sum(vac_forrentE * wt_hu, na.rm = TRUE),
-    vac_forsaleE = sum(vac_forsaleE * wt_hu, na.rm = TRUE),
-    ohuE         = sum(ohuE * wt_hu, na.rm = TRUE),
-    smfE         = sum(smfE * wt_hu, na.rm = TRUE),
+    vac_forrentE = strict_weighted_sum(vac_forrentE, wt_hu),
+    vac_forsaleE = strict_weighted_sum(vac_forsaleE, wt_hu),
+    ohuE         = strict_weighted_sum(ohuE, wt_hu),
+    smfE         = strict_weighted_sum(smfE, wt_hu),
     .groups = "drop"
   )
 
@@ -525,6 +530,9 @@ assert_tract_keys(vac_owner_2024_bg_aggregated, target_tract_ids_2024_bg_aggrega
 acs_2024_bg_aggregated <- merge_df(acs_2024_bg_aggregated, vac_owner_2024_bg_aggregated, "tr2010_id")
 table(acs_2024_bg_aggregated$merge)
 assert_complete_tract_join(acs_2024_bg_aggregated, target_tract_ids_2024_bg_aggregated, "Supplemental count join")
+count_reconciliation_2024 <- assert_bg_count_aggregates(
+  acs_2024_bg_aggregated, acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024
+)
 ```
 
 ### Decision: Allocate all rental-inventory components with renter weights
@@ -537,7 +545,10 @@ and nonnegative. Missing MOEs, income, or rent do not affect completeness.
 
 For each destination, sum each component over retained links with `wt_renthu > 0`
 using `sum(component * wt_renthu)` without removing missing values. The helper
-records contributing-source and missing-component counts. If any contributing
+records contributing-source and missing-component counts. Before calculation,
+reconcile allocation pairs with `bg_reference_2024`; afterward, independently
+verify contributor counts, each component’s missingness/totals, and completeness
+against reference-based diagnostics in `inventory_reference_qa_2024`. If any contributing
 estimate is `NA` or `NaN`, explicitly set `rhu_inventoryE = NA_real_`; otherwise
 add the three diagnostic totals. A zero-contributor target has zero components,
 zero inventory, and `inventory_incomplete = FALSE`. Retained weights are never
@@ -550,7 +561,11 @@ inventory's renter-weighted vacancy component. Existing `rhuE` and its
 missing/top-coded-rent denominators remain occupied-renter measures.
 
 ```{r rental-inventory-2024-bg-aggregated}
+assert_bg_contributors(acs_2024_bg_allocations, bg_reference_2024)
 inventory_2024_bg_aggregated <- calc_rental_inventory(acs_2024_bg_allocations, tr2010_id, weight_col = "wt_renthu")
+inventory_reference_qa_2024 <- assert_bg_inventory_reference(
+  acs_2024_bg_allocations, bg_reference_2024, inventory_2024_bg_aggregated
+)
 assert_tract_keys(inventory_2024_bg_aggregated, acs_2024_bg_aggregated$tr2010_id, "2024 block-group-aggregated inventory diagnostics")
 inventory_missing_sources_2024_bg_aggregated <- acs_2024_bg_allocations |>
   filter(wt_renthu > 0) |>
@@ -558,7 +573,7 @@ inventory_missing_sources_2024_bg_aggregated <- acs_2024_bg_allocations |>
   pivot_longer(c(rhuE, vac_forrentE, vac_rentedE),
                names_to = "missing_component", values_to = "estimate") |>
   filter(is.na(estimate))
-print(inventory_missing_sources_2024_bg_aggregated, n = Inf, width = Inf)
+print(head(inventory_missing_sources_2024_bg_aggregated, 10L), width = Inf)
 inventory_county_qa_2024_bg_aggregated <- inventory_2024_bg_aggregated |>
   dplyr::count(county = substr(tr2010_id, 3, 5), inventory_incomplete,
         zero_contributors = n_contributing == 0, name = "tracts")
@@ -613,10 +628,22 @@ used as a rate denominator or uncertainty input.
 Top-coded `rentE` was censored to `NA` in §2.4 *before* this aggregation, so
 `calc_missing_vars()` (which counts block groups where `rentE` is `NA`) treats both
 genuinely missing and top-coded block groups as "missing." `pct_miss_rent` is
-therefore the share of weighted renter units that are missing **or** top-coded,
-and it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` (truly missing
+therefore the share of weighted renter units that are missing **or** top-coded.
+Where its required counts are complete, it decomposes as `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` (truly missing
 plus top-coded, both computed pre-censoring in §2.3). The retained `pct_tc_rent`
 isolates the top-coded portion.
+
+### Deferred to Pass 3: interpolation and rent-quality/uncertainty coverage
+
+Interpolation keeps its existing formula and can remain observed when a rent bin
+after the median category is missing. No new all-bin completeness gate is added.
+The pre-censoring missing/top-code shares, quality flags, relative weights,
+weighted income, and MOE calculations retain their existing partial-source
+behavior. Derived shares, vacancy rates, combined structure counts, and CVs
+naturally inherit corrected count missingness through unchanged formulas.
+The rent-share decomposition assertion in §3.5 applies only where `rhuE` and
+`rhu_miss_rent` are complete. `rent_share_deferred_2024` retains other cases for
+Pass 3 review; no missingness threshold or new quality flag is imposed.
 
 ```{r derive-measures-2024-bg-aggregated}
 # Calculate interpolated rent
@@ -674,21 +701,39 @@ to the prior Southern California records, permitting the inventory addition
 and fixed cleanup removals under `schema_migration = "2024"`. `socal_parity_2024_bg_aggregated` reports cell
 differences and added/removed keys separately for unaffected and boundary tracts.
 Each changed cell is classified as `verified_income_correction`,
-`boundary_review`, or `unexpected`, with counts in `difference_summary` and all
+`verified_count_correction`, `boundary_review`, or `unexpected`, with counts in `difference_summary` and all
 values retained in `differences`. Every geographically unaffected difference
-must be a verified income correction; other cell or membership changes fail.
+must be a verified income or count correction; other cell or membership changes fail.
 The boundary group is defined by `socal_boundary_contributions_2024_bg_aggregated` (§2.2): incoming
 sources omitted by the old source-county filter. Its differences require review
-alongside those source weights/counts. Income corrections do not change that
+alongside those source weights/counts. All-zero links confer no boundary exception.
+Income corrections do not change that
 geographic classification. Boundary exposure alone does not excuse unrelated
 input changes.
+
+`expected_count_corrections_2024` reconstructs legacy missing-dropping counts
+and corrected complete counts from validated sources, then runs the unchanged
+downstream formulas on both. `compare_socal_parity()` accepts an optional keyed
+`expected_count_corrections` table (default `NULL`). Each changed count or natural
+dependent cell must match both its legacy reference expectation and corrected
+candidate expectation. The fixed eligible field list excludes income, raw MOEs,
+inventory, flags, and pre-censoring rent shares; it never exempts an entire column.
+Existing income and geographic classifications, schema checks, and missing-reference
+reporting remain in force. Neither expectations nor diagnostics enter the Feather.
 
 ```{r acceptance-2024-bg-aggregated}
 report_tract_counties(acs_2024_bg_aggregated_interp, target_counties, "2024 block-group-aggregated destination counties")
 assert_rental_inventory(acs_2024_bg_aggregated_interp, inventory_2024_bg_aggregated, "2024 block-group-aggregated inventory before save")
+count_reconciliation_2024 <- assert_bg_count_aggregates(
+  acs_2024_bg_aggregated_interp, acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024
+)
+expected_count_corrections_2024 <- if (is.null(prior_outputs[["2024_bg_aggregated"]])) NULL else {
+  bg_count_parity_expectations(acs_2024_bg_allocations, bg_reference_2024)
+}
 socal_parity_2024_bg_aggregated <- compare_socal_parity(
   acs_2024_bg_aggregated_interp, prior_outputs[["2024_bg_aggregated"]], southern_california_counties,
-  socal_boundary_ids_2024_bg_aggregated, expected_income = expected_income_2024_bg_aggregated, schema_migration = "2024"
+  socal_boundary_ids_2024_bg_aggregated, expected_income = expected_income_2024_bg_aggregated, schema_migration = "2024",
+  expected_count_corrections = expected_count_corrections_2024
 )
 ```
 
@@ -794,7 +839,7 @@ summary(acs_2024_bg_aggregated$med_hhincE)
 
 Re-loads the saved block-group output and checks key uniqueness, missingness on
 critical variables, the encoding of the flag columns, and the distribution of
-every numeric column. Inventory completeness and reconciliation repeat the
+every numeric column. Count and inventory completeness/reconciliation repeat the
 pre-save checks using the saved estimates and separate source diagnostics.
 
 ```{r reload-step2}
@@ -876,8 +921,19 @@ bind_rows(
 rent_share_qa_2024_bg_aggregated <- acs_2024_bg_aggregated_out |>
   select(tr2010_id, pct_miss_rent) |>
   left_join(rent_shares_2024_bg_aggregated, by = "tr2010_id")
-stopifnot("Missing-rent shares must decompose into raw missing plus top-coded" = isTRUE(all.equal(
-  rent_share_qa_2024_bg_aggregated$pct_miss_rent, rent_share_qa_2024_bg_aggregated$pct_m_rent + rent_share_qa_2024_bg_aggregated$pct_tc_rent,
+rent_share_count_completeness_2024 <- bg_count_qa_2024$measure |>
+  filter(measure %in% c("rhuE", "rhu_miss_rent")) |>
+  group_by(tr2010_id) |>
+  summarise(required_counts_complete = all(complete), .groups = "drop")
+rent_share_qa_2024_bg_aggregated <- rent_share_qa_2024_bg_aggregated |>
+  left_join(rent_share_count_completeness_2024, by = "tr2010_id", relationship = "one-to-one")
+rent_share_deferred_2024 <- rent_share_qa_2024_bg_aggregated |>
+  filter(!required_counts_complete)
+print(head(rent_share_deferred_2024, 10L), width = Inf)
+report_n(rent_share_deferred_2024, "Incomplete rent-share count groups deferred to Pass 3")
+complete_rent_shares <- filter(rent_share_qa_2024_bg_aggregated, required_counts_complete)
+stopifnot("Complete missing-rent shares must decompose into raw missing plus top-coded" = isTRUE(all.equal(
+  complete_rent_shares$pct_miss_rent, complete_rent_shares$pct_m_rent + complete_rent_shares$pct_tc_rent,
   tolerance = 1e-10
 )))
 for (column in c("pct_miss_rent", "pct_m_rent", "pct_tc_rent")) {
@@ -886,7 +942,7 @@ for (column in c("pct_miss_rent", "pct_m_rent", "pct_tc_rent")) {
 }
 ```
 
-## 3.6 Check inventory completeness and reconciliation
+## 3.6 Check count and inventory completeness and reconciliation
 
 Missing inventory must agree exactly with `inventory_incomplete` by tract key.
 Every complete inventory must be finite, nonnegative, and equal to the sum of
@@ -900,23 +956,21 @@ target-first totals over **complete targets only**, retaining the original
 allocation fractions. Incomplete targets are reported separately, and the
 complete-target total is not an estimate for the entire sample. The source-first
 calculation adds components before weighting; the target-first calculation adds
-the separately aggregated components. Original allocation pairs/weights and
-occupied-renter counts must still match their earlier checks.
+the separately aggregated components. Original allocation pairs/weights must still match the locked reference. All
+count families reconcile numerically over complete groups, while every incomplete
+measure must remain missing in the saved output.
 
 ```{r validate-rental-inventory-step2}
 assert_rental_inventory(acs_2024_bg_aggregated_out, inventory_2024_bg_aggregated, "Saved 2024 block-group-aggregated inventory")
 stopifnot(`Saving must preserve every 2024 block-group-aggregated value and row` = identical(acs_2024_bg_aggregated_out,
     acs_2024_bg_aggregated_interp))
-print(inventory_missing_sources_2024_bg_aggregated, n = Inf, width = Inf)
+print(head(inventory_missing_sources_2024_bg_aggregated, 10L), width = Inf)
 print(bind_rows(`2024_bg_aggregated` = inventory_county_qa_2024_bg_aggregated, .id = "product"), n = Inf,
     width = Inf)
 print(bind_rows(`2024_bg_aggregated` = reconcile_rental_inventory(acs_2024_bg_allocations, inventory_2024_bg_aggregated,
     tr2010_id, weight_col = "wt_renthu"), .id = "product"), n = Inf, width = Inf)
-stopifnot("Inventory must preserve original allocation pairs and weights" = identical(
-  acs_2024_bg_allocations |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id),
-  xwalk_target |> select(all_of(allocation_columns)) |> arrange(bg2020_id, tr2010_id)
-), "Saved occupied counts must still conserve their source contributions" = isTRUE(all.equal(
-  acs_2024_bg_aggregated_out |> select(all_of(names(allocated_counts_2024_bg_aggregated))) |> arrange(tr2010_id),
-  allocated_counts_2024_bg_aggregated |> arrange(tr2010_id), tolerance = 1e-10
-)))
+assert_bg_inventory_reference(acs_2024_bg_allocations, bg_reference_2024, inventory_2024_bg_aggregated)
+saved_count_reconciliation_2024 <- assert_bg_count_aggregates(
+  acs_2024_bg_aggregated_out, acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024
+)
 ```

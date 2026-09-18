@@ -12,6 +12,7 @@ suppressPackageStartupMessages({
 })
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
+source(here::here("R", "bg_aggregation_qa.R"))
 source(here::here("R", "acs_input_qa.R"))
 
 quiet <- function(expr) {
@@ -184,16 +185,21 @@ legacy_import$load_data <- function(path, folder = NULL, name) {
     xwalk_bg24_tr10.feather = select(legacy_bg_input, bg2020_id, tr2010_id, starts_with("wt_")))
 }
 run_chunk("import-bg-and-xwalk-2024-bg-aggregated", legacy_import, bg_notebook)
-run_chunk("load-restrict-16", legacy_import, tract_notebook)
+if (!isTRUE(get0("bg_only", ifnotfound = FALSE))) {
+  run_chunk("load-restrict-16", legacy_import, tract_notebook)
+} else {
+  legacy_import$acs_16 <- select(legacy_16_input, -rhu_lrE, -rhu_lr2E)
+}
 stopifnot(identical(legacy_import$acs_2024_bg_source, select(legacy_bg_input, -rhu_lrE, -rhu_lr2E)),
           identical(legacy_import$acs_16, select(legacy_16_input, -rhu_lrE, -rhu_lr2E)))
 
 assemble_24 <- function(include_inventory) {
   env <- new.env(parent = environment())
-  env$acs_2024_bg_allocations <- assembly_sources
+  env$acs_2024_bg_allocations <- mutate(assembly_sources, .acs_present = TRUE)
   env$weight_cols <- c("wt_pop", "wt_hh", "wt_hu", "wt_renthu")
   env$xwalk_target <- select(assembly_sources, bg2020_id, tr2010_id, all_of(env$weight_cols))
-  env$target_tract_ids_2024_bg_aggregated <- unique(assembly_sources$tr2010_id)
+  env$bg_reference_2024 <- new_bg_aggregation_reference(env$xwalk_target)
+  env$target_tract_ids_2024_bg_aggregated <- env$bg_reference_2024$targets
   chunks <- c("relative-weights-and-tc-2024-bg-aggregated", "censor-and-structure-2024-bg-aggregated", "aggregate-to-tracts-2024-bg-aggregated",
               "aggregate-supplemental-2024-bg-aggregated", if (include_inventory) "rental-inventory-2024-bg-aggregated",
               "derive-measures-2024-bg-aggregated", "merge-flags-2024-bg-aggregated")
@@ -212,6 +218,27 @@ assemble_16 <- function(include_inventory) {
 }
 with_24 <- assemble_24(TRUE)
 without_24 <- assemble_24(FALSE)
+if (isTRUE(get0("bg_only", ifnotfound = FALSE))) {
+  stopifnot(identical(select(with_24$acs_2024_bg_aggregated_interp, -rhu_inventoryE),
+                      without_24$acs_2024_bg_aggregated_interp),
+            identical(with_24$acs_2024_bg_allocations, without_24$acs_2024_bg_allocations))
+  bg_saved <- with_24
+  bg_saved$target_counties <- "037"
+  bg_saved$data_dir <- paste0(tempfile("bg-inventory-"), "/")
+  dir.create(bg_saved$data_dir)
+  tryCatch({
+    for (chunk in c("save-2024-bg-aggregated", "reload-step2", "validate-keys-step2",
+                    "validate-missingness-step2", "validate-flags-step2", "validate-numeric-step2",
+                    "validate-county-rent-step2", "validate-rental-inventory-step2")) {
+      run_chunk(chunk, bg_saved, bg_notebook)
+    }
+    stopifnot(identical(bg_saved$acs_2024_bg_aggregated_out, bg_saved$acs_2024_bg_aggregated_interp))
+    bg_saved$acs_2024_bg_aggregated_out$pctrvacE[1] <- 0.99
+    expect_error(run_chunk("validate-rental-inventory-step2", bg_saved, bg_notebook),
+                 "Saving must preserve every 2024 block-group-aggregated value")
+  }, finally = unlink(bg_saved$data_dir, recursive = TRUE))
+  cat("Passed: BG-only inventory chunks and temporary Feather round trip; no native notebook execution.\n")
+} else {
 with_16 <- assemble_16(TRUE)
 without_16 <- assemble_16(FALSE)
 for (tables in list(list(with_24$acs_2024_bg_aggregated_interp, without_24$acs_2024_bg_aggregated_interp),
@@ -329,7 +356,7 @@ validate_saved_products <- function(env, notebook, saves, products, filenames, r
   on.exit(unlink(directory, recursive = TRUE))
   # Load notebook helpers into an isolated parent; fixture globals cannot leak in.
   helper_env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("assemble_helpers.R", "geography_qa.R")) {
+  for (file in c("assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
     sys.source(here::here("R", file), helper_env)
   }
   parent.env(env) <- helper_env
@@ -396,7 +423,12 @@ run_isolated_notebook <- function(notebook, inputs, outputs, helper_dir = here::
   on.exit(unlink(directory, recursive = TRUE))
   for (name in names(inputs)) write_feather(inputs[[name]], file.path(directory, name))
   env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("assemble_helpers.R", "geography_qa.R")) sys.source(file.path(helper_dir, file), env)
+  for (file in c("assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
+    # Historical split baselines predate the BG-only QA file.
+    if (file != "bg_aggregation_qa.R" || file.exists(file.path(helper_dir, file))) {
+      sys.source(file.path(helper_dir, file), env)
+    }
+  }
   lines <- readLines(notebook, warn = FALSE)
   starts <- which(startsWith(lines, "```{r"))
   for (start in starts) {
@@ -595,3 +627,5 @@ for (product in names(step1$output_checks)) {
   step1$output_checks[[product]]$data <- original
 }
 cat("Passed: Step 1 mapping/bin contract and retired-field rejection; older Step 2 inputs lose only low-rent columns.\n")
+
+}

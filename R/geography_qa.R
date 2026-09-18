@@ -72,6 +72,18 @@ assert_step2_cleanup <- function(df, product) {
   invisible(TRUE)
 }
 
+# Fixed scope for BG count corrections and natural consequences of existing formulas.
+# Raw MOEs, income, inventory, flags, and pre-censoring rent shares are excluded.
+bg_count_correction_columns <- function() {
+  c("popE", "pop_blkE", "pop_hspE", "pop_aaE", "pop_raceE", "pop_ethnE", "hhE",
+    "huE", "tot_vacE", "tot_vac_baseE", "sfd_detE", "sfd_baseE", "mf5E",
+    "vac_forrentE", "vac_forsaleE", "ohuE", "smfE", "rhuE", "rhu_baseE", "rhucashE",
+    paste0("grentcat", 1:24, "E"), "rhu_miss_rent", "nsfaE", "pct_miss_rent",
+    "pctrhuE", "pctvacE", "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "pctrvacE", "pctsvacE",
+    "pctrhuM", "pctblkM", "pcthspM", "pctrhuCV", "pctblkCV", "pcthspCV",
+    "rhuCV", "huCV", "popCV", "interp_rent")
+}
+
 # Boundary IDs identify destination tracts receiving sources excluded by the old
 # Southern California source filter. Differences there require analyst review.
 # Optional expected_income is uniquely keyed by key (default tr2010_id), with numeric
@@ -80,10 +92,12 @@ assert_step2_cleanup <- function(df, product) {
 # Only income cells matching both expectations qualify for the correction.
 # Optional schema_migration is "2016", "2024" (BG), or "2024_tract" for Step 2.
 # Its fixed allowlist applies to additions/removals; shared columns stay strict.
+# Optional expected_count_corrections has unique (key, variable) rows and numeric
+# legacy/corrected values reconstructed from validated BG sources, never output cells.
 compare_socal_parity <- function(current, previous, socal_counties,
                                  boundary_ids = character(), tolerance = 1e-10,
                                  expected_income = NULL, schema_migration = NULL,
-                                 key = "tr2010_id") {
+                                 key = "tr2010_id", expected_count_corrections = NULL) {
   if (!is.null(schema_migration)) {
     if (!is.character(schema_migration) || length(schema_migration) != 1L ||
         is.na(schema_migration) || !schema_migration %in% c("2016", "2024", "2024_tract")) {
@@ -143,6 +157,19 @@ compare_socal_parity <- function(current, previous, socal_counties,
     }
     assert_unique_key(expected_income, key, "Income expectations")
   }
+  if (!is.null(expected_count_corrections)) {
+    expected <- expected_count_corrections
+    if (!is.data.frame(expected) || anyDuplicated(names(expected)) ||
+        !all(c(key, "variable", "legacy", "corrected") %in% names(expected)) ||
+        !is.character(expected[[key]]) || !is.character(expected$variable) ||
+        !all(vapply(expected[c("legacy", "corrected")], function(x) {
+          is.numeric(x) && !is.complex(x)
+        }, logical(1))) ||
+        !all(expected$variable %in% bg_count_correction_columns())) {
+      stop("Count expectations require keyed, allowed variables and numeric legacy/corrected values")
+    }
+    assert_unique_key(expected, c(key, "variable"), "Count expectations")
+  }
   values_match <- function(old, new) {
     same <- (is.na(old) & is.na(new)) | (!is.na(old) & !is.na(new) & old == new)
     if (is.numeric(old)) {
@@ -184,12 +211,22 @@ compare_socal_parity <- function(current, previous, socal_counties,
         values_match(old[changed], expected_income[[paste0("legacy_", column)]][expected_rows]) &
         values_match(new[changed], expected_income[[paste0("corrected_", column)]][expected_rows])
     }
+    verified_count <- rep(FALSE, length(changed))
+    if (!is.null(expected_count_corrections) && column %in% bg_count_correction_columns()) {
+      expected <- expected_count_corrections |>
+        filter(variable == column)
+      expected_rows <- match(shared_ids[changed], expected[[key]])
+      verified_count <- !is.na(expected_rows) &
+        values_match(old[changed], expected$legacy[expected_rows]) &
+        values_match(new[changed], expected$corrected[expected_rows])
+    }
     tibble(
       !!key := shared_ids[changed], variable = rep(column, length(changed)),
       prior = as.character(old[changed]), candidate = as.character(new[changed]),
       difference = if (is.numeric(old)) new[changed] - old[changed] else rep(NA_real_, length(changed)),
       classification = case_when(
         verified_income ~ "verified_income_correction",
+        verified_count ~ "verified_count_correction",
         shared_ids[changed] %in% boundary_ids ~ "boundary_review",
         TRUE ~ "unexpected"
       )

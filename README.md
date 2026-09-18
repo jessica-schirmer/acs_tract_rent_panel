@@ -130,7 +130,7 @@ shows at most ten IDs in each direction; `$crosswalk_only_links` retains full
 unmatched links and weights for review. Statewide coverage differences remain
 diagnostic, including cross-state sources; they neither filter inputs nor
 determine target-tract completeness. Failed structural or weight-sum assertions
-remain fatal independently of coverage. Step 2 contributor logic is unchanged.
+remain fatal independently of coverage. Step 2 applies the separate contributor and count checks described below.
 
 Confirm both exact-readback checks pass in §7.6: row counts, keys and row order,
 column names/order, storage types/classes, and every value must equal the
@@ -173,7 +173,7 @@ levels/change; `rhuPOST` remains occupied-renter change.
 ## Step 2: Assemble 2016 tract and separate 2024 block-group/tract measures
 Notebooks: [02a_aggregate_2024_block_groups.Rmd](02a_aggregate_2024_block_groups.Rmd) and
 [02b_prepare_tract_sources.Rmd](02b_prepare_tract_sources.Rmd). Either can run first; each reads, validates,
-and writes only its own products. Step 4 consumes all three unchanged products.
+and writes only its own products. Step 4 consumes all three products with unchanged schemas.
 
 Inputs:
 - `../../../data/acs_step1_2024_block_group.feather` — 2020-2024 ACS estimates, one row per 2020 CA block group.
@@ -199,7 +199,50 @@ Schema:
 Steps in 02a:
 1. Set up environment, shared county configuration, and the block-group parity reference.
 2. Assemble 2020–2024 ACS block-group measures to 2010 tracts: select and check allocations, capture income expectations, censor, aggregate, interpolate, construct inventory, validate parity, and save.
-3. Validate the reloaded block-group output, including allocation conservation, rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
+3. Validate the reloaded block-group output, including reference-based contributor integrity, count completeness/reconciliation, complete-count rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
+
+**2024 BG contributor/count hardening:** `02a` constructs a locked reference
+before joining ACS, containing all original target links, four weights, target
+IDs, and positive-weight contributors by family. Cross-county sources and split
+fractions remain intact; full-source weights still reconcile without
+renormalization. Missing/duplicate/substituted/unexpected links, changed weights,
+missing positive-weight ACS rows, lost targets, and inconsistent diagnostics fail.
+Unmatched links with four exact zero weights remain as noncontributing rows,
+including targets represented entirely by those links.
+
+Every ordinary/supplemental additive count uses `strict_weighted_sum()`:
+positive-weight `NA`/`NaN` makes only the affected aggregate missing; observed
+zeros are valid; zero-weight missing values have no effect; reference-confirmed
+empty sets yield numeric zero. Population/race/ethnicity uses `wt_pop`, households
+`wt_hh`, housing/vacancy/owner/structure counts `wt_hu`, and renter/base/cash/all
+24 rent-bin counts plus `rhu_miss_rent` use `wt_renthu`. The latter retains
+`if_else(is.na(rentE), rhuE, 0)` after censoring. Source structure additions and
+`mfE` → `mf5E` stay unchanged. Inventory retains its three renter-weighted
+components, independently checked against the reference.
+
+`bg_count_qa_2024` retains keyed family/measure diagnostics and full missing-source
+tables; county/family summaries and bounded incomplete examples are printed.
+Complete groups reconcile numerically and incomplete groups must be missing,
+including after Feather reload. Optional `expected_count_corrections` supplies
+keyed, source-derived legacy/corrected values to parity; only individually
+verified count corrections and their natural dependent changes are accepted.
+Strict defaults, schema checks, income handling, and geographic review remain.
+No new columns/types or filenames are introduced, and reference snapshots stay intact.
+
+Pass 3 deferrals: interpolation can still be observed with a later missing bin;
+pre-censoring rent-quality shares/flags, relative weights, income, and MOEs retain
+partial-source behavior. Unchanged dependent formulas propagate newly missing
+counts. Rent-share decomposition is asserted only for complete required counts;
+`rent_share_deferred_2024` keeps other cases for review. `02b`, Step 4, dependencies,
+and canonical outputs are unchanged by this implementation.
+
+Run `Rscript --vanilla tests/test_bg_aggregation_qa.R` for contributor/count tests,
+BG inventory helper/chunk checks, temporary Feather readback, parsing, and focused
+shared-parity compatibility. `tests/test_rental_inventory_bg.R` is the narrower
+BG-only inventory entry point; neither executes the native-tract notebook.
+Run `Rscript --vanilla tests/test_income_censoring.R` for income regressions.
+Full notebook execution and empirical acceptance remain analyst-run. See the
+[hardening status and Pass 3 deferrals](docs/step1_step2_bg_qa_hardening_plan.md).
 
 Steps in 02b:
 1. Set up environment, shared county configuration, and the two tract parity references.
@@ -225,8 +268,9 @@ and unrelated columns. The separate `inventory_rhuE`, `inventory_vac_forrentE`,
 `inventory_vac_rentedE`, contributing/missing counts, and `inventory_incomplete`
 stay in the notebook. Block-group-aggregated `vac_forrentE` continues to use **`wt_hu`**
 for vacancy rates; inventory's diagnostic vacancy components use **`wt_renthu`**.
-Occupied-renter counts and rent denominators, cash/bin measures,
-censoring, income, retained weights, flags, MOEs, and CVs keep their calculations.
+Occupied-renter counts, rent denominators, and cash/bin counts now propagate
+required source missingness as described below. Censoring, income, retained
+weights, flags, MOEs, and derived formulas keep their calculations.
 No inventory MOE/CV is added. The 2000-to-2010 tract crosswalk remains outside
 Step 2's input contract. The two 2024 products are not compared or reconciled in
 Step 2; Step 4 compares their measurements on geographically consistent links.
@@ -466,24 +510,27 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
 - Crosswalk pairs and tract keys must be unique at their documented grains;
   retained allocations and tract-level joins must all match without row
   multiplication. Unmatched crosswalk links are reported with their IDs/weights
-  and excluded only when all four weights are finite and exactly zero; matched
-  zero-weight links remain. Missing sources with any positive or missing/invalid
-  weight still fail validation. Exclusions must preserve destination tract
-  coverage. Full source weights sum to one within `1e-6`; retained weights
+  and retained as exempt noncontributing rows only when all four weights are
+  finite and exactly zero. Missing sources with any positive or missing/invalid
+  weight still fail validation. All original targets survive, including those
+  represented entirely by exempt links; all-zero links grant no boundary exception. Full source weights sum to one within `1e-6`; retained weights
   can sum below one and must remain identical to their original fractions.
   Assertion failures stop notebook execution.
   [Note: conditions met when both Step 2 notebooks run without error.]
 - `socal_parity_16` and `socal_parity_2024_bg_aggregated` compare every shared output column, reporting
   changed values and added/removed keys. Each changed cell is classified as
-  `verified_income_correction`, `boundary_review`, or `unexpected`, with counts
-  in `difference_summary` and the complete values in `differences`. For
-  geographically unaffected tracts, only changed `med_hhincE`/`med_hhincCV` cells
-  matching both the expected legacy reference and corrected candidate may pass.
+  `verified_income_correction`, `verified_count_correction` (BG only),
+  `boundary_review`, or `unexpected`, with counts in `difference_summary` and
+  complete values in `differences`. For geographically unaffected tracts, each
+  approved income/count correction must match both source-derived legacy
+  reference and corrected candidate expectations.
   Expectations use uncensored source incomes and the existing household weights
   (2024 block groups); both CV expectations use the reference income MOE and existing formula.
-  Candidate MOEs, all other shared columns, and tract membership remain subject to
-  ordinary parity. The existing tolerance is unchanged, and the helper remains
-  strict on shared values when `expected_income = NULL`; schema differences
+  Count expectations use validated BG sources and unchanged downstream formulas;
+  natural dependent corrections include shares/rates, interpolated rent, and
+  derived share MOEs/CVs. Raw count/income MOEs, flags, other shared columns, and
+  tract membership retain ordinary parity. The existing tolerance is unchanged,
+  and the helper stays strict when both optional expectation arguments are `NULL`; schema differences
   require the explicit allowlist above. Review boundary differences with
   `socal_boundary_contributions_2024_bg_aggregated`, which identifies newly included sources and
   their weights/allocated counts. Use unchanged inputs for a valid comparison.
@@ -554,10 +601,12 @@ the stage's interface in [the shared pipeline document](../../PIPELINE.md).
 
 The notebook split preserves the post-cleanup calculations, operation order within
 each product, filenames, keys, column order/types, values, and missingness.
-Measurement changes and the proposed QA-hardening work remain separate.
+This describes the historical split. The subsequent contributor/count hardening
+above intentionally changes incomplete BG counts and their natural dependent values.
 `read_step2_parity_references()` in `R/assemble_helpers.R` reads each notebook's
 explicit map, retaining historical filenames, named missing references, and the
-existing messages. Existing measurement helpers are unchanged.
+existing messages. The split itself left measurement helpers unchanged; the
+subsequent hardening replaces only additive sums in `calc_agg_vars()`.
 
 Before full execution, preserve post-cleanup baseline outputs. Run both notebooks
 on identical inputs, in either order, and compare all three products across their

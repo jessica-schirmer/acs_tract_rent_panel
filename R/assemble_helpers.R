@@ -195,6 +195,18 @@ flag_tc_vars <- function(df, var_list) {
 
 # ---- Weighting / aggregation -------------------------------------------------
 
+#' Sum counts over positive allocation weights, requiring every contributing value
+strict_weighted_sum <- function(value, weight) {
+  if (!is.numeric(value) || is.complex(value) || !is.numeric(weight) ||
+      is.complex(weight) || length(value) != length(weight) ||
+      any(!is.finite(weight) | weight < 0 | weight > 1)) {
+    stop("Strict count sums require numeric values and finite allocation fractions")
+  }
+  contributes <- weight > 0
+  if (anyNA(value[contributes])) return(NA_real_)
+  as.double(sum(value[contributes] * weight[contributes]))
+}
+
 #' Aggregate rental inventory with explicit component completeness
 #'
 #' @param df Source tract rows, or retained block-group allocation rows
@@ -419,7 +431,7 @@ calc_agg_vars <- function(df, id) {
     group_by({{id}}) |>
     summarise(
       # Count missing values FIRST using original data
-      rhu_miss_rent = sum(if_else(is.na(rentE), rhuE * wt_renthu, 0), na.rm = TRUE),
+      rhu_miss_rent = strict_weighted_sum(if_else(is.na(rentE), rhuE, 0), wt_renthu),
 
       # Retain weighted income BEFORE aggregating its weight variables
       med_hhincE_agg = weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
@@ -441,27 +453,27 @@ calc_agg_vars <- function(df, id) {
       popM_agg = if (sum(popE * wt_pop, na.rm = TRUE) != 0) sqrt(sum((popM * rel_wt_pop)^2, na.rm = TRUE)) else NA,
 
       # Now aggregate counts (labeled with _agg)
-      huE_agg     = sum(huE * wt_hu, na.rm = TRUE),
-      rhuE_agg    = sum(rhuE * wt_renthu, na.rm = TRUE),
-      rhu_baseE_agg    = sum(rhu_baseE * wt_renthu, na.rm = TRUE),
-      hhE_agg     = sum(hhE * wt_hh, na.rm = TRUE),
-      popE_agg    = sum(popE * wt_pop, na.rm = TRUE),
-      tot_vacE_agg    = sum(tot_vacE * wt_hu, na.rm = TRUE),
-      tot_vac_baseE_agg    = sum(tot_vac_baseE * wt_hu, na.rm = TRUE),
-      pop_blkE_agg = sum(pop_blkE * wt_pop, na.rm = TRUE),
-      pop_hspE_agg = sum(pop_hspE * wt_pop, na.rm = TRUE),
-      pop_aaE_agg = sum(pop_aaE * wt_pop, na.rm = TRUE),
-      pop_raceE_agg =  sum(pop_raceE * wt_pop, na.rm = TRUE),
-      pop_ethnE_agg =  sum(pop_ethnE * wt_pop, na.rm = TRUE),
-      sfd_detE_agg =  sum(sfd_detE * wt_hu, na.rm = TRUE),
-      sfd_baseE_agg = sum(sfd_baseE * wt_hu, na.rm = TRUE),
-      mfE_agg = sum(mfE * wt_hu, na.rm = TRUE),
+      huE_agg     = strict_weighted_sum(huE, wt_hu),
+      rhuE_agg    = strict_weighted_sum(rhuE, wt_renthu),
+      rhu_baseE_agg    = strict_weighted_sum(rhu_baseE, wt_renthu),
+      hhE_agg     = strict_weighted_sum(hhE, wt_hh),
+      popE_agg    = strict_weighted_sum(popE, wt_pop),
+      tot_vacE_agg    = strict_weighted_sum(tot_vacE, wt_hu),
+      tot_vac_baseE_agg    = strict_weighted_sum(tot_vac_baseE, wt_hu),
+      pop_blkE_agg = strict_weighted_sum(pop_blkE, wt_pop),
+      pop_hspE_agg = strict_weighted_sum(pop_hspE, wt_pop),
+      pop_aaE_agg = strict_weighted_sum(pop_aaE, wt_pop),
+      pop_raceE_agg =  strict_weighted_sum(pop_raceE, wt_pop),
+      pop_ethnE_agg =  strict_weighted_sum(pop_ethnE, wt_pop),
+      sfd_detE_agg =  strict_weighted_sum(sfd_detE, wt_hu),
+      sfd_baseE_agg = strict_weighted_sum(sfd_baseE, wt_hu),
+      mfE_agg = strict_weighted_sum(mfE, wt_hu),
 
-      rhucashE_agg = sum(rhucashE * wt_renthu, na.rm = TRUE),
+      rhucashE_agg = strict_weighted_sum(rhucashE, wt_renthu),
 
       # Use across() for grentcat1E through grentcat24E
       across(starts_with("grentcat") & ends_with("E"),
-             ~sum(.x * wt_renthu, na.rm = TRUE),
+             ~strict_weighted_sum(.x, wt_renthu),
              .names = "{.col}_agg"),
 
 
