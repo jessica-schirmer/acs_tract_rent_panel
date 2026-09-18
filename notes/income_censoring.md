@@ -29,7 +29,7 @@ positive-weight household counts for aggregated income and complete renter
 counts for its income MOE; the income CV requires both. The weighted-mean and
 CV formulas, available-income treatment, and independence from rent censoring
 remain. Corrected parity expectations apply these count gates; historical
-findings below predate this change. See the [current BG schema](../schemas/acs_step2_2024_block_group.md).
+findings below predate this change. See the [current BG schema](../schemas/acs_step2_2024_block_group_aggregated.md).
 
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),

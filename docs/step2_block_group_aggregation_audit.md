@@ -12,7 +12,7 @@ are retained; successor links do not imply that those line numbers still apply.
 2020–2024 ACS block groups allocated to `tr2010_id` (2010 tracts).
 
 This audit uses the current working tree, including the renamed
-[block-group Step 2 schema](../schemas/acs_step2_2024_block_group.md).
+[block-group Step 2 schema](../schemas/acs_step2_2024_block_group_aggregated.md).
 This audit adds only this document; it does not edit existing code,
 documentation, schemas, or canonical data. Existing working-tree changes are
 preserved, including a concurrent Step 1 edit adding `rhuE` to missingness

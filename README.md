@@ -193,7 +193,7 @@ All three outputs cover the configured Southern California and Bay Area counties
 
 Schema:
 - `schemas/acs_step2_2016_tract.md`
-- `schemas/acs_step2_2024_block_group.md`
+- `schemas/acs_step2_2024_block_group_aggregated.md`
 - [2024 tract-source schema](schemas/acs_step2_2024_tract.md)
 
 Steps in 02a:

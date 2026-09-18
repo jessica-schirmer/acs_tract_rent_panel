@@ -82,7 +82,7 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
 | Helpers | [R/helpers.R](../R/helpers.R), [R/assemble_helpers.R](../R/assemble_helpers.R), [R/geography_qa.R](../R/geography_qa.R), [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R) |
 | Tests | [test_income_censoring.R](../tests/test_income_censoring.R), [test_rental_inventory.R](../tests/test_rental_inventory.R), [test_merge_diagnostics.R](../tests/test_merge_diagnostics.R) |
 | Step 1 schemas | [2016 tract](../schemas/acs_step1_2016_tract.md), [2024 block group](../schemas/acs_step1_2024_block_group.md), [2024 tract](../schemas/acs_step1_2024_tract.md) |
-| Step 2/panel schemas | [2016 tract](../schemas/acs_step2_2016_tract.md), [2024 block group](../schemas/acs_step2_2024_block_group.md), [2024 tract](../schemas/acs_step2_2024_tract.md), [acs_full](../schemas/acs_full.md) |
+| Step 2/panel schemas | [2016 tract](../schemas/acs_step2_2016_tract.md), [2024 block group](../schemas/acs_step2_2024_block_group_aggregated.md), [2024 tract](../schemas/acs_step2_2024_tract.md), [acs_full](../schemas/acs_full.md) |
 | Documentation | [README](../README.md), [shared PIPELINE](../../../PIPELINE.md), [pending hardening plan](step1_step2_bg_qa_hardening_plan.md), this cleanup record |
 
 Existing working-tree edits and schema renames are preserved. Step 3, source

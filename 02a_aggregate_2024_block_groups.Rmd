@@ -35,7 +35,7 @@ knitr::opts_chunk$set(
 - `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 ACS
   measures on Southern California and Bay Area 2010 tracts for `04_merge.Rmd`,
   including rental inventory, interpolated rent, shares, vacancy rates, and
-  uncertainty measures. See the [output schema](schemas/acs_step2_2024_block_group.md).
+  uncertainty measures. See the [output schema](schemas/acs_step2_2024_block_group_aggregated.md).
 
 **Steps:**
 
@@ -94,7 +94,7 @@ Set `parity_reference_dir` to a preserved snapshot directory; this product uses
 does not replace the snapshot. A missing reference means **parity not checked**.
 Reference and candidate must use the same statewide inputs and measurement code,
 apart from the income/count corrections verified in §2.8 and the fixed
-`schema_migration = "2024"` allowance in the [output schema](schemas/acs_step2_2024_block_group.md).
+`schema_migration = "2024"` allowance in the [output schema](schemas/acs_step2_2024_block_group_aggregated.md).
 
 ```{r load-parity-references}
 parity_reference_files <- c(

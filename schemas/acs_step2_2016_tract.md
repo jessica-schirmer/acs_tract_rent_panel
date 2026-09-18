@@ -55,7 +55,7 @@ substitution is allowed. Missing rent, income, or source MOEs do not affect
 inventory completeness. Required estimate/MOE columns must be numeric, and
 observed contributing estimates must be finite and nonnegative.
 
-The [2024 block-group counterpart](acs_step2_2024_block_group.md#rental-inventory) allocates each of the
+The [2024 block-group counterpart](acs_step2_2024_block_group_aggregated.md#rental-inventory) allocates each of the
 same components with `wt_renthu`. A retained link contributes only when
 `wt_renthu > 0`; zero-weight links contribute zero and do not affect completeness.
 A target without positive-weight contributors has zero components and inventory,

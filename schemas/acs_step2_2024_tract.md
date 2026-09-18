@@ -7,7 +7,7 @@ California and nine Bay Area counties configured by `target_counties` in §1.3.
 **Key:** `tr2020_id` (11-digit character, unique and non-missing).
 
 This direct tract-source product uses no crosswalk or allocation. It is separate
-from the [2024 block-group-aggregated product](acs_step2_2024_block_group.md), which is keyed
+from the [2024 block-group-aggregated product](acs_step2_2024_block_group_aggregated.md), which is keyed
 by `tr2010_id`. Step 2 processes them separately. Step 4 selects this product
 for canonical measurements through explicit `geo_consistent == 1` links,
 including different-GEOID pairs, and retains native-source and paired diagnostics.
