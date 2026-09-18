@@ -202,34 +202,127 @@ stopifnot(identical(joined_reference, as.list(joined$bg_reference_2024)),
           joined$acs_2024_bg_aggregated$popE[3] == 0)
 cat("Passed: original join, cross-county/split links, full-source audit, and unmatched all-zero target retention.\n")
 
-# Unchanged interpolation may remain available when a later bin is missing.
+# Every required bin gates interpolation, including bins after the median.
 bins <- assembly_sources |> mutate(.acs_present = TRUE)
 bins$grentcat24E[1] <- NA_real_
 late_bin <- assemble_allocations(bins)
 stopifnot(is.na(late_bin$acs_2024_bg_aggregated$grentcat24E[1]),
-          is.finite(late_bin$acs_2024_bg_aggregated_interp$interp_rent[1]))
-late_expectations <- bg_count_parity_expectations(late_bin$acs_2024_bg_allocations, late_bin$bg_reference_2024)
-stopifnot(!"interp_rent" %in% late_expectations$variable)
+          is.na(late_bin$acs_2024_bg_aggregated_interp$interp_rent[1]))
+count_expectations <- function(env) bg_count_parity_expectations(
+  env$acs_2024_bg_allocations, env$bg_reference_2024, env$bg_original_allocations_2024)
+late_expectations <- count_expectations(late_bin)
+stopifnot("interp_rent" %in% late_expectations$variable)
 bins$grentcat1E[1] <- NA_real_
 early_bin <- assemble_allocations(bins)
-early_expectations <- bg_count_parity_expectations(early_bin$acs_2024_bg_allocations, early_bin$bg_reference_2024)
+early_expectations <- count_expectations(early_bin)
 stopifnot(is.na(early_bin$acs_2024_bg_aggregated_interp$interp_rent[1]),
           "interp_rent" %in% early_expectations$variable)
 dependent <- assembly_sources |> mutate(.acs_present = TRUE)
 dependent$rhuE[3] <- NA_real_
 dependent_result <- assemble_allocations(dependent)
-dependent_expectations <- bg_count_parity_expectations(
-  dependent_result$acs_2024_bg_allocations, dependent_result$bg_reference_2024)
+dependent_expectations <- count_expectations(dependent_result)
 stopifnot(all(c("pctrhuE", "pctrhuM", "pctrhuCV", "rhuCV", "pctrvacE", "pct_miss_rent") %in%
                 dependent_expectations$variable),
           filter(dependent_expectations, variable == "pctrhuE")$legacy == 25 / 160,
           is.na(dependent_result$acs_2024_bg_aggregated$pctrhuM[1]))
+stopifnot(filter(dependent_expectations, variable == "pct_tc_rent")$legacy == 1,
+          filter(dependent_expectations, variable == "tc_flag_rent_24")$legacy == 1,
+          all(is.na(filter(dependent_expectations,
+                            variable %in% c("pct_tc_rent", "tc_flag_rent_24"))$corrected)))
+
+observed_zero <- assembly_sources[1, ] |> mutate(.acs_present = TRUE, rhuE = 0)
+zero_result <- assemble_allocations(observed_zero)$acs_2024_bg_aggregated_interp
+stopifnot(zero_result$rhuE == 0, zero_result$pctrhuE == 0, zero_result$pctrvacE == 1,
+          is.na(zero_result$rhuCV), is.na(zero_result$pct_tc_rent), zero_result$tc_flag_rent_24 == 0)
+
+# An interior median has an independently calculated dollar value. All 25 count
+# inputs gate it; missing MOEs and unrelated counts do not. Keep every target key.
+rent_fixture <- complete[rep(1L, 5), c("tr2010_id", "rhucashE", paste0("grentcat", 1:24, "E"))]
+rent_fixture$tr2010_id <- sprintf("06037%06d", 1:5)
+rent_fixture$rhucashE <- c(20, 20, 20, 0, 0)
+rent_fixture[paste0("grentcat", 1:24, "E")] <- 0
+rent_fixture$grentcat17E[1] <- 4
+rent_fixture$grentcat18E[1] <- 16
+rent_fixture$grentcat1E[2] <- 20
+rent_fixture$grentcat24E[3] <- 20
+rent_fixture$grentcat18E[5] <- 20
+rent_result <- calc_interp_rent(rent_fixture)
+stopifnot(identical(rent_result$tr2010_id, rent_fixture$tr2010_id),
+          rent_result$interp_rent[1] == 1000 + 249 * (10 - 4) / 16,
+          all(is.na(rent_result$interp_rent[2:5])))
+for (count in c("rhucashE", paste0("grentcat", 1:24, "E"))) {
+  for (missing in c(NA_real_, NaN)) {
+    partial <- rent_fixture
+    partial[[count]][1] <- missing
+    stopifnot(is.na(calc_interp_rent(partial)$interp_rent[1]))
+  }
+}
+expect_error(calc_interp_rent(select(rent_fixture, -grentcat24E)), "grentcat24E")
+all_bins_missing <- rent_fixture |> mutate(across(starts_with("grentcat"), ~ NA_real_))
+stopifnot(all(is.na(calc_interp_rent(all_bins_missing)$interp_rent)))
+stopifnot(identical(calc_interp_rent(mutate(rent_fixture, rhuE = NA_real_, grentcat18M = NA_real_)),
+                    rent_result))
+
+# Missing late-bin sources at zero weights are harmless; any positive weight counts.
+zero_bin_source <- bins |> mutate(wt_renthu = replace(wt_renthu, 1, 0))
+zero_bin_source$grentcat1E[1] <- 100 / 24
+zero_bin_result <- assemble_allocations(zero_bin_source)
+tiny_bin_source <- zero_bin_source |> mutate(wt_renthu = replace(wt_renthu, 1, 1e-30))
+tiny_bin_result <- assemble_allocations(tiny_bin_source)
+stopifnot(is.finite(zero_bin_result$acs_2024_bg_aggregated_interp$interp_rent[1]),
+          is.na(tiny_bin_result$acs_2024_bg_aggregated_interp$interp_rent[1]),
+          any(tiny_bin_result$bg_dependent_qa_2024$missing_sources$dependent == "interp_rent"))
+
+# Run source-level incompleteness through each weighted denominator family.
+affected <- list(
+  hhE = c("med_hhincE", "med_hhincCV"),
+  rhuE = c("rhuM", "med_hhincM", "med_hhincCV", "pct_tc_rent", "tc_flag_rent_24", "pct_miss_rent"),
+  huE = c("huM", "rhu_baseM", "tot_vacM", "tot_vac_baseM", "sfd_detM", "sfd_baseM", "pctrhuM"),
+  popE = c("popM", "pop_blkM", "pop_hspM", "pop_aaM", "pop_raceM", "pctblkM", "pcthspM")
+)
+for (count in names(affected)) {
+  source <- assembly_sources |> mutate(.acs_present = TRUE)
+  source[[count]][3] <- NA_real_
+  if (count == "hhE") source$med_hhincE[3] <- NA_real_
+  env <- assemble_allocations(source)
+  output <- env$acs_2024_bg_aggregated_interp
+  stopifnot(all(is.na(output[1, affected[[count]]])),
+            is.finite(output$interp_rent[1]),
+            identical(output[2, ], complete[2, ]))
+  for (column in affected[[count]]) {
+    bad <- output
+    bad[[column]][1] <- 0
+    expect_error(assert_bg_dependent_measures(bad, env$bg_count_qa_2024), "incomplete required counts")
+  }
+  if (count %in% c("rhuE", "huE", "popE")) {
+    relative <- c(rhuE = "rel_wt_rhu", huE = "rel_wt_hu", popE = "rel_wt_pop")[[count]]
+    stopifnot(all(is.na(env$acs_2024_bg_allocations[[relative]][source$tr2010_id == tract_ids[1]])))
+  }
+}
+stopifnot(is.na(result$tc_flag_rent_24[1]), result$tc_flag_rent_24[2] == 0,
+          is.na(result$interp_rent[2]), result$nsfaE[2] == 0)
+for (column in c("interp_rent", "nsfaE", "pctrvacE", "pctrhuE", "popCV")) {
+  env <- if (column == "interp_rent") late_bin else mixed
+  bad <- env$acs_2024_bg_aggregated_interp
+  bad[[column]][1] <- 0
+  expect_error(assert_bg_dependent_measures(bad, env$bg_count_qa_2024), "incomplete required counts")
+}
+
+# Production and freshly recalculated QA cannot agree their way around the
+# original source snapshot. Complete wrong totals and numeric partials both fail.
+altered <- with_24$acs_2024_bg_allocations |> mutate(popE = popE + 10)
+altered_qa <- bg_aggregation_diagnostics(altered, with_24$bg_reference_2024)
+expect_error(assert_bg_count_aggregates(complete, with_24$bg_reconciliation_source_2024,
+                                        with_24$bg_reference_2024, altered_qa), "diagnostics disagree")
+stopifnot(identical(with_24$bg_original_allocations_2024$rentE, assembly_sources$rentE))
+cat("Passed: all-bin interpolation gate, endpoints, source/weight edge cases, dependent gates, and original-source reconciliation.\n")
 
 # Two-sided count expectations are source-derived and limited to declared counts
 # and their dependencies. A missing reference remains explicitly unchecked.
-expectations <- bg_count_parity_expectations(frame, reference)
+expectations <- count_expectations(mixed)
 stopifnot(all(c("popE", "rhuE", "mf5E", "nsfaE") %in% expectations$variable),
-          !any(c("med_hhincE", "med_hhincCV", "rhuM", "pct_tc_rent", "tc_flag_rent_24") %in% expectations$variable))
+          all(c("popM", "tc_flag_rent_24") %in% expectations$variable),
+          !"rhu_inventoryE" %in% expectations$variable)
 legacy <- result
 for (i in seq_len(nrow(expectations))) {
   legacy[[expectations$variable[i]]][match(expectations$tr2010_id[i], legacy$tr2010_id)] <- expectations$legacy[i]
@@ -245,7 +338,7 @@ expect_error(parity_count(expected = NULL), "parity failed")
 expect_error(parity_count(expected = expectations[0, ]), "parity failed")
 expect_error(parity_count(expected = expectations[-1, ]), "parity failed")
 expect_error(parity_count(expected = bind_rows(expectations, expectations[1, ])), "duplicate key")
-expect_error(parity_count(expected = mutate(expectations, variable = "rhuM")), "Count expectations require")
+expect_error(parity_count(expected = mutate(expectations, variable = "rhu_inventoryE")), "Count expectations require")
 expect_error(parity_count(expected = mutate(expectations, corrected = "missing")), "Count expectations require")
 expect_error(parity_count(expected = mutate(expectations, legacy = 123)), "parity failed")
 expect_error(parity_count(expected = mutate(expectations, corrected = 123)), "parity failed")
@@ -278,18 +371,18 @@ for (migration in c("2016", "2024")) {
 }
 cat("Passed: individually verified count parity, rejected unexplained differences, and shared-helper compatibility.\n")
 
-# Missing estimates survive the Feather round trip; decomposition only checks
-# complete required counts and retains incomplete groups for Pass 3 review.
+# Missing estimates survive readback; incomplete rent shares also decompose as NA.
 mixed$acs_2024_bg_aggregated_out <- mixed$acs_2024_bg_aggregated_interp
 mixed$target_counties <- "037"
 run_chunk("validate-county-rent-step2", mixed, bg_notebook)
-stopifnot(nrow(mixed$rent_share_deferred_2024) == 1L)
+stopifnot(nrow(mixed$rent_share_incomplete_2024) == 1L)
 path <- tempfile(fileext = ".feather")
 tryCatch({
   arrow::write_feather(result, path)
   reloaded <- arrow::read_feather(path)
   stopifnot(identical(reloaded, result))
   quiet(assert_bg_count_aggregates(reloaded, frame, reference, qa))
+  quiet(assert_bg_dependent_measures(reloaded, qa))
   quiet(assert_rental_inventory(reloaded, mixed$inventory_2024_bg_aggregated, "Synthetic reload"))
 }, finally = unlink(path))
 
@@ -306,4 +399,4 @@ for (notebook in c(bg_notebook, tract_notebook)) {
   }
   cat("Parsed", length(starts), "chunks:", notebook, "\n")
 }
-cat("Passed: incomplete-count Feather readback, complete-only rent decomposition, and code parsing.\n")
+cat("Passed: incomplete-count Feather readback, missing-safe rent decomposition, and code parsing.\n")

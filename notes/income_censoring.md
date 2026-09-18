@@ -24,6 +24,13 @@ is strict; the historical income-correction exceptions below apply only to the
 listed in the [output migration](../README.md#stage-2-output-naming-and-references).
 Historical filenames and empirical results below remain unchanged.
 
+**Subsequent BG count-completeness hardening:** `02a` now requires complete
+positive-weight household counts for aggregated income and complete renter
+counts for its income MOE; the income CV requires both. The weighted-mean and
+CV formulas, available-income treatment, and independence from rent censoring
+remain. Corrected parity expectations apply these count gates; historical
+findings below predate this change. See the [current BG schema](../schemas/acs_step2_2024_block_group.md).
+
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),
 [tests/test_income_censoring.R](../tests/test_income_censoring.R), this note,

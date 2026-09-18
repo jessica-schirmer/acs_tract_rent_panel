@@ -199,7 +199,7 @@ Schema:
 Steps in 02a:
 1. Set up environment, shared county configuration, and the block-group parity reference.
 2. Assemble 2020–2024 ACS block-group measures to 2010 tracts: select and check allocations, capture income expectations, censor, aggregate, interpolate, construct inventory, validate parity, and save.
-3. Validate the reloaded block-group output, including reference-based contributor integrity, count completeness/reconciliation, complete-count rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
+3. Validate the reloaded block-group output, including reference-based contributor integrity, count/dependent completeness, rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
 
 **2024 BG contributor/count hardening:** `02a` constructs a locked reference
 before joining ACS, containing all original target links, four weights, target
@@ -229,12 +229,26 @@ verified count corrections and their natural dependent changes are accepted.
 Strict defaults, schema checks, income handling, and geographic review remain.
 No new columns/types or filenames are introduced, and reference snapshots stay intact.
 
-Pass 3 deferrals: interpolation can still be observed with a later missing bin;
-pre-censoring rent-quality shares/flags, relative weights, income, and MOEs retain
-partial-source behavior. Unchanged dependent formulas propagate newly missing
-counts. Rent-share decomposition is asserted only for complete required counts;
-`rent_share_deferred_2024` keeps other cases for review. `02b`, Step 4, dependencies,
-and canonical outputs are unchanged by this implementation.
+**Dependent-measure hardening (Pass 3):** `interp_rent` now requires complete
+`rhucashE` and all 24 rent bins, including bins after the median. Its category
+endpoints, interpolation formula, censoring, and zero-cash-renter rules remain.
+Pre-censoring rent shares and `tc_flag_rent_24` require complete renter counts;
+complete zero denominators retain missing shares and flag zero. Relative weights
+use strict count denominators. Income estimates require complete household
+counts; income MOEs require complete renter counts. Count MOEs require the base
+counts used by their relative weights. Missing income/MOE inputs retain their
+existing treatment when required counts are complete.
+
+`bg_dependent_qa_2024` traces required counts for totals, shares/rates, flags,
+income, MOEs, CVs, and interpolation, reusing contributor/completeness metadata.
+Populated results with incomplete required counts fail after joins, before save,
+and after readback. Full missing-source details remain outside the Feather.
+`rent_share_incomplete_2024` records cases where all rent shares must be missing.
+The existing independent count reconciliation is retained and anchored to an
+original-source snapshot plus immutable crosswalk weights; it never reuses the
+production sum helper. Parity verifies both historical and corrected values for
+the newly gated cells, including income, MOEs, rent shares, and flags. Native
+tract calculations, Step 4, package dependencies, and canonical files are unchanged.
 
 Run `Rscript --vanilla tests/test_bg_aggregation_qa.R` for contributor/count tests,
 BG inventory helper/chunk checks, temporary Feather readback, parsing, and focused
@@ -242,7 +256,7 @@ shared-parity compatibility. `tests/test_rental_inventory_bg.R` is the narrower
 BG-only inventory entry point; neither executes the native-tract notebook.
 Run `Rscript --vanilla tests/test_income_censoring.R` for income regressions.
 Full notebook execution and empirical acceptance remain analyst-run. See the
-[hardening status and Pass 3 deferrals](docs/step1_step2_bg_qa_hardening_plan.md).
+[hardening status and acceptance checks](docs/step1_step2_bg_qa_hardening_plan.md).
 
 Steps in 02b:
 1. Set up environment, shared county configuration, and the two tract parity references.
@@ -269,8 +283,8 @@ and unrelated columns. The separate `inventory_rhuE`, `inventory_vac_forrentE`,
 stay in the notebook. Block-group-aggregated `vac_forrentE` continues to use **`wt_hu`**
 for vacancy rates; inventory's diagnostic vacancy components use **`wt_renthu`**.
 Occupied-renter counts, rent denominators, and cash/bin counts now propagate
-required source missingness as described below. Censoring, income, retained
-weights, flags, MOEs, and derived formulas keep their calculations.
+required source missingness as described above. Censoring, retained allocation
+weights, and derived formulas remain; dependent values require complete counts.
 No inventory MOE/CV is added. The 2000-to-2010 tract crosswalk remains outside
 Step 2's input contract. The two 2024 products are not compared or reconciled in
 Step 2; Step 4 compares their measurements on geographically consistent links.
@@ -525,11 +539,13 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   approved income/count correction must match both source-derived legacy
   reference and corrected candidate expectations.
   Expectations use uncensored source incomes and the existing household weights
-  (2024 block groups); both CV expectations use the reference income MOE and existing formula.
+  (2024 block groups); corrected income/CV expectations also require complete
+  household/renter counts, retaining the reference MOE when its counts are complete.
   Count expectations use validated BG sources and unchanged downstream formulas;
-  natural dependent corrections include shares/rates, interpolated rent, and
-  derived share MOEs/CVs. Raw count/income MOEs, flags, other shared columns, and
-  tract membership retain ordinary parity. The existing tolerance is unchanged,
+  dependent corrections include shares/rates, interpolated rent, count-weighted
+  income/MOEs, CVs, and the rent top-code flag. Every cell must match both
+  expectations; unrelated changes and tract membership retain ordinary parity.
+  The existing tolerance is unchanged,
   and the helper stays strict when both optional expectation arguments are `NULL`; schema differences
   require the explicit allowlist above. Review boundary differences with
   `socal_boundary_contributions_2024_bg_aggregated`, which identifies newly included sources and
@@ -606,7 +622,7 @@ above intentionally changes incomplete BG counts and their natural dependent val
 `read_step2_parity_references()` in `R/assemble_helpers.R` reads each notebook's
 explicit map, retaining historical filenames, named missing references, and the
 existing messages. The split itself left measurement helpers unchanged; the
-subsequent hardening replaces only additive sums in `calc_agg_vars()`.
+subsequent hardening adds strict sums and required-count gates for dependent measures.
 
 Before full execution, preserve post-cleanup baseline outputs. Run both notebooks
 on identical inputs, in either order, and compare all three products across their

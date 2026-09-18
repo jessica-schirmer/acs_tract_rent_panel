@@ -87,8 +87,13 @@ Parity's optional `expected_count_corrections = NULL` remains strict by default.
 counts and natural dependent cells using unchanged downstream formulas. Both
 sides must match for `verified_count_correction`; unexplained differences retain
 the existing failure/geographic-review rules. Schema and income checks remain.
-Pre-censoring rent-quality diagnostics/flags, income, relative weights, and MOEs
-retain partial-source behavior pending Pass 3; formulas are not changed here.
+Pre-censoring rent shares and the top-code flag require complete `rhuE`.
+Relative weights, income, and MOEs now require complete count denominators;
+their formulas and treatment of missing source income/MOEs otherwise remain.
+`bg_dependent_qa_2024` records transitive count dependencies and missing source
+IDs. Populated dependent cells with incomplete required counts fail after joins,
+before save, and after reload. Original uncensored source values are retained
+for the existing independent reference-based count and inventory reconciliation.
 
 ## Rental inventory
 
@@ -152,8 +157,8 @@ including missing/unexpected status. Consistent tracts use native tract median
 gross rent. Missingness follows the selected source, with no availability
 fallback. `interp_rentPOST` uses the selected canonical
 value over positive, inflation-adjusted 2016 median rent. This upstream product's
-interpolation method is unchanged and can remain observed with a missing bin
-after the median category; a stricter all-bin gate is deferred to Pass 3. See the [panel schema](acs_full.md).
+interpolation method retains its formula but now requires complete cash-rent
+counts and all 24 bins, including bins after the median. See the [panel schema](acs_full.md).
 
 ## Aggregated income (weighted mean)
 
@@ -162,7 +167,8 @@ after the median category; a stricter all-bin gate is deferred to Pass 3. See th
 **Income retention:** `censor_tc_vars()` leaves block-group `med_hhincE` unchanged
 regardless of missing or top-coded rent, preserving source values and missingness
 without adding an income threshold. Income is then aggregated with the unchanged
-`weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`. Available income
+`weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`, gated to `NA` if
+any positive-`wt_hh` source household count is missing. With complete counts, available income
 contributions whose rent is missing or censored are retained; missing source
 income is excluded, and an aggregate with all source incomes missing remains
 missing. Removing the previous rent-dependent income exclusion can change both
@@ -179,13 +185,23 @@ The count MOEs use root-sum-of-squares:
 `tot_vac_baseM`, `pop_blkM`, `pop_hspM`, `pop_aaM`, `pop_raceM`, `sfd_detM`,
 `sfd_baseM`, `huM`, `popM`.
 
+Required-count gates preserve these formulas: `med_hhincM` and `rhuM` require
+complete renter counts; `rhu_baseM`, `tot_vacM`, `tot_vac_baseM`, `sfd_detM`,
+`sfd_baseM`, and `huM` require complete `huE`; population MOEs require complete
+`popE`. Relative-weight denominators use strict count sums. Missing source MOEs
+retain their previous treatment when these counts are complete. Existing
+zero-denominator behavior remains, including zero for unguarded count MOEs and
+missing `rhuM`/`huM`/`popM` when their totals are zero. Income CV requires both
+complete household and renter counts; share MOEs/CVs also inherit the required
+counts of their ratios. No uncertainty formula or weighting family changes.
+
 ## Derived measures
 
 | column | type | description |
 |---|---|---|
 
 ### Interpolated medians
-| `interp_rent` | numeric | Median rent interpolated within the median gross-rent category; `NA` for open-ended bottom/top categories or no cash-rent units (see §2.6). |
+| `interp_rent` | numeric | Median rent interpolated within the median gross-rent category; requires complete `rhucashE` and all 24 `grentcat*E` aggregates. `NA` for any required contributing count missing, open-ended bottom/top categories, or no cash-rent units (see §2.6). |
 
 ### Aggregated counts
 | `nsfaE` | numeric | Non-single-family **attached** units: `smfE + mf5E` (`sfd_att + duplex + quadplex` plus units in 5+ structures); excludes single-family detached, mobile homes, and other units. |
@@ -200,8 +216,8 @@ The count MOEs use root-sum-of-squares:
 
 #### Missingness/ Partial aggregation
 | `rhu_miss_rent` | numeric (double) | Strict `wt_renthu` sum of `if_else(is.na(rentE), rhuE, 0)` after censoring. Missing renter counts matter only for sources with missing/censored rent. |
-| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups; the decomposition `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` is asserted only when required counts are complete. Other cases remain in notebook Pass 3 diagnostics. |
-| `pct_tc_rent` | numeric | Share of weighted renter units in the tract whose rent is top-coded (`rentE >= 3500`), computed on the **uncensored** block-group rent in §2.3; the top-coded portion of `pct_miss_rent`. `NA` where tract `rhuE = 0`. |
+| `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` (share of renter units missing rent). Because rent is censored (`>= 3500` → `NA`) **before** aggregation, this counts both genuinely missing **and** top-coded block groups. Decomposition `pct_miss_rent ≈ pct_m_rent + pct_tc_rent` is asserted with matching missingness: all shares must be missing when required counts are incomplete. |
+| `pct_tc_rent` | numeric | Share of weighted renter units whose rent is top-coded (`rentE >= 3500`), computed on **uncensored** rent in §2.3. `NA` where renter counts are incomplete or tract `rhuE = 0`. |
 
 #### Margin of errors
 | `pctrhuM`, `pctblkM`, `pcthspM` | numeric | Derived share MOEs. |
@@ -213,6 +229,6 @@ The count MOEs use root-sum-of-squares:
 
 | column | type | description |
 |---|---|---|
-| `tc_flag_rent_24` | numeric (double, 0/1) | 1 if the tract had any top-coded (`>= 3500`) renter rent before censoring. Existing storage and column name are preserved. |
+| `tc_flag_rent_24` | numeric (double, 0/1/NA) | With complete renter counts, 1 iff the pre-censoring top-coded share is positive; 0 otherwise, including complete zero-renter/zero-contributor targets. `NA` when any positive-`wt_renthu` source renter count is missing. |
 | `rhu_id` | logical | Constant `TRUE`; tag added during aggregation. |
 | `merge`, `left_id`, `right_id` | character / logical | Join indicators retained from the final `merge_df()` steps (interpolated rent and top-code-flag merges). All rows should be `"both"`. |

@@ -207,6 +207,22 @@ strict_weighted_sum <- function(value, weight) {
   as.double(sum(value[contributes] * weight[contributes]))
 }
 
+# Count denominators used by the existing income and relative-weight MOE formulas.
+bg_weighted_count_dependencies <- function() {
+  list(med_hhincE = "hhE", med_hhincM = "rhuE", rhuM = "rhuE",
+       rhu_baseM = "huE", tot_vacM = "huE", tot_vac_baseM = "huE",
+       pop_blkM = "popE", pop_hspM = "popE", pop_aaM = "popE", pop_raceM = "popE",
+       sfd_detM = "huE", sfd_baseM = "huE", huM = "huE", popM = "popE")
+}
+
+propagate_count_missingness <- function(df, dependencies) {
+  for (measure in names(dependencies)) {
+    incomplete <- Reduce(`|`, lapply(df[dependencies[[measure]]], is.na))
+    df[[measure]][incomplete] <- NA_real_
+  }
+  df
+}
+
 #' Aggregate rental inventory with explicit component completeness
 #'
 #' @param df Source tract rows, or retained block-group allocation rows
@@ -356,12 +372,9 @@ calc_rel_wt <- function(df, id) {
   df |>
     group_by({{id}}) |>
     mutate(
-    #   moe_wt_rhu = rhuE * wt_renthu / sum(rhuE * wt_renthu, na.rm = TRUE),
-    #   moe_wt_hu = huE * wt_hu / sum(huE * wt_hu, na.rm = TRUE),
-    #   moe_wt_pop = popE * wt_pop / sum(popE * wt_pop, na.rm = TRUE)
-      rel_wt_rhu = rhuE * wt_renthu / sum(rhuE * wt_renthu, na.rm = TRUE),
-      rel_wt_hu = huE * wt_hu / sum(huE * wt_hu, na.rm = TRUE),
-      rel_wt_pop = popE * wt_pop / sum(popE * wt_pop, na.rm = TRUE)
+      rel_wt_rhu = rhuE * wt_renthu / strict_weighted_sum(rhuE, wt_renthu),
+      rel_wt_hu = huE * wt_hu / strict_weighted_sum(huE, wt_hu),
+      rel_wt_pop = popE * wt_pop / strict_weighted_sum(popE, wt_pop)
     ) |>
     ungroup()
 }
@@ -389,10 +402,9 @@ calc_pct_tc_m <- function(df, id) {
   tr_df <- df |>
     group_by({{id}}) |>
     summarise(
-    #   huE     = sum(huE * wt_hu, na.rm = TRUE),
-      rhuE_tot    = sum(rhuE * wt_renthu, na.rm = TRUE),
-      rhu_m_rent = sum(is.na(rentE) * rhuE * wt_renthu, na.rm = TRUE),
-      rhu_tc_rent = sum((!is.na(rhuE) & rhuE!=0 & !is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
+      rhuE_tot = strict_weighted_sum(rhuE, wt_renthu),
+      rhu_m_rent = strict_weighted_sum(if_else(is.na(rentE), rhuE, 0), wt_renthu),
+      rhu_tc_rent = strict_weighted_sum(if_else(!is.na(rentE) & rentE >= 3500, rhuE, 0), wt_renthu),
       .groups = "drop"
     )
 
@@ -517,7 +529,8 @@ calc_agg_vars <- function(df, id) {
     # Rename all grentcat variables at once
     rename_with(~str_remove(.x, "_agg$"), starts_with("grentcat")) |>
     mutate(rhu_id = TRUE) |>
-    select(-ends_with("_agg"))
+    select(-ends_with("_agg")) |>
+    propagate_count_missingness(bg_weighted_count_dependencies())
 }
 
 
@@ -526,12 +539,14 @@ calc_agg_vars <- function(df, id) {
 #' @param df
 #' @return dataframe with linearly interpolated median rent per tract
 calc_interp_rent <- function(df) {
+    required_counts <- c("rhucashE", paste0("grentcat", 1:24, "E"))
     # Identify the median rent category
     tr_rhu <- df |>
       select(tr2010_id, rhucashE)
 
     tr_median_cat <- df |>
-      select(tr2010_id, rhucashE, starts_with("grentcat")) |>
+      select(tr2010_id, all_of(required_counts)) |>
+      filter(if_all(all_of(required_counts), ~ !is.na(.x)), rhucashE > 0) |>
       pivot_longer(
         cols = starts_with("grentcat"),
         names_to = "grentcat",

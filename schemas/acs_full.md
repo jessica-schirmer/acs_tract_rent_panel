@@ -113,7 +113,9 @@ unchanged.
 
 Canonical `interp_rent` uses the reported native tract median gross rent as the
 intended tract counterpart; no new tract interpolation is constructed. The
-existing block-group interpolation method is unchanged. Its input is preserved
+block-group interpolation formula is unchanged; upstream now requires complete
+cash-rent counts and all 24 bins, so an incomplete distribution is missing.
+Its input is preserved
 as notebook-only `interp_rent_24_bg_agg` before the canonical value is selected.
 `merge_2024_field_map()` in `R/merge_helpers.R` maps that source and
 `rentE_24_tract` to `interp_rent`; selection occurs in `04_merge.Rmd` §3.2.
@@ -129,7 +131,7 @@ Missing selected source records or unavailable source flags leave these flags mi
 |---|---|
 | `m_flag_rhu_24` | Tract source: upstream renter-count missing flag. Aggregate source: `is.na(rhuE)`, calculated before joining. |
 | `zero_flag_rhu_24` | Tract source: upstream zero flags. Aggregate source: its estimate equals zero, with `NA` for missing estimates. |
-| `tc_flag_rent_24` | Tract source: upstream `tc_flag_rent` (tract median meets the censoring threshold). Aggregate source: upstream `tc_flag_rent_24` (a positively renter-weighted contributing block group was top-coded). This source diagnostic does not determine whether interpolated rent is observed. |
+| `tc_flag_rent_24` | Tract source: upstream `tc_flag_rent` (tract median meets the censoring threshold). Aggregate source: upstream `tc_flag_rent_24` (positive allocated renter units with top-coded rent), missing for incomplete renter counts and zero for complete zero-renter targets. This source diagnostic does not determine whether interpolated rent is observed. |
 
 ## Change measures
 

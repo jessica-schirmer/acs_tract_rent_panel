@@ -72,8 +72,8 @@ assert_step2_cleanup <- function(df, product) {
   invisible(TRUE)
 }
 
-# Fixed scope for BG count corrections and natural consequences of existing formulas.
-# Raw MOEs, income, inventory, flags, and pre-censoring rent shares are excluded.
+# Fixed scope for BG count corrections and their required-count dependencies.
+# Every permitted difference still requires matching both source-derived values.
 bg_count_correction_columns <- function() {
   c("popE", "pop_blkE", "pop_hspE", "pop_aaE", "pop_raceE", "pop_ethnE", "hhE",
     "huE", "tot_vacE", "tot_vac_baseE", "sfd_detE", "sfd_baseE", "mf5E",
@@ -81,7 +81,10 @@ bg_count_correction_columns <- function() {
     paste0("grentcat", 1:24, "E"), "rhu_miss_rent", "nsfaE", "pct_miss_rent",
     "pctrhuE", "pctvacE", "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "pctrvacE", "pctsvacE",
     "pctrhuM", "pctblkM", "pcthspM", "pctrhuCV", "pctblkCV", "pcthspCV",
-    "rhuCV", "huCV", "popCV", "interp_rent")
+    "rhuCV", "huCV", "popCV", "interp_rent", "pct_tc_rent", "tc_flag_rent_24",
+    "med_hhincE", "med_hhincM", "med_hhincCV", "rhuM", "rhu_baseM",
+    "tot_vacM", "tot_vac_baseM", "pop_blkM", "pop_hspM", "pop_aaM", "pop_raceM",
+    "sfd_detM", "sfd_baseM", "huM", "popM")
 }
 
 # Boundary IDs identify destination tracts receiving sources excluded by the old

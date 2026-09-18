@@ -140,9 +140,10 @@ The geographic parity check compares every shared output column. Only a changed
 the legacy and corrected expectations qualifies as `verified_income_correction`.
 Expectations use inputs before censoring (§2.4), with the former
 missing/top-coded-rent income exclusion applied only to the legacy estimate.
-Both expected CVs use the reference `med_hhincM` and the existing
-`(med_hhincM / 1.645) / med_hhincE` formula. Candidate MOEs remain subject to
-ordinary parity. Missing values and numeric tolerance follow the same comparison
+Expected CVs use the reference `med_hhincM` and the existing formula, with the
+corrected expectation missing when its household/renter counts are incomplete.
+Candidate MOEs require ordinary parity or individually verified count-completeness
+corrections. Missing values and numeric tolerance follow the same comparison
 rule as all other columns. Without expectations, the helper remains strict.
 
 ### Decision: Keep source-specific references and preserve historical snapshots
@@ -310,6 +311,9 @@ count margins of error are combined as a weighted root-sum-of-squares. For that 
 each block group's *relative* contribution to its tract total — `rel_wt_*` —
 computed as the block group's weighted count over the tract's weighted total
 (separately by population, housing units, and renter-occupied housing units).
+Each denominator now uses the same strict count sum as its production aggregate.
+An incomplete denominator makes its relative weights missing; the resulting
+MOEs are explicitly gated in §2.5 so missing weights cannot yield a numeric zero.
 
 ### Decision: Retain the tract-level top-coded-rent share
 
@@ -321,7 +325,29 @@ missing-rent share is auditable downstream. It must be computed here, *before*
 censoring (§2.4): censoring sets top-coded `rentE` to `NA`, after which top-codes
 can no longer be distinguished from genuine non-response.
 
+### Decision: Require complete renter counts for rent shares and their flag
+
+Both shares require every positive-`wt_renthu` source `rhuE`. Their conditional
+numerators and common denominator use `strict_weighted_sum()`. An incomplete
+denominator makes both shares and `tc_flag_rent_24` missing, even if an observed
+source is top-coded. Complete zero-renter/zero-contributor targets retain missing
+shares and the existing numeric flag value zero. County summaries use the same
+strict sums and report missing contributing renter counts separately.
+
+Keep `bg_original_allocations_2024` before transformations and reconstruct the
+QA source counts in `bg_reconciliation_source_2024`. Reconciliation uses these
+original source values with the locked crosswalk reference.
+
 ```{r relative-weights-and-tc-2024-bg-aggregated}
+assert_bg_contributors(acs_2024_bg_allocations, bg_reference_2024)
+# Preserve original source values before any weighting, censoring, or aggregation.
+bg_original_allocations_2024 <- acs_2024_bg_allocations
+bg_reconciliation_source_2024 <- bg_reconciliation_sources(bg_original_allocations_2024)
+bg_renter_count_qa_2024 <- bg_aggregation_diagnostics(
+  bg_original_allocations_2024, bg_reference_2024,
+  filter(bg_count_measure_map(), measure == "rhuE")
+)
+
 # Calc the relative weight for count variables
 acs_2024_bg_allocations <- calc_rel_wt(acs_2024_bg_allocations, tr2010_id)
 
@@ -337,9 +363,10 @@ rent_allocation_qa_2024_bg_aggregated <- acs_2024_bg_allocations |>
   group_by(county = substr(tr2010_id, 3, 5)) |>
   summarise(
     source_block_groups = n_distinct(bg2020_id),
-    allocated_rhu = sum(rhuE * wt_renthu, na.rm = TRUE),
-    missing_rhu = sum(is.na(rentE) * rhuE * wt_renthu, na.rm = TRUE),
-    topcoded_rhu = sum((!is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
+    allocated_rhu = strict_weighted_sum(rhuE, wt_renthu),
+    missing_rhu = strict_weighted_sum(if_else(is.na(rentE), rhuE, 0), wt_renthu),
+    topcoded_rhu = strict_weighted_sum(if_else(!is.na(rentE) & rentE >= 3500, rhuE, 0), wt_renthu),
+    missing_rhu_counts = sum(wt_renthu > 0 & is.na(rhuE)),
     .groups = "drop"
   ) |>
   mutate(missing_share = if_else(allocated_rhu > 0, missing_rhu / allocated_rhu, NA_real_),
@@ -351,9 +378,19 @@ check_tc_out_2024_bg_aggregated
 
 # Create top-coded flag
 tc_diagnostics_2024_bg_aggregated <- tc_diagnostics_2024_bg_aggregated |>
-    mutate (tc_flag_rent_24= if_else(!is.na(pct_tc_rent) & pct_tc_rent>0, 1, 0)) |>
+    left_join(select(bg_renter_count_qa_2024$measure, tr2010_id, complete),
+              by = "tr2010_id", relationship = "one-to-one") |>
+    mutate(tc_flag_rent_24 = if_else(!complete, NA_real_,
+                                     if_else(!is.na(pct_tc_rent) & pct_tc_rent > 0, 1, 0))) |>
     # Keep pct_tc_rent (top-coded-rent share, analogous to pct_miss_rent) alongside the flag
     select(tr2010_id, pct_tc_rent, tc_flag_rent_24)
+
+assert_bg_dependent_measures(
+  left_join(rent_shares_2024_bg_aggregated,
+            select(tc_diagnostics_2024_bg_aggregated, tr2010_id, tc_flag_rent_24),
+            by = "tr2010_id", relationship = "one-to-one"),
+  bg_renter_count_qa_2024, c("pct_m_rent", "pct_tc_rent", "tc_flag_rent_24")
+)
 
 table(tc_diagnostics_2024_bg_aggregated$tc_flag_rent_24)
 ```
@@ -395,14 +432,18 @@ if (!is.null(prior_outputs[["2024_bg_aggregated"]])) {
     summarise(
       legacy_med_hhincE = weightedMean(legacy_med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
       corrected_med_hhincE = weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
+      hh_complete = !is.na(strict_weighted_sum(hhE, wt_hh)),
+      rhu_complete = !is.na(strict_weighted_sum(rhuE, wt_renthu)),
       .groups = "drop"
     ) |>
     left_join(select(prior_outputs[["2024_bg_aggregated"]], tr2010_id, med_hhincM),
               by = "tr2010_id", relationship = "many-to-one") |>
     transmute(
-      tr2010_id, legacy_med_hhincE, corrected_med_hhincE,
+      tr2010_id, legacy_med_hhincE,
+      corrected_med_hhincE = if_else(hh_complete, corrected_med_hhincE, NA_real_),
       legacy_med_hhincCV = (med_hhincM / 1.645) / legacy_med_hhincE,
-      corrected_med_hhincCV = (med_hhincM / 1.645) / corrected_med_hhincE
+      corrected_med_hhincCV = if_else(rhu_complete,
+                                     (med_hhincM / 1.645) / corrected_med_hhincE, NA_real_)
     )
   assert_tract_keys(expected_income_2024_bg_aggregated, target_tract_ids_2024_bg_aggregated, "2024 block-group-aggregated income expectations")
 }
@@ -464,11 +505,30 @@ and compare diagnostics against the aggregation frame to reject tampering or
 stale diagnostics. Complete groups reconcile numerically; incomplete groups
 must have missing aggregates, both before saving and after readback.
 
+The Pass 2 reconciliation already independently reconstructs totals by joining
+source values to the immutable reference's positive-weight contributors. It
+does not call `strict_weighted_sum()` or drop missing counts. Retain that check,
+now anchored to the original source snapshot, with the existing `1e-10` relative
+tolerance and reference-derived zeros. Failed checks print target/measure and
+missing-source examples; full investigation tables remain in memory.
+
+### Decision: Propagate incomplete count denominators through weighted measures
+
+Keep the existing available-income mean and root-sum-of-squares MOE formulas.
+`med_hhincE` requires complete `hhE`; `med_hhincM` and `rhuM` require complete
+`rhuE`. Housing-relative MOEs (`rhu_baseM`, `tot_vacM`, `tot_vac_baseM`,
+`sfd_detM`, `sfd_baseM`, `huM`) require complete `huE`; population-relative MOEs
+(`pop_blkM`, `pop_hspM`, `pop_aaM`, `pop_raceM`, `popM`) require complete `popE`.
+`calc_agg_vars()` sets these results to `NA_real_` when those counts are
+incomplete. Observed count zeros and existing zero-denominator behavior remain.
+Missing income/MOE inputs retain their existing treatment; no new estimate or
+uncertainty method, imputation, or weight renormalization is introduced.
+
 This produces one row per original target tract without adding output columns.
 
 ```{r aggregate-to-tracts-2024-bg-aggregated}
 # Reconcile keyed pairs/weights and measure-specific completeness immediately before sums.
-bg_count_qa_2024 <- bg_aggregation_diagnostics(acs_2024_bg_allocations, bg_reference_2024)
+bg_count_qa_2024 <- bg_aggregation_diagnostics(bg_reconciliation_source_2024, bg_reference_2024)
 bg_county_family_qa_2024 <- bg_count_qa_2024$family |>
   mutate(county = substr(tr2010_id, 3, 5)) |>
   group_by(county, family) |>
@@ -633,17 +693,28 @@ Where its required counts are complete, it decomposes as `pct_miss_rent ≈ pct_
 plus top-coded, both computed pre-censoring in §2.3). The retained `pct_tc_rent`
 isolates the top-coded portion.
 
-### Deferred to Pass 3: interpolation and rent-quality/uncertainty coverage
+### Decision: Require the entire rent distribution and audit dependent counts
 
-Interpolation keeps its existing formula and can remain observed when a rent bin
-after the median category is missing. No new all-bin completeness gate is added.
-The pre-censoring missing/top-code shares, quality flags, relative weights,
-weighted income, and MOE calculations retain their existing partial-source
-behavior. Derived shares, vacancy rates, combined structure counts, and CVs
-naturally inherit corrected count missingness through unchanged formulas.
-The rent-share decomposition assertion in §3.5 applies only where `rhuE` and
-`rhu_miss_rent` are complete. `rent_share_deferred_2024` retains other cases for
-Pass 3 review; no missingness threshold or new quality flag is imposed.
+`interp_rent` requires complete `rhucashE` and all 24 `grentcat*E` counts,
+including bins after the median category. Contributor integrity and the strict
+count sums establish completeness over every expected positive-`wt_renthu`
+source. `calc_interp_rent()` excludes incomplete distributions before locating
+the median, then restores every original tract key with a missing result.
+The B25063 bins, dollar endpoints, interpolation formula, bottom/top-category
+rules, and no-cash-renter behavior are unchanged.
+
+`bg_dependent_count_map()` traces each retained total, share, rate, flag, MOE,
+and CV to its required counts. Structure totals require `smfE` and `mf5E`;
+shares and vacancy rates require their existing numerator/denominator counts.
+CV/MOE dependencies include their estimate ratios and relative-weight counts;
+income CV requires both household and renter counts. `bg_dependent_qa_2024`
+reuses count completeness and missing-source tables. Any populated dependent
+cell with an incomplete required count fails after the final joins, before
+save, and after readback. No diagnostic columns enter the output.
+
+The rent-share decomposition in §3.5 also checks incomplete groups: all three
+shares must be missing. `rent_share_incomplete_2024` retains those cases for
+review, without an empirical missingness threshold or a new quality flag.
 
 ```{r derive-measures-2024-bg-aggregated}
 # Calculate interpolated rent
@@ -686,6 +757,9 @@ acs_2024_bg_aggregated_interp <- merge_df(acs_2024_bg_aggregated_tc, interp_rent
 table(acs_2024_bg_aggregated_interp$merge)
 assert_complete_tract_join(acs_2024_bg_aggregated_interp, target_tract_ids_2024_bg_aggregated, "Interpolated rent join")
 summary(acs_2024_bg_aggregated_interp$interp_rent, useNA = "ifany")
+bg_dependent_qa_2024 <- assert_bg_dependent_measures(acs_2024_bg_aggregated_interp, bg_count_qa_2024)
+print(head(filter(bg_dependent_qa_2024$measure, !complete), 10L), width = Inf)
+print(head(bg_dependent_qa_2024$missing_sources, 10L), width = Inf)
 ```
 
 ## 2.8 Save 2020–2024 block-group-aggregated output
@@ -716,19 +790,23 @@ and corrected complete counts from validated sources, then runs the unchanged
 downstream formulas on both. `compare_socal_parity()` accepts an optional keyed
 `expected_count_corrections` table (default `NULL`). Each changed count or natural
 dependent cell must match both its legacy reference expectation and corrected
-candidate expectation. The fixed eligible field list excludes income, raw MOEs,
-inventory, flags, and pre-censoring rent shares; it never exempts an entire column.
+candidate expectation. The fixed eligible field list includes count-dependent
+income, MOEs, rent shares, and the top-code flag; inventory keeps its separate
+validation. Historical partial-count weights/shares are reconstructed only for
+parity. Every change must match both sides; no entire column is exempted.
 Existing income and geographic classifications, schema checks, and missing-reference
 reporting remain in force. Neither expectations nor diagnostics enter the Feather.
 
 ```{r acceptance-2024-bg-aggregated}
 report_tract_counties(acs_2024_bg_aggregated_interp, target_counties, "2024 block-group-aggregated destination counties")
 assert_rental_inventory(acs_2024_bg_aggregated_interp, inventory_2024_bg_aggregated, "2024 block-group-aggregated inventory before save")
+assert_bg_contributors(acs_2024_bg_allocations, bg_reference_2024)
 count_reconciliation_2024 <- assert_bg_count_aggregates(
-  acs_2024_bg_aggregated_interp, acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024
+  acs_2024_bg_aggregated_interp, bg_reconciliation_source_2024, bg_reference_2024, bg_count_qa_2024
 )
+assert_bg_dependent_measures(acs_2024_bg_aggregated_interp, bg_count_qa_2024)
 expected_count_corrections_2024 <- if (is.null(prior_outputs[["2024_bg_aggregated"]])) NULL else {
-  bg_count_parity_expectations(acs_2024_bg_allocations, bg_reference_2024)
+  bg_count_parity_expectations(acs_2024_bg_allocations, bg_reference_2024, bg_original_allocations_2024)
 }
 socal_parity_2024_bg_aggregated <- compare_socal_parity(
   acs_2024_bg_aggregated_interp, prior_outputs[["2024_bg_aggregated"]], southern_california_counties,
@@ -839,8 +917,8 @@ summary(acs_2024_bg_aggregated$med_hhincE)
 
 Re-loads the saved block-group output and checks key uniqueness, missingness on
 critical variables, the encoding of the flag columns, and the distribution of
-every numeric column. Count and inventory completeness/reconciliation repeat the
-pre-save checks using the saved estimates and separate source diagnostics.
+every numeric column. Count, inventory, and dependent-measure completeness checks
+repeat the pre-save checks using saved estimates and original source diagnostics.
 
 ```{r reload-step2}
 acs_2024_bg_aggregated_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2024_block_group_aggregated.feather"))
@@ -867,6 +945,7 @@ an empirical threshold.
 ```{r validate-missingness-step2}
 cat("acs_step2_2024_block_group_aggregated missing tr2010_id:", sum(is.na(acs_2024_bg_aggregated_out$tr2010_id)), "\n")
 cat("acs_step2_2024_block_group_aggregated missing interp_rent:", sum(is.na(acs_2024_bg_aggregated_out$interp_rent)), "\n")
+cat("acs_step2_2024_block_group_aggregated missing mf5E:", sum(is.na(acs_2024_bg_aggregated_out$mf5E)), "\n")
 ```
 
 ## 3.3 Check flag-variable encoding
@@ -882,6 +961,8 @@ flag_cols_2024_bg_aggregated <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs
 for (f in flag_cols_2024_bg_aggregated) {
   cat("acs_step2_2024_block_group_aggregated", f, "-> class:", class(acs_2024_bg_aggregated_out[[f]]),
       "| values:", paste(sort(unique(acs_2024_bg_aggregated_out[[f]])), collapse = ", "), "\n")
+  stopifnot(typeof(acs_2024_bg_aggregated_out[[f]]) == "double",
+            all(is.na(acs_2024_bg_aggregated_out[[f]]) | acs_2024_bg_aggregated_out[[f]] %in% c(0, 1)))
 }
 ```
 
@@ -903,8 +984,8 @@ The saved product reports missing distribution-based `interp_rent`. Review count
 differences without imposing an empirical missingness threshold. Income is retained independently of rent censoring; compare restored
 income values and downstream measures using the
 [income acceptance checks](notes/income_censoring.md#analyst-run-acceptance-checks).
-The existing income-MOE behavior is preserved; its research ambiguity remains a
-separate decision.
+The income-MOE weighting formula is preserved with the required-renter-count
+gate; its differing allocation family remains a separate research decision.
 
 ```{r validate-county-rent-step2}
 report_tract_counties(acs_2024_bg_aggregated_out, target_counties, "Saved 2024 block-group-aggregated counties")
@@ -927,13 +1008,14 @@ rent_share_count_completeness_2024 <- bg_count_qa_2024$measure |>
   summarise(required_counts_complete = all(complete), .groups = "drop")
 rent_share_qa_2024_bg_aggregated <- rent_share_qa_2024_bg_aggregated |>
   left_join(rent_share_count_completeness_2024, by = "tr2010_id", relationship = "one-to-one")
-rent_share_deferred_2024 <- rent_share_qa_2024_bg_aggregated |>
+rent_share_incomplete_2024 <- rent_share_qa_2024_bg_aggregated |>
   filter(!required_counts_complete)
-print(head(rent_share_deferred_2024, 10L), width = Inf)
-report_n(rent_share_deferred_2024, "Incomplete rent-share count groups deferred to Pass 3")
-complete_rent_shares <- filter(rent_share_qa_2024_bg_aggregated, required_counts_complete)
-stopifnot("Complete missing-rent shares must decompose into raw missing plus top-coded" = isTRUE(all.equal(
-  complete_rent_shares$pct_miss_rent, complete_rent_shares$pct_m_rent + complete_rent_shares$pct_tc_rent,
+print(head(rent_share_incomplete_2024, 10L), width = Inf)
+report_n(rent_share_incomplete_2024, "Incomplete rent-share count groups (all shares must be missing)")
+stopifnot(all(is.na(select(rent_share_incomplete_2024, pct_miss_rent, pct_m_rent, pct_tc_rent))))
+stopifnot("Missing-rent shares must decompose, including matching incompleteness" = isTRUE(all.equal(
+  rent_share_qa_2024_bg_aggregated$pct_miss_rent,
+  rent_share_qa_2024_bg_aggregated$pct_m_rent + rent_share_qa_2024_bg_aggregated$pct_tc_rent,
   tolerance = 1e-10
 )))
 for (column in c("pct_miss_rent", "pct_m_rent", "pct_tc_rent")) {
@@ -942,7 +1024,7 @@ for (column in c("pct_miss_rent", "pct_m_rent", "pct_tc_rent")) {
 }
 ```
 
-## 3.6 Check count and inventory completeness and reconciliation
+## 3.6 Check count, dependent-measure, and inventory reconciliation
 
 Missing inventory must agree exactly with `inventory_incomplete` by tract key.
 Every complete inventory must be finite, nonnegative, and equal to the sum of
@@ -958,7 +1040,7 @@ complete-target total is not an estimate for the entire sample. The source-first
 calculation adds components before weighting; the target-first calculation adds
 the separately aggregated components. Original allocation pairs/weights must still match the locked reference. All
 count families reconcile numerically over complete groups, while every incomplete
-measure must remain missing in the saved output.
+measure and any dependent result must remain missing in the saved output.
 
 ```{r validate-rental-inventory-step2}
 assert_rental_inventory(acs_2024_bg_aggregated_out, inventory_2024_bg_aggregated, "Saved 2024 block-group-aggregated inventory")
@@ -969,8 +1051,10 @@ print(bind_rows(`2024_bg_aggregated` = inventory_county_qa_2024_bg_aggregated, .
     width = Inf)
 print(bind_rows(`2024_bg_aggregated` = reconcile_rental_inventory(acs_2024_bg_allocations, inventory_2024_bg_aggregated,
     tr2010_id, weight_col = "wt_renthu"), .id = "product"), n = Inf, width = Inf)
-assert_bg_inventory_reference(acs_2024_bg_allocations, bg_reference_2024, inventory_2024_bg_aggregated)
+assert_bg_inventory_reference(bg_original_allocations_2024, bg_reference_2024, inventory_2024_bg_aggregated)
+assert_bg_contributors(acs_2024_bg_allocations, bg_reference_2024)
 saved_count_reconciliation_2024 <- assert_bg_count_aggregates(
-  acs_2024_bg_aggregated_out, acs_2024_bg_allocations, bg_reference_2024, bg_count_qa_2024
+  acs_2024_bg_aggregated_out, bg_reconciliation_source_2024, bg_reference_2024, bg_count_qa_2024
 )
+saved_dependent_qa_2024 <- assert_bg_dependent_measures(acs_2024_bg_aggregated_out, bg_count_qa_2024)
 ```

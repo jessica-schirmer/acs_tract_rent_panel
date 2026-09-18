@@ -22,6 +22,75 @@ bg_inventory_measure_map <- function() {
          family = "wt_renthu", source = measure)
 }
 
+# Reconstruct only the source transformations needed by count QA, from the
+# uncensored allocation snapshot rather than the mutable production frame.
+bg_reconciliation_sources <- function(original) {
+  original |>
+    mutate(rentE = if_else(rentE >= 3500, NA_real_, rentE),
+           mfE = mf_5_9E + mf_10_19E + mf_20_49E + mf_50E,
+           smfE = sfd_attE + duplexE + quadplexE)
+}
+
+# Transitive required counts, including count denominators of weighted results.
+# Missing source income/MOEs retain their established available-case treatment.
+bg_dependent_count_map <- function() {
+  c(bg_weighted_count_dependencies(), list(
+    nsfaE = c("smfE", "mf5E"),
+    pct_miss_rent = c("rhu_miss_rent", "rhuE"),
+    pct_m_rent = "rhuE", pct_tc_rent = "rhuE", tc_flag_rent_24 = "rhuE",
+    pctrhuE = c("rhuE", "huE"), pctvacE = c("tot_vacE", "tot_vac_baseE"),
+    pctblkE = c("pop_blkE", "pop_raceE"), pcthspE = c("pop_hspE", "pop_ethnE"),
+    pctaaE = c("pop_aaE", "pop_raceE"), pctsfdE = c("sfd_detE", "sfd_baseE"),
+    pctrvacE = c("rhuE", "vac_forrentE"), pctsvacE = c("ohuE", "vac_forsaleE"),
+    pctrhuM = c("rhuE", "huE", "rhu_baseE"),
+    pctblkM = c("pop_blkE", "pop_raceE", "popE"),
+    pcthspM = c("pop_hspE", "pop_ethnE", "pop_raceE", "popE"),
+    pctrhuCV = c("rhuE", "huE", "rhu_baseE"),
+    pctblkCV = c("pop_blkE", "pop_raceE", "popE"),
+    pcthspCV = c("pop_hspE", "pop_ethnE", "pop_raceE", "popE"),
+    rhuCV = "rhuE", huCV = "huE", popCV = "popE", med_hhincCV = c("hhE", "rhuE"),
+    interp_rent = c("rhucashE", paste0("grentcat", 1:24, "E"))
+  ))
+}
+
+bg_dependent_diagnostics <- function(diagnostics, measures = names(bg_dependent_count_map())) {
+  dependencies <- bg_dependent_count_map()[measures]
+  if (any(vapply(dependencies, is.null, logical(1)))) stop("Unknown BG dependent measure")
+  map <- tibble(dependent = rep(names(dependencies), lengths(dependencies)),
+                measure = unlist(dependencies, use.names = FALSE))
+  targets <- sort(unique(diagnostics$measure$tr2010_id))
+  required <- expand_grid(tr2010_id = targets, dependent = measures) |>
+    left_join(map, by = "dependent", relationship = "many-to-many") |>
+    left_join(diagnostics$measure, by = c("tr2010_id", "measure"), relationship = "many-to-one")
+  if (anyNA(required$complete)) stop("Missing BG dependent count diagnostics")
+  summary <- required |> group_by(tr2010_id, dependent) |>
+    summarise(complete = all(complete), zero_contributors = all(zero_contributors),
+              missing_counts = paste(measure[!complete], collapse = ", "), .groups = "drop")
+  missing_sources <- map |>
+    inner_join(diagnostics$missing_sources, by = "measure", relationship = "many-to-many") |>
+    select(tr2010_id, dependent, measure, bg2020_id, family, weight)
+  list(measure = summary, missing_sources = missing_sources)
+}
+
+# The default covers every saved dependent measure; pct_m_rent is diagnostic only.
+assert_bg_dependent_measures <- function(output, diagnostics,
+                                         measures = setdiff(names(bg_dependent_count_map()), "pct_m_rent")) {
+  qa <- bg_dependent_diagnostics(diagnostics, measures)
+  assert_tract_keys(output, unique(qa$measure$tr2010_id), "BG dependent completeness")
+  if (!all(measures %in% names(output)) ||
+      !all(vapply(output[measures], is.numeric, logical(1)))) stop("BG dependent columns missing or nonnumeric")
+  actual <- output |> select(tr2010_id, all_of(measures)) |>
+    pivot_longer(-tr2010_id, names_to = "dependent", values_to = "actual")
+  checked <- left_join(qa$measure, actual, by = c("tr2010_id", "dependent"), relationship = "one-to-one")
+  bad <- filter(checked, !complete & !is.na(actual))
+  if (nrow(bad)) {
+    print(head(bad, 10L), width = Inf)
+    print(head(semi_join(qa$missing_sources, bad, by = c("tr2010_id", "dependent")), 10L), width = Inf)
+    stop("BG dependent measure populated despite incomplete required counts")
+  }
+  invisible(qa)
+}
+
 bg_validate_links <- function(df) {
   keys <- c("bg2020_id", "tr2010_id")
   weights <- bg_weight_columns()
@@ -189,6 +258,12 @@ assert_bg_count_aggregates <- function(output, df, reference, diagnostics, toler
   if (any(!is.na(reconciliation$actual[!complete])) ||
       any(!is.finite(observed)) ||
       any(abs(observed - expected) > tolerance * pmax(1, abs(observed), abs(expected)))) {
+    bad <- reconciliation |>
+      filter((!complete & !is.na(actual)) |
+               (complete & (!is.finite(actual) |
+                              abs(actual - expected_total) > tolerance * pmax(1, abs(actual), abs(expected_total)))))
+    print(head(bad, 10L), width = Inf)
+    print(head(semi_join(diagnostics$missing_sources, bad, by = c("tr2010_id", "measure")), 10L), width = Inf)
     stop("BG aggregate counts disagree with source completeness or weighted totals")
   }
   invisible(reconciliation)
@@ -217,13 +292,40 @@ assert_bg_inventory_reference <- function(df, reference, inventory) {
   invisible(qa)
 }
 
-# Expectations isolate only the count policy. Income and raw MOEs are identical on
-# both sides; dependent fields use the unchanged production formula helpers.
-bg_count_parity_expectations <- function(df, reference) {
+# Historical partial-count weights are reconstructed only for two-sided parity.
+bg_legacy_weighted_values <- function(df) {
+  df |> group_by(tr2010_id) |>
+    mutate(rel_wt_rhu = rhuE * wt_renthu / sum(rhuE * wt_renthu, na.rm = TRUE),
+           rel_wt_hu = huE * wt_hu / sum(huE * wt_hu, na.rm = TRUE),
+           rel_wt_pop = popE * wt_pop / sum(popE * wt_pop, na.rm = TRUE)) |>
+    summarise(
+      med_hhincE = weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE),
+      med_hhincM = weightedMean(med_hhincM, w = rhuE * wt_renthu, na.rm = TRUE),
+      rhuM = if (sum(rhuE * wt_renthu, na.rm = TRUE) != 0)
+        sqrt(sum((rhuM * rel_wt_rhu)^2, na.rm = TRUE)) else NA_real_,
+      across(all_of(c("rhu_baseM", "tot_vacM", "tot_vac_baseM", "sfd_detM", "sfd_baseM")),
+             ~ sqrt(sum((.x * rel_wt_hu)^2, na.rm = TRUE))),
+      across(all_of(c("pop_blkM", "pop_hspM", "pop_aaM", "pop_raceM")),
+             ~ sqrt(sum((.x * rel_wt_pop)^2, na.rm = TRUE))),
+      huM = if (sum(huE * wt_hu, na.rm = TRUE) != 0)
+        sqrt(sum((huM * rel_wt_hu)^2, na.rm = TRUE)) else NA_real_,
+      popM = if (sum(popE * wt_pop, na.rm = TRUE) != 0)
+        sqrt(sum((popM * rel_wt_pop)^2, na.rm = TRUE)) else NA_real_,
+      .groups = "drop")
+}
+
+# Expectations isolate the count policy, including newly gated dependent cells.
+# Income's independent rent-censoring correction keeps its own notebook audit.
+bg_count_parity_expectations <- function(df, reference, uncensored_df) {
   qa <- bg_aggregation_diagnostics(df, reference)
+  assert_bg_contributors(uncensored_df, reference)
   corrected <- calc_agg_vars(df, tr2010_id) |> rename(mf5E = mfE)
   map <- bg_count_measure_map()
   legacy <- corrected
+  old_weighted <- bg_legacy_weighted_values(df)
+  for (column in names(bg_weighted_count_dependencies())) {
+    legacy[[column]] <- old_weighted[[column]][match(legacy$tr2010_id, old_weighted$tr2010_id)]
+  }
   for (i in seq_len(nrow(map))) {
     values <- bg_measure_values(df, map$source[i])
     source <- df |> ungroup() |>
@@ -234,7 +336,19 @@ bg_count_parity_expectations <- function(df, reference) {
     corrected[[map$measure[i]]] <- expected$expected_total[match(corrected$tr2010_id, expected$tr2010_id)]
     legacy[[map$measure[i]]] <- old$value[match(legacy$tr2010_id, old$tr2010_id)]
   }
-  derive <- function(counts) {
+  legacy_shares <- uncensored_df |> group_by(tr2010_id) |>
+    summarise(total = sum(rhuE * wt_renthu, na.rm = TRUE),
+              topcoded = sum((!is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
+              .groups = "drop") |>
+    transmute(tr2010_id, pct_tc_rent = if_else(total > 0, topcoded / total, NA_real_),
+              tc_flag_rent_24 = if_else(!is.na(pct_tc_rent) & pct_tc_rent > 0, 1, 0))
+  corrected_shares <- calc_pct_tc_m(uncensored_df, tr2010_id) |>
+    select(tr2010_id, pct_tc_rent) |>
+    left_join(select(corrected, tr2010_id, rhuE), by = "tr2010_id", relationship = "one-to-one") |>
+    mutate(tc_flag_rent_24 = if_else(is.na(rhuE), NA_real_,
+                                    if_else(!is.na(pct_tc_rent) & pct_tc_rent > 0, 1, 0))) |>
+    select(-rhuE)
+  derive <- function(counts, shares) {
     counts |> calc_missing_vars() |> calc_pct_vars() |> calc_cv(source = "bg_agg") |>
       mutate(nsfaE = smfE + mf5E,
              pctrvacE = if_else((rhuE + vac_forrentE) > 0,
@@ -242,11 +356,12 @@ bg_count_parity_expectations <- function(df, reference) {
              pctsvacE = if_else((ohuE + vac_forsaleE) > 0,
                                 vac_forsaleE / (ohuE + vac_forsaleE), NA_real_)) |>
       left_join(calc_interp_rent(counts), by = "tr2010_id", relationship = "one-to-one") |>
+      left_join(shares, by = "tr2010_id", relationship = "one-to-one") |>
       select(tr2010_id, all_of(bg_count_correction_columns())) |>
       pivot_longer(-tr2010_id, names_to = "variable", values_to = "value")
   }
-  left_join(derive(legacy) |> rename(legacy = value),
-            derive(corrected) |> rename(corrected = value),
+  left_join(derive(legacy, legacy_shares) |> rename(legacy = value),
+            derive(corrected, corrected_shares) |> rename(corrected = value),
             by = c("tr2010_id", "variable"), relationship = "one-to-one") |>
     filter(xor(is.na(legacy), is.na(corrected)) |
              (!is.na(legacy) & !is.na(corrected) & legacy != corrected))
