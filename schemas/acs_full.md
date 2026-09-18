@@ -17,7 +17,7 @@ the fixed schema migration below, announced replacement, and saved-value checks.
 See the [Step 4 diagnostic workflow](../README.md#step-4-create-acs-panel-and-compare-revised-measurement-sources).
 
 **Grain:** one row per 2010-vintage tract in the five Southern California plus
-nine Bay Area counties configured in [02_assemble.Rmd](../02_assemble.Rmd) §1.3
+nine Bay Area counties configured in [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd) §1.3
 (the union of the 2016 and block-group-aggregated 2024 `tr2010_id` keys).
 **Key:** `tr2010_id` (unique, non-missing).
 

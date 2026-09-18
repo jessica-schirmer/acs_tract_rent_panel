@@ -1,5 +1,11 @@
 **ACS tract pipeline: Bay Area extension inspection**
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 Inspection date: 2026-09-11. Scope: [task_spec_01_inspect.md](../task_spec_01_inspect.md).
 
 The recommendation is to **lightly parameterize the existing R pipeline, then
@@ -37,7 +43,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
    | Stage | Main work and outputs |
    |---|---|
    | [01_acs.Rmd](../01_acs.Rmd), using [R/helpers.R](../R/helpers.R) | Downloads statewide 2012–2016 tract and 2020–2024 block-group ACS estimates/MOEs; derives low-rent counts; imports NHGIS crosswalks. Writes `acs_step1_16.feather`, `acs_step1_24.feather`, and two crosswalk Feathers. |
-   | [02_assemble.Rmd](../02_assemble.Rmd), using [R/assemble_helpers.R](../R/assemble_helpers.R) | Selects counties, allocates 2024 block groups to 2010 tracts, censors rent, aggregates measures, and calculates interpolated rent, shares, vacancy rates, flags, and uncertainty. Writes both `acs_step2_*` files. |
+   | [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), using [R/assemble_helpers.R](../R/assemble_helpers.R) | Selects counties, allocates 2024 block groups to 2010 tracts, censors rent, aggregates measures, and calculates interpolated rent, shares, vacancy rates, flags, and uncertainty. Writes both `acs_step2_*` files. |
    | [04_merge.Rmd](../04_merge.Rmd), using [R/merge_helpers.R](../R/merge_helpers.R) | Selects and suffixes measures, multiplies 2016 dollar estimates/MOEs by 1.307, full-joins surveys, and calculates change measures. Writes `acs_full.feather`. |
 
    Outputs meet downstream stages through shared `ADU_Rent/data/` filenames.
@@ -49,7 +55,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
 
    Import geography is statewide: both ACS calls specify `state = "CA"`, and
    NHGIS filenames identify California. The assembled sample is controlled by
-   one `scag_counties` vector in [02_assemble.Rmd](../02_assemble.Rmd), §1.3:
+   one `scag_counties` vector in [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), §1.3:
    Los Angeles `037`, Orange `059`, Riverside `065`, San Bernardino `071`, and
    Ventura `111`. Thus “Southern California” currently means these five
    counties; Imperial and San Diego are excluded.
@@ -88,7 +94,7 @@ added 2024 tract-source inventory uses direct tract sums with the same missingne
    into an Alameda tract. A Bay Area source-only filter would omit it.
 
    These arise from the source-geography restriction before aggregation in
-   [02_assemble.Rmd](../02_assemble.Rmd), §2.2. Retain the original allocation
+   [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), §2.2. Retain the original allocation
    weights; destination filtering must not renormalize a source’s retained
    fractions.
 

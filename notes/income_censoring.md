@@ -1,5 +1,11 @@
 # Income censoring: analyst decision and correction
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 **Status:** Implemented following the analyst's decision in
 [task_spec_04_confirm_plan.md](../task_spec_04_confirm_plan.md) and subsequent
 authorization to implement the plan. Median household income is retained
@@ -21,7 +27,7 @@ Historical filenames and empirical results below remain unchanged.
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),
 [tests/test_income_censoring.R](../tests/test_income_censoring.R), this note,
-[02_assemble.Rmd](../02_assemble.Rmd) (income expectations, parity calls, and prose),
+[02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd) (income expectations, parity calls, and prose),
 [acs_step2_16.md](../schemas/acs_step2_16.md),
 [acs_step2_24.md](../schemas/acs_step2_24.md), and the income-status passage in
 [README.md](../README.md).
@@ -53,7 +59,7 @@ returns `NA`, so the absence of a true condition does **not** make it inactive.
 Already missing income stays missing. The helper does not consult renter counts
 or apply a threshold to income itself. No rows are dropped.
 
-The calls in [02_assemble.Rmd](../02_assemble.Rmd) applied this rule to 2024
+The calls in [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd) applied this rule to 2024
 block-group allocation rows in §2.4, before tract aggregation, and directly to
 2016 tracts in §3.2. In 2024, `calc_agg_vars()` uses
 `weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`. Under the old helper,

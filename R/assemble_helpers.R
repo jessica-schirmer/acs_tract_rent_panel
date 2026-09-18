@@ -1,10 +1,10 @@
 # assemble_helpers.R -----------------------------------------------------
-# Helper functions for 02_assemble.Rmd (Step 2: assemble geographically
+# Helper functions for both Step 2 notebooks (assemble geographically
 # consistent 2010-tract measures from 2020-2024 block groups, and prepare the
-# 2012-2016 tract measures).
+# native 2012-2016 and 2020-2024 tract measures).
 #
-# This file is intentionally SELF-CONTAINED: 02_assemble.Rmd sources only this
-# file. It therefore carries its own copies of a few small generic/diagnostic
+# This file keeps measurement and I/O helpers self-contained. It carries
+# its own copies of a few small generic/diagnostic
 # helpers (save_data, report_n, report_drop, print_numeric_summary, fmt_num) and
 # its own `summ_var()` — which is a DISTRIBUTION-focused variant, distinct from
 # the MOE/CV-focused `summ_var()` in R/helpers.R used by 01_acs.Rmd. Keeping the
@@ -774,4 +774,20 @@ print_numeric_summary <- function(df, name = NULL) {
                 col, fmt_num(mn), fmt_num(lo), fmt_num(hi)))
   }
   invisible(df)
+}
+
+# Read only the explicitly mapped product references, retaining named NULL entries.
+read_step2_parity_references <- function(reference_dir, reference_files) {
+  prior_outputs <- lapply(names(reference_files), function(product) {
+    path <- file.path(reference_dir, reference_files[[product]])
+    if (file.exists(path)) {
+      cat("Reading parity reference before saving:", path, "\n")
+      arrow::read_feather(path)
+    } else {
+      cat("PARITY NOT CHECKED for", product, ": reference absent at", path, "\n")
+      NULL
+    }
+  })
+  names(prior_outputs) <- names(reference_files)
+  prior_outputs
 }

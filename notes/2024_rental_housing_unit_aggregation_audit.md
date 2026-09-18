@@ -1,7 +1,13 @@
 # Audit: 2024 rental housing unit aggregation
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 Reviewed 2026-09-11 at commit `1e07d96`. Scope: renter **count estimates** in
-[02_assemble.Rmd](../02_assemble.Rmd#L151), from available block-group counts and
+[02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), from available block-group counts and
 crosswalk fractions through the saved 2010-tract counts. This assessment does
 not validate the separate rent statistics, share measures, or MOEs/CVs.
 
@@ -70,7 +76,7 @@ fractions explain why these counts differ.
 Selection uses the destination tract's state/county, preserving all matched
 sources allocating there, including sources outside the 14 target counties.
 Original fractions are not renormalized after destination filtering.
-[The notebook](../02_assemble.Rmd#L197) asserts unique source IDs, unique
+[The notebook](../02a_aggregate_2024_block_groups.Rmd) asserts unique source IDs, unique
 `(bg2020_id, tr2010_id)` pairs, no join multiplication, and exact fraction
 preservation. Later tract joins assert unique, fully matched tract keys.
 The cached IDs are character GEOIDs with the expected 12-/11-digit lengths.
@@ -126,7 +132,7 @@ the excluded allocation explains the total difference. Rounding errors are
 well within the notebook's `1e-6` source-fraction tolerance. All 5,513 saved
 values matched for each of `rhuE`, `rhucashE`, `rhu_lrE`, and `rhu_lr2E`.
 There is no unexplained systematic loss or inflation in these cached counts.
-The existing [tract reconciliation](../02_assemble.Rmd#L454) repeats the same
+The existing [tract reconciliation](../02a_aggregate_2024_block_groups.Rmd) repeats the same
 `na.rm = TRUE` formula; it alone cannot detect missing-count omission.
 
 **Panel comparability.** The earlier measure is the same `B25003_003E` universe
@@ -140,7 +146,7 @@ all renters within each source. Earlier low-rent thresholds are below $1,000
 and $1,500, versus $1,250 and $2,000 in 2024, so their intended real-threshold
 comparability is approximate. ([Earlier extraction](../01_acs.Rmd#31-download-2016-acs-tract-estimates),
 [shared variable mapping](../01_acs.Rmd#22-specify-variables-to-extract),
-[earlier preparation](../02_assemble.Rmd#L745),
+[earlier preparation](../02a_aggregate_2024_block_groups.Rmd),
 [threshold definitions](../schemas/acs_step1_2016_tract.md),
 [2016 B25003](https://api.census.gov/data/2016/acs/acs5/groups/B25003.html).)
 

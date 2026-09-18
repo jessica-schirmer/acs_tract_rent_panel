@@ -1,4 +1,4 @@
-# Geographic and key diagnostics shared by 02_assemble.Rmd, 03_tract_change.Rmd, and 04_merge.Rmd.
+# Geographic and key diagnostics shared by both Step 2 notebooks, 03_tract_change.Rmd, and 04_merge.Rmd.
 # Uses the notebooks' existing dplyr/tidyr packages; does not modify outputs.
 
 assert_unique_key <- function(df, key, label) {
@@ -242,4 +242,21 @@ audit_panel_keys <- function(df, keys_16, keys_24) {
           dplyr::count(county, membership, name = "tracts"), n = Inf)
   print(filter(audit, membership != "both"), n = Inf)
   invisible(audit)
+}
+
+# Named regional county vectors and their unchanged union for Step 2.
+step2_target_counties <- function() {
+  # County FIPS codes within California (state code "06").
+  southern_california_counties <- c(
+    "Los Angeles" = "037", "Orange" = "059", "Riverside" = "065",
+    "San Bernardino" = "071", "Ventura" = "111"
+  )
+  bay_area_counties <- c(
+    "Alameda" = "001", "Contra Costa" = "013", "Marin" = "041", "Napa" = "055",
+    "San Francisco" = "075", "San Mateo" = "081", "Santa Clara" = "085",
+    "Solano" = "095", "Sonoma" = "097"
+  )
+  target_counties <- union(unname(southern_california_counties), unname(bay_area_counties))
+  list(southern_california_counties = southern_california_counties,
+       bay_area_counties = bay_area_counties, target_counties = target_counties)
 }

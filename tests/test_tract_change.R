@@ -123,12 +123,7 @@ local({
   env <- new.env(parent = environment())
   quiet(eval(notebook_chunk("target-county-config"), env))
   assembly_config <- new.env()
-  for (expr in notebook_chunk("set-paths", "02_assemble.Rmd")) {
-    if (is.call(expr) && identical(expr[[1]], as.name("<-")) &&
-        as.character(expr[[2]]) %in% c("southern_california_counties", "bay_area_counties")) {
-      eval(expr, assembly_config)
-    }
-  }
+  quiet(eval(notebook_chunk("set-paths", "02b_prepare_tract_sources.Rmd"), assembly_config))
   stopifnot(identical(env$southern_california_counties, assembly_config$southern_california_counties),
             identical(env$bay_area_counties, assembly_config$bay_area_counties))
   in_county <- function(x, county) mutate(x, tr2020_id = paste0("06", county, substr(tr2020_id, 6, 11)))

@@ -111,7 +111,7 @@ expect_error(diagnostic_summary(c(1, Inf)), "finite")
 # Exercise actual notebook chunks using all configured counties and temporary
 # inputs, including a baseline-only tract and a block-group-only tract.
 county_env <- new.env(parent = globalenv())
-eval(notebook_chunk("set-paths", "02_assemble.Rmd"), county_env)
+eval(notebook_chunk("set-paths", "02a_aggregate_2024_block_groups.Rmd"), county_env)
 base_ids <- paste0("06", county_env$target_counties, "000100")
 ids_16 <- c(base_ids, tract_id(c(901, 903, 904)))
 ids_bg <- c(base_ids, tract_id(902))

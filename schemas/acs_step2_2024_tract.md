@@ -1,6 +1,6 @@
 # Schema: `acs_step2_2024_tract.feather`
 
-**Produced by:** `02_assemble.Rmd` §4 (Step 2) · **Source:** `acs_step1_2024_tract.feather`
+**Produced by:** `02b_prepare_tract_sources.Rmd` §3 (Step 2) · **Source:** `acs_step1_2024_tract.feather`
 
 **Grain:** one row per native 2020-vintage California tract in the five Southern
 California and nine Bay Area counties configured by `target_counties` in §1.3.
@@ -96,7 +96,7 @@ retains component totals (`inventory_rhuE`, `inventory_vac_forrentE`,
 Every direct tract has one contributor, including a tract whose components
 are all zero. Existing occupied `rhuE` and rate denominators retain their meanings.
 
-Before saving and after reloading (§5.6), inventory missingness must match its
+Before saving and after reloading (§4.6), inventory missingness must match its
 keyed completeness diagnostic and complete inventories must equal their three
 component totals. Source-first and target-first sums reconcile over complete
 targets only; incomplete targets and missing components are reported separately.

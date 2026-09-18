@@ -1,5 +1,11 @@
 # Finding: `calc_pct_tc_m()` name-shadowing bug — and why `pct_miss_rent` was unaffected
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 **Date:** 2026-06-12
 **Fixed in commit:** `1a7ac1a` ("Carry corrected pct_tc_rent share into acs_full; fix calc_pct_tc_m shadowing bug")
 **Files:** `R/assemble_helpers.R` (`calc_pct_tc_m()`), surfaced while adding `pct_tc_rent` to `02_assemble.Rmd` / `04_merge.Rmd`.

@@ -1,7 +1,13 @@
 # Audit: 2024 block-group-to-tract rent weighting
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 Reviewed 2026-09-11 at commit `b4ab25e`. Scope: the rent calculations in
-[02_assemble.Rmd](../02_assemble.Rmd#L299), starting with available ACS source
+[02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), starting with available ACS source
 estimates and crosswalk allocations; earlier-vintage inspection was limited to
 conceptual comparability.
 
@@ -70,8 +76,8 @@ contributes 25/75 units, not 100 to each tract. Original fractions are preserved
 when destinations are restricted, and pair uniqueness is asserted. `_agg`
 summary names preserve the source `rhuE` vector during calculation. Precomputed
 `rel_wt_rhu = q_bt / sum(q_bt)` is not used for `rentE` or `rentM`.
-([Allocation checks](../02_assemble.Rmd#L197),
-[weight preservation](../02_assemble.Rmd#L319).)
+([Allocation checks](../02a_aggregate_2024_block_groups.Rmd),
+[weight preservation](../02a_aggregate_2024_block_groups.Rmd).)
 
 **Statistical limits remain.** Medians cannot generally be combined by averaging;
 even changing to a weighted median of source medians would not recover the pooled

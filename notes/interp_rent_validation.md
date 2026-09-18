@@ -38,7 +38,7 @@ rent-related columns, and ran targeted calculations in memory. It did not run
 or knit an entire notebook, download new ACS observations, or regenerate data.
 The only repository write is this note.
 
-The [configured sample](../02_assemble.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
+The [configured sample](../02a_aggregate_2024_block_groups.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
 and nine Bay Area counties, selected by **destination 2010 tract**. Of 29,740
 statewide crosswalk rows, 19,807 point to the target tracts. Following the
 notebook, one unmatched source link with all four allocation weights equal to

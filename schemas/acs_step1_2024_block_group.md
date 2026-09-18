@@ -69,7 +69,7 @@ requires exact Feather readback of row counts, keys/row order, column names/orde
 storage types/classes, and values against the validated in-memory extract.
 These checks add no output columns or measures.
 
-**Downstream:** `02_assemble.Rmd` continues to aggregate this block-group table
+**Downstream:** `02a_aggregate_2024_block_groups.Rmd` continues to aggregate this block-group table
 to 2010 tracts using `xwalk_bg24_tr10.feather`. See `01_acs.Rmd` §§4.1 and 6.1.
 The separate [2024 tract input](acs_step1_2024_tract.md) is consumed by the
 native-2020 tract path in Step 2 §4. Generate this file from the revised stage 1; the old cache cannot

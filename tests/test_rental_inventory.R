@@ -12,6 +12,7 @@ suppressPackageStartupMessages({
 })
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
+source(here::here("R", "acs_input_qa.R"))
 
 quiet <- function(expr) {
   invisible(capture.output(value <- force(expr)))
@@ -143,8 +144,10 @@ expect_error(calc_rental_inventory(bind_rows(one, one), tr2010_id), "unique trac
 cat("Passed: component sums, split/fractional allocations, missingness, zero links, and input validation.\n")
 
 # Run actual notebook joins and downstream measures with/without inventory.
-notebook_lines <- readLines(here::here("02_assemble.Rmd"))
-run_chunk <- function(label, env) {
+bg_notebook <- "02a_aggregate_2024_block_groups.Rmd"
+tract_notebook <- "02b_prepare_tract_sources.Rmd"
+run_chunk <- function(label, env, notebook) {
+  notebook_lines <- readLines(here::here(notebook))
   start <- match(paste0("```{r ", label, "}"), notebook_lines)
   stopifnot(!is.na(start))
   end <- which(seq_along(notebook_lines) > start & notebook_lines == "```")[1]
@@ -180,8 +183,8 @@ legacy_import$load_data <- function(path, folder = NULL, name) {
     acs_step1_2016_tract.feather = legacy_16_input,
     xwalk_bg24_tr10.feather = select(legacy_bg_input, bg2020_id, tr2010_id, starts_with("wt_")))
 }
-run_chunk("import-bg-and-xwalk-2024-bg-aggregated", legacy_import)
-run_chunk("load-restrict-16", legacy_import)
+run_chunk("import-bg-and-xwalk-2024-bg-aggregated", legacy_import, bg_notebook)
+run_chunk("load-restrict-16", legacy_import, tract_notebook)
 stopifnot(identical(legacy_import$acs_2024_bg_source, select(legacy_bg_input, -rhu_lrE, -rhu_lr2E)),
           identical(legacy_import$acs_16, select(legacy_16_input, -rhu_lrE, -rhu_lr2E)))
 
@@ -194,7 +197,7 @@ assemble_24 <- function(include_inventory) {
   chunks <- c("relative-weights-and-tc-2024-bg-aggregated", "censor-and-structure-2024-bg-aggregated", "aggregate-to-tracts-2024-bg-aggregated",
               "aggregate-supplemental-2024-bg-aggregated", if (include_inventory) "rental-inventory-2024-bg-aggregated",
               "derive-measures-2024-bg-aggregated", "merge-flags-2024-bg-aggregated")
-  for (chunk in chunks) run_chunk(chunk, env)
+  for (chunk in chunks) run_chunk(chunk, env, bg_notebook)
   env
 }
 assemble_16 <- function(include_inventory) {
@@ -204,7 +207,7 @@ assemble_16 <- function(include_inventory) {
     select(-bg2020_id, -starts_with("wt_"))
   env$target_tract_ids_16 <- env$acs_16$tr2010_id
   chunks <- c("flag-censor-16", "structure-pct-cv-16", if (include_inventory) "rental-inventory-16")
-  for (chunk in chunks) run_chunk(chunk, env)
+  for (chunk in chunks) run_chunk(chunk, env, tract_notebook)
   env
 }
 with_24 <- assemble_24(TRUE)
@@ -224,7 +227,7 @@ stopifnot(identical(with_24$acs_2024_bg_allocations, without_24$acs_2024_bg_allo
 
 # Exercise the new native-2020 tract path using documented source columns.
 configured_env <- new.env(parent = environment())
-run_chunk("set-paths", configured_env)
+run_chunk("set-paths", configured_env, tract_notebook)
 native_ids <- c(sprintf("06037%06d", 1:8),
                 paste0("06", configured_env$target_counties, "000009"), "06073000001")
 native_source <- assembly_sources[rep(1L, length(native_ids)), ] |>
@@ -250,7 +253,7 @@ native_source$vac_forsaleE[5] <- 0
 
 assemble_2024_tract <- function(source = native_source, counties = "037", reference = NULL) {
   env <- new.env(parent = environment())
-  run_chunk("set-paths", env)
+  run_chunk("set-paths", env, tract_notebook)
   if (!is.null(counties)) env$target_counties <- counties
   env$prior_outputs <- list(`2024_tract` = reference)
   env$load_data <- function(path, folder = NULL, name) {
@@ -260,7 +263,7 @@ assemble_2024_tract <- function(source = native_source, counties = "037", refere
   for (chunk in c("load-restrict-2024-tract", "income-source-2024-tract",
                   "flag-censor-2024-tract", "structure-pct-cv-2024-tract",
                   "rental-inventory-2024-tract", "acceptance-2024-tract")) {
-    run_chunk(chunk, env)
+    run_chunk(chunk, env, tract_notebook)
   }
   env
 }
@@ -315,48 +318,148 @@ expect_error(assemble_2024_tract(reference = select(native_out, -rhu_inventoryE)
 expect_error(assemble_2024_tract(reference = with_24$acs_2024_bg_aggregated_interp), "unapproved schema")
 cat("Passed: native tract filtering, retained source fields/income, flags, derived measures, inventory, and strict source-specific parity.\n")
 
-saved_env <- with_24
-saved_env$acs_16 <- with_16$acs_16
-saved_env$inventory_16 <- with_16$inventory_16
-saved_env$inventory_missing_sources_16 <- with_16$inventory_missing_sources_16
-saved_env$inventory_county_qa_16 <- with_16$inventory_county_qa_16
-saved_env$target_tract_ids_16 <- with_16$target_tract_ids_16
-saved_env$target_counties <- "037"
-saved_env$rent_raw_qa_16 <- tibble(county = "037", tracts = nrow(with_16$acs_16))
-for (name in ls(native, pattern = "2024_tract$")) assign(name, get(name, native), saved_env)
-validate_saved_products <- function(env) {
+# Each product environment has no access to the other notebook's bindings.
+bg_saved <- with_24
+tract_saved <- with_16
+for (name in ls(native, pattern = "2024_tract$")) assign(name, get(name, native), tract_saved)
+tract_saved$rent_raw_qa_16 <- tibble(county = "037", tracts = nrow(with_16$acs_16))
+validate_saved_products <- function(env, notebook, saves, products, filenames, references) {
   directory <- tempfile("step2-synthetic-")
   dir.create(directory)
   on.exit(unlink(directory, recursive = TRUE))
+  # Load notebook helpers into an isolated parent; fixture globals cannot leak in.
+  helper_env <- new.env(parent = parent.env(globalenv()))
+  for (file in c("assemble_helpers.R", "geography_qa.R")) {
+    sys.source(here::here("R", file), helper_env)
+  }
+  parent.env(env) <- helper_env
+  env$target_counties <- "037"
   env$data_dir <- paste0(directory, "/")
-  for (chunk in c("save-16", "save-2024-bg-aggregated", "save-2024-tract")) run_chunk(chunk, env)
-  stopifnot(setequal(list.files(directory), c("acs_step2_2016_tract.feather",
-                                             "acs_step2_2024_block_group_aggregated.feather",
-                                             "acs_step2_2024_tract.feather")))
+  for (chunk in saves) run_chunk(chunk, env, notebook)
+  stopifnot(setequal(list.files(directory), filenames))
   for (chunk in c("reload-step2", "validate-keys-step2", "validate-missingness-step2",
                   "validate-flags-step2", "validate-numeric-step2",
-                  "validate-county-rent-step2", "validate-rental-inventory-step2")) run_chunk(chunk, env)
+                  "validate-county-rent-step2", "validate-rental-inventory-step2")) {
+    run_chunk(chunk, env, notebook)
+  }
   env$parity_reference_dir <- file.path(directory, "references")
   dir.create(env$parity_reference_dir)
-  run_chunk("load-parity-references", env)
-  stopifnot(identical(names(env$prior_outputs), c("16", "2024_bg_aggregated", "2024_tract")),
+  # A corrupt unrelated product must never be opened by this notebook.
+  unrelated <- if (notebook == bg_notebook) "acs_step2_16.feather" else "acs_step2_24.feather"
+  writeLines("unrelated product", file.path(env$parity_reference_dir, unrelated))
+  run_chunk("load-parity-references", env, notebook)
+  stopifnot(identical(names(env$prior_outputs), names(references)),
             all(vapply(env$prior_outputs, is.null, logical(1))))
-  write_feather(env$acs_16, file.path(env$parity_reference_dir, "acs_step2_16.feather"))
-  write_feather(env$acs_2024_bg_aggregated_interp, file.path(env$parity_reference_dir, "acs_step2_24.feather"))
-  write_feather(env$acs_2024_tract, file.path(env$parity_reference_dir, "acs_step2_2024_tract.feather"))
+  for (i in seq_along(references)) {
+    write_feather(get(products[i], env), file.path(env$parity_reference_dir, references[i]))
+    # Exercise partially present maps as well as all-missing/all-present maps.
+    run_chunk("load-parity-references", env, notebook)
+    stopifnot(identical(names(env$prior_outputs), names(references)))
+    for (j in seq_along(references)) {
+      stopifnot(if (j <= i) identical(env$prior_outputs[[j]], get(products[j], env))
+                else is.null(env$prior_outputs[[j]]))
+    }
+  }
   reference_hashes <- tools::md5sum(list.files(env$parity_reference_dir, full.names = TRUE))
-  run_chunk("load-parity-references", env)
-  stopifnot(identical(env$prior_outputs[["16"]], env$acs_16),
-            identical(env$prior_outputs[["2024_bg_aggregated"]], env$acs_2024_bg_aggregated_interp),
-            identical(env$prior_outputs[["2024_tract"]], env$acs_2024_tract),
-            identical(reference_hashes, tools::md5sum(names(reference_hashes))))
+  run_chunk("load-parity-references", env, notebook)
+  stopifnot(identical(reference_hashes, tools::md5sum(names(reference_hashes))))
 }
-validate_saved_products(saved_env)
-saved_env$acs_2024_bg_aggregated_out$pctrvacE[1] <- saved_env$acs_2024_bg_aggregated_out$pctrvacE[1] + 0.01
-expect_error(run_chunk("validate-rental-inventory-step2", saved_env), "Saving must preserve every 2024 block-group-aggregated value")
-saved_env$acs_2024_bg_aggregated_out <- saved_env$acs_2024_bg_aggregated_interp
-saved_env$acs_2024_tract_out$rent1bdrE[1] <- saved_env$acs_2024_tract_out$rent1bdrE[1] + 1
-expect_error(run_chunk("validate-rental-inventory-step2", saved_env), "Saving must preserve every 2024 tract-source value")
+validate_saved_products(bg_saved, bg_notebook, "save-2024-bg-aggregated",
+  "acs_2024_bg_aggregated_interp", "acs_step2_2024_block_group_aggregated.feather",
+  c(`2024_bg_aggregated` = "acs_step2_24.feather"))
+validate_saved_products(tract_saved, tract_notebook, c("save-16", "save-2024-tract"),
+  c("acs_16", "acs_2024_tract"), c("acs_step2_2016_tract.feather", "acs_step2_2024_tract.feather"),
+  c(`16` = "acs_step2_16.feather", `2024_tract` = "acs_step2_2024_tract.feather"))
+bg_saved$acs_2024_bg_aggregated_out$pctrvacE[1] <- bg_saved$acs_2024_bg_aggregated_out$pctrvacE[1] + 0.01
+expect_error(run_chunk("validate-rental-inventory-step2", bg_saved, bg_notebook), "Saving must preserve every 2024 block-group-aggregated value")
+bg_saved$acs_2024_bg_aggregated_out <- bg_saved$acs_2024_bg_aggregated_interp
+tract_saved$acs_2024_tract_out$rent1bdrE[1] <- tract_saved$acs_2024_tract_out$rent1bdrE[1] + 1
+expect_error(run_chunk("validate-rental-inventory-step2", tract_saved, tract_notebook), "Saving must preserve every 2024 tract-source value")
+tract_saved$acs_2024_tract_out <- tract_saved$acs_2024_tract
+tract_saved$acs16_out$rentE[1] <- 1
+expect_error(run_chunk("validate-rental-inventory-step2", tract_saved, tract_notebook), "Saving must preserve every 2016 value")
+tract_saved$acs16_out <- tract_saved$acs_16
+
+# Optional post-cleanup baseline captured before this structural refactor.
+baseline_path <- Sys.getenv("STEP2_SPLIT_BASELINE")
+if (nzchar(baseline_path)) {
+  stopifnot(identical(readRDS(baseline_path), list(
+    bg = with_24$acs_2024_bg_aggregated_interp, tract16 = with_16$acs_16, tract24 = native_out)))
+  cat("Passed: exact pre-split fixture parity for all three product tables.\n")
+}
+
+# Execute each notebook's complete operational chunk sequence on small fixtures,
+# with only its declared input files and no access to the test's global objects.
+run_isolated_notebook <- function(notebook, inputs, outputs, helper_dir = here::here("R")) {
+  directory <- tempfile("step2-isolated-")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE))
+  for (name in names(inputs)) write_feather(inputs[[name]], file.path(directory, name))
+  env <- new.env(parent = parent.env(globalenv()))
+  for (file in c("assemble_helpers.R", "geography_qa.R")) sys.source(file.path(helper_dir, file), env)
+  lines <- readLines(notebook, warn = FALSE)
+  starts <- which(startsWith(lines, "```{r"))
+  for (start in starts) {
+    label <- sub("^```\\{r ([^,}]+).*", "\\1", lines[start])
+    if (label %in% c("setup", "load-packages", "load-helpers") ||
+        grepl("eval=FALSE", lines[start], fixed = TRUE)) next
+    end <- which(seq_along(lines) > start & lines == "```")[1]
+    quiet(eval(parse(text = lines[seq.int(start + 1L, end - 1L)]), env))
+    if (label == "set-paths") {
+      env$data_dir <- paste0(directory, "/")
+      env$parity_reference_dir <- file.path(directory, "absent-references")
+      env$target_counties <- "037"
+    }
+  }
+  stopifnot(setequal(list.files(directory), c(names(inputs), outputs)))
+  setNames(lapply(file.path(directory, outputs), read_feather), outputs)
+}
+fixture_bg <- assembly_sources |> select(-tr2010_id, -starts_with("wt_")) |> distinct()
+fixture_xwalk <- assembly_sources |> select(bg2020_id, tr2010_id, starts_with("wt_"))
+# Complete the second source's original fractions with an outside destination.
+fixture_outside <- fixture_xwalk[3, ] |>
+  mutate(tr2010_id = "06073000001", across(starts_with("wt_"), ~ 1 - .x))
+fixture_xwalk <- bind_rows(fixture_xwalk, fixture_outside)
+bg_inputs <- list(acs_step1_2024_block_group.feather = fixture_bg,
+                  xwalk_bg24_tr10.feather = fixture_xwalk)
+tract_inputs <- list(acs_step1_2016_tract.feather = legacy_16_input,
+                     acs_step1_2024_tract.feather = native_source)
+bg_files <- "acs_step2_2024_block_group_aggregated.feather"
+tract_files <- c("acs_step2_2016_tract.feather", "acs_step2_2024_tract.feather")
+isolated_bg <- run_isolated_notebook(here::here(bg_notebook), bg_inputs, bg_files)
+isolated_tract <- run_isolated_notebook(here::here(tract_notebook), tract_inputs, tract_files)
+if (nzchar(baseline_path)) {
+  frozen_dir <- dirname(baseline_path)
+  frozen_products <- run_isolated_notebook(file.path(frozen_dir, "02_assemble.Rmd"),
+    c(bg_inputs, tract_inputs), c(bg_files, tract_files), helper_dir = frozen_dir)
+  stopifnot(identical(c(isolated_bg, isolated_tract), frozen_products))
+  cat("Passed: full operational chunk sequences exactly match the frozen notebook and helpers.\n")
+}
+cat("Passed: both notebooks execute independently using only their declared synthetic inputs.\n")
+
+# Parse all chunks, preserve unique labels, and check overview/section agreement.
+for (file in c("R/assemble_helpers.R", "R/geography_qa.R")) invisible(parse(file = here::here(file)))
+for (notebook in c(bg_notebook, tract_notebook)) {
+  lines <- readLines(here::here(notebook), warn = FALSE)
+  starts <- which(startsWith(lines, "```{r"))
+  labels <- sub("^```\\{r ([^,}]+).*", "\\1", lines[starts])
+  stopifnot(!anyDuplicated(labels))
+  prose <- lines
+  for (start in starts) {
+    end <- which(seq_along(lines) > start & lines == "```")[1]
+    parse(text = lines[seq.int(start + 1L, end - 1L)])
+    prose[start:end] <- ""
+  }
+  headings <- prose[grepl("^# [0-9]+\\.", prose)]
+  stopifnot(identical(sub("^# ([0-9]+)\\..*", "\\1", headings),
+                      as.character(seq_along(headings))),
+            all(sub("^# ", "", headings) %in% prose))
+  for (section in seq_along(headings)) {
+    subsections <- prose[grepl(paste0("^## ", section, "\\."), prose)]
+    stopifnot(identical(sub(paste0("^## ", section, "\\.([0-9]+).*"), "\\1", subsections),
+                        as.character(seq_along(subsections))))
+  }
+}
 cat("Passed: notebook joins, unchanged unrelated measures/allocations, and synthetic Feather validation.\n")
 
 # Fixed vintage allowlists never authorize unrelated schema or value changes.

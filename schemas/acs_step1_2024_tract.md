@@ -88,7 +88,7 @@ The derived low-rent counts `rhu_lrE` and `rhu_lr2E` are retired and must be
 absent. All source estimates/MOEs and all 24 gross-rent bins remain unchanged;
 see the [cleanup contract](../docs/measure_cleanup.md).
 
-**Downstream:** `02_assemble.Rmd` §4 restricts this input to the configured target
+**Downstream:** `02b_prepare_tract_sources.Rmd` §3 restricts this input to the configured target
 counties and constructs the [2024 tract-source output](acs_step2_2024_tract.md),
 retaining `tr2020_id`. The separate [2024 block-group input](acs_step1_2024_block_group.md)
 is aggregated to 2010 tracts in §2; no comparison or reconciliation is performed

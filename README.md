@@ -10,14 +10,15 @@ crosswalk supports later comparison of the two native tract-source products.
 
 Assembly covers five Southern California counties plus the nine Bay Area counties.
 The named `southern_california_counties` and `bay_area_counties` sets and their
-union, `target_counties`, are centralized in `02_assemble.Rmd` §1.3. All three
+union, `target_counties`, are centralized in `step2_target_counties()` in `R/geography_qa.R`. All three
 products use those counties while retaining their documented tract vintages.
 The 2024 block-group allocation retains all source
 block groups contributing to those 2010 tracts, including sources outside the
 target counties, with the original NHGIS fractions (no renormalization).
 
 01_acs.Rmd - import selected variables from the 2012-2016 ACS (tracts) and 2020-2024 ACS (tracts and block groups); import cross-walk for 2024 block groups to 2010 tracts
-02_assemble.Rmd - aggregate 2020-2024 block groups to 2010 tracts; prepare 2016 and 2024 tract-source measures separately; construct rental inventory with explicit missingness, data flags, and uncertainty measures for all three products
+02a_aggregate_2024_block_groups.Rmd - aggregate 2020-2024 block groups to 2010 tracts, with inventory and diagnostics
+02b_prepare_tract_sources.Rmd - prepare native 2016 and 2024 tract measures, with inventory, flags, and diagnostics
 03_tract_change.Rmd - characterize statewide 2010–2020 tract intersections and save a 2020-tract crosswalk identifying exact geographic consistency
 04_merge.Rmd - retain the 2016/block-group 2024 key union, select canonical 2024 bundles by geographic consistency, retain smfE and sfd_detE levels for both years, calculate changes including separate rental inventory change, retain source comparisons, and optionally save the panel
 
@@ -170,7 +171,9 @@ levels/change; `rhuPOST` remains occupied-renter change.
 
 
 ## Step 2: Assemble 2016 tract and separate 2024 block-group/tract measures
-Script: `02_assemble.Rmd`
+Notebooks: [02a_aggregate_2024_block_groups.Rmd](02a_aggregate_2024_block_groups.Rmd) and
+[02b_prepare_tract_sources.Rmd](02b_prepare_tract_sources.Rmd). Either can run first; each reads, validates,
+and writes only its own products. Step 4 consumes all three unchanged products.
 
 Inputs:
 - `../../../data/acs_step1_2024_block_group.feather` — 2020-2024 ACS estimates, one row per 2020 CA block group.
@@ -193,12 +196,16 @@ Schema:
 - `schemas/acs_step2_2024_block_group.md`
 - [2024 tract-source schema](schemas/acs_step2_2024_tract.md)
 
-Steps:
-1. Set up environment (packages, `R/assemble_helpers.R` and shared `R/geography_qa.R`, data directory, named target counties, prior-output parity references)
-2. Assemble 2020-2024 ACS block-group measures to 2010 tracts (select destination crosswalk rows, join all contributing sources, check allocation weights, capture legacy/corrected income expectations before censoring, aggregate existing measures and separate inventory components, validate inventory and Southern California parity, save)
-3. Prepare 2012-2016 ACS tract measures (select the same target counties, capture income expectations before flagging/censoring, build share, vacancy-rate, CV, and direct inventory measures, validate inventory and parity, save)
-4. Prepare 2020-2024 ACS tract-source measures (restrict native 2020 tracts to the target counties, preserve uncensored income diagnostics, apply tract flags/censoring and derived measures, construct direct inventory, validate income/inventory and optional strict parity, save)
-5. Validate all three outputs separately (native key membership, county coverage, missing/top-coded rent, flag encoding, numeric distributions, strict saved schema/values, inventory completeness and reconciliation in §5.6)
+Steps in 02a:
+1. Set up environment, shared county configuration, and the block-group parity reference.
+2. Assemble 2020–2024 ACS block-group measures to 2010 tracts: select and check allocations, capture income expectations, censor, aggregate, interpolate, construct inventory, validate parity, and save.
+3. Validate the reloaded block-group output, including allocation conservation, rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
+
+Steps in 02b:
+1. Set up environment, shared county configuration, and the two tract parity references.
+2. Prepare 2012–2016 ACS tract measures, retaining income expectations, flags, derived measures, inventory, parity, and saving.
+3. Prepare 2020–2024 ACS tract-source measures on native keys, retaining source income, flags, derived measures, inventory, parity, and saving.
+4. Validate both reloaded native tract outputs, including key membership, county coverage, flag encoding, numeric distributions, exact saved schema/values, and inventory reconciliation (§4.6).
 
 Rental inventory combines renter-occupied units (`rhuE`, B25003_003), vacant
 for rent (`vac_forrentE`, B25004_002), and rented, not occupied (`vac_rentedE`,
@@ -465,7 +472,7 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   coverage. Full source weights sum to one within `1e-6`; retained weights
   can sum below one and must remain identical to their original fractions.
   Assertion failures stop notebook execution.
-  [Note: conditions met when 02_assemble.Rmd runs without error.]
+  [Note: conditions met when both Step 2 notebooks run without error.]
 - `socal_parity_16` and `socal_parity_2024_bg_aggregated` compare every shared output column, reporting
   changed values and added/removed keys. Each changed cell is classified as
   `verified_income_correction`, `boundary_review`, or `unexpected`, with counts
@@ -491,7 +498,7 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   keyed completeness diagnostic. Complete inventory must equal its three component
   totals. Inspect each `inventory_reconciliation_*`: source-first and target-first
   totals must agree over **complete targets only**, without renormalizing weights.
-  Incomplete targets remain separately reported. §5.6 repeats inventory checks
+  Incomplete targets remain separately reported. 02a §3.6 and 02b §4.6 repeat inventory checks
   after reloading and verifies all saved values, original allocation pairs/weights,
   and occupied-count reconciliation.
 - Inspect `panel_membership`/`validated_panel_membership` and, after an enabled write,
@@ -542,3 +549,26 @@ its executable behavior is unchanged. Other retired dollar-MOE findings remain
 historical evidence, not current output contracts. This cleaning-stage
 expansion does not expand downstream analysis filters or supporting data. See
 the stage's interface in [the shared pipeline document](../../PIPELINE.md).
+
+### Step 2 split acceptance
+
+The notebook split preserves the post-cleanup calculations, operation order within
+each product, filenames, keys, column order/types, values, and missingness.
+Measurement changes and the proposed QA-hardening work remain separate.
+`read_step2_parity_references()` in `R/assemble_helpers.R` reads each notebook's
+explicit map, retaining historical filenames, named missing references, and the
+existing messages. Existing measurement helpers are unchanged.
+
+Before full execution, preserve post-cleanup baseline outputs. Run both notebooks
+on identical inputs, in either order, and compare all three products across their
+**full key universes**, including row/column order, storage types, values, and
+missingness. Southern California reference checks alone do not establish this
+refactor's full parity. Review allocation conservation, county coverage, rent-share
+decomposition, income retention, inventory reconciliation, and exact save/reload
+checks. Full execution and canonical regeneration remain analyst-run.
+
+The four affected synthetic suites are `tests/test_income_censoring.R`,
+`tests/test_rental_inventory.R`, `tests/test_tract_change.R`, and
+`tests/test_merge_diagnostics.R`. The inventory suite also parses both notebooks,
+checks labels/numbering/overviews, and exercises product-specific temporary
+Feather saves, reloads, missing/partial references, and failure assertions.

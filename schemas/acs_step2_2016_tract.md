@@ -1,10 +1,10 @@
 # Schema: `acs_step2_2016_tract.feather`
 
-**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2016_tract.feather`
+**Produced by:** `02b_prepare_tract_sources.Rmd` (Step 2) · **Source:** `acs_step1_2016_tract.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
-California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
-§1.3 (`target_counties`, shared by all three Step 2 products).
+California plus nine Bay Area counties** configured in [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+§1.3 (`step2_target_counties()` in `R/geography_qa.R`, shared by all three Step 2 products).
 **Key:** `tr2010_id` (unique, non-missing).
 
 This file is the 2012–2016 tract table restricted to those 14 counties, with
@@ -22,7 +22,7 @@ All columns from `acs_step1_2016_tract.feather` carry through — see
 [acs_step1_2016_tract.md](acs_step1_2016_tract.md) for the full `<name>E` / `<name>M` measure list, plus
 `tr2010_id`, `NAME`, and `rent_id`. Note that `rentE` and
 `lqcrentE` are **censored** here: values `>= 3500` are set to `NA` (top-code
-removal). See the §2.4 / §3.2 decision blocks in the notebook.
+removal). See the §2.2 / §3.2 decision blocks in the notebook.
 
 The revised input removes `rentmv1yr`, `rentmv5yr`, `rentyrblt`,
 `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, and `rentyrblt_90_99`
@@ -66,7 +66,7 @@ Component totals (`inventory_rhuE`, `inventory_vac_forrentE`,
 `inventory_vac_rentedE`), missing-component counts, and `inventory_incomplete`
 remain in notebook diagnostics. Only the key and `rhu_inventoryE` are joined
 one-to-one onto the output, preserving its other columns and rows. Pre-save and
-reload checks in §5.6 validate keyed missingness and reconcile complete-target
+reload checks in §4.6 validate keyed missingness and reconcile complete-target
 totals separately from incomplete targets, including when inventory is absent
 from a reference. No inventory MOE/CV is added. `rhuE` and all existing rent
 denominators remain occupied-renter measures. Step 4 retains `rhu_inventoryE_16`

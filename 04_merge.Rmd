@@ -57,7 +57,7 @@ This notebook:
 
 This step only **merges** existing tract measures and derives change variables;
 all three ACS inputs already use the 14 counties configured and validated in
-`02_assemble.Rmd`, so no further sample restriction happens here. This notebook
+both Step 2 notebooks, so no further sample restriction happens here. This notebook
 inherits county coverage from the 2016 input and checks both 2024 inputs on their
 native keys and the full panel. County definitions remain centralized in stage 2.
 Paired Census-vs-block-group comparisons use only geographically consistent
@@ -96,7 +96,7 @@ library(srvyr)
 This stage's helpers — feather I/O, the survey `merge_df()`, variable
 renaming/selection, inflation adjustment, and the change-variable functions —
 live in `R/merge_helpers.R`. That file is self-contained for this notebook (its
-`merge_df()` differs from the one used by `02_assemble.Rmd`).
+`merge_df()` differs from the one used by `02a_aggregate_2024_block_groups.Rmd`).
 Shared geographic, key, and schema diagnostics live in `R/geography_qa.R`.
 Alignment, source-selection assertions, and paired summaries live in
 `R/merge_diagnostics.R`. Bundle preparation and selection use `R/merge_helpers.R`.
@@ -132,7 +132,7 @@ Load the 2024 block-group-aggregated measures, suffix canonical variables with `
 keep the analytic variable set plus a few extra quality/derived columns
 (`pct_miss_rent`, `pct_tc_rent`, `tc_flag_rent_24`, `interp_rent`).
 `pct_tc_rent` is the top-coded portion of `pct_miss_rent` (see §2.3/§2.6 of
-`02_assemble.Rmd`). The analytic set also carries the structure counts `mf5E`,
+`02a_aggregate_2024_block_groups.Rmd`). The analytic set also carries the structure counts `mf5E`,
 `nsfaE`, `smfE`, and `sfd_detE`, and the rental / for-sale vacancy rates
 `pctrvacE` / `pctsvacE`. The source-specific `merge_measure_columns("bg_agg")` list gives these
 fields year suffixes and retains them through selection. Preserve all mapped

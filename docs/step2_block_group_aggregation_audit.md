@@ -1,5 +1,11 @@
 # Step 2 block-group aggregation audit
 
+Historical notebook references below describe `02_assemble.Rmd` before its split.
+Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+(native tract preparation, §§2–3). Historical section/line numbers and findings
+are retained; successor links do not imply that those line numbers still apply.
+
 **Audit date:** 2026-09-15. **Authority:** the intended list in
 [task_spec_03_agg_audit.md](../task_spec_03_agg_audit.md).
 **Product:** `../../../data/acs_step2_2024_block_group_aggregated.feather`,
@@ -322,7 +328,7 @@ is assembled through summarization and joins, then written in full.
 |---|---|
 | [01_acs.Rmd](../01_acs.Rmd), §§1.2, 2.2 (lines 113–126, 178–278) | Defines bedroom-rent exclusions, `tract_vars`, and derived `block_group_vars`; excludes no intended measure. Duplicate-code aliases resolve to first rent-bin aliases. |
 | `01_acs.Rmd`, §§4.1–4.4 (lines 369–434); [R/helpers.R](../R/helpers.R), `rent_cat_sum()` (line 22) | Downloads E/M pairs; derives source low-rent counts with available-case row sums; saves the BG input. |
-| [02_assemble.Rmd](../02_assemble.Rmd), §§2.1–2.2 (lines 203–346) | Reads full BG input and crosswalk; selects destination counties, joins contributing sources, validates keys/weights. Does not select a narrow source-variable list. |
+| [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), §§2.1–2.2 (lines 203–346) | Reads full BG input and crosswalk; selects destination counties, joins contributing sources, validates keys/weights. Does not select a narrow source-variable list. |
 | `02_assemble.Rmd`, §2.3 (lines 369–409); [R/assemble_helpers.R](../R/assemble_helpers.R), `calc_rel_wt()` (343), `calc_pct_tc_m()` (376) | Builds relative MOE weights; raw missing/top-code shares. Saves only key, `pct_tc_rent`, and derived flag in the later join table. |
 | `02_assemble.Rmd`, §2.4 (lines 437–474); `censor_tc_vars()` (405) | Keeps optional income expectations separate; censors rent/lower quartile; builds source `mfE` and `smfE` with ordinary `+`. |
 | `R/assemble_helpers.R`, `calc_agg_vars()` (418–527); notebook §2.5 | Defines ordinary count, dollar E/M, count-MOE, and missing-count selections. Only `starts_with("grentcat") & ends_with("E")` is dynamic; current input yields exactly 24 bins. Adds `rhu_id`; drops residual `_agg` columns after renaming. |

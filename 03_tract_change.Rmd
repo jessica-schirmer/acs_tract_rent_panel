@@ -83,7 +83,7 @@ overwrite_output <- TRUE
 
 ## 1.3 Configure target-county diagnostics
 
-The county definitions match `02_assemble.Rmd` §1.3; a focused test checks that
+The county definitions match `step2_target_counties()` in `R/geography_qa.R`, used by both Step 2 notebooks; a focused test checks that
 they stay synchronized. They apply only to diagnostic summaries of the completed
 statewide crosswalk. Counties are assigned using the 2020 tract GEOID, and
 partner counts retain the complete California relationship-file universe.

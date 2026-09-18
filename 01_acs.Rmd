@@ -63,7 +63,7 @@ available for downstream interpolation.
 This step only **imports and stores** source data; it performs no row-level
 filtering or sample restriction. Geographic harmonization (aggregating the
 2020–2024 block-group data to 2010 tracts using these crosswalks) happens in
-`02_assemble.Rmd`. Its separate 2024 tract-source path retains native 2020
+`02a_aggregate_2024_block_groups.Rmd`. `02b_prepare_tract_sources.Rmd` retains native 2020
 tracts and constructs the same direct tract measures as the 2016 path.
 Generate the newly named inputs
 from this notebook; old caches do not implement the revised variable contract.
@@ -329,7 +329,7 @@ out
 
 Renames `GEOID` to `tr2010_id` (and tags the table with the `rent_id` join
 flag), then writes the output. **Output:** `acs_step1_2016_tract.feather` — 2012–2016 ACS
-estimates with one row per 2010 CA tract, consumed by `02_assemble.Rmd`.
+estimates with one row per 2010 CA tract, consumed by `02b_prepare_tract_sources.Rmd`.
 
 ```{r save-acs-tract-16}
 acs_trt_16 <- rename_id(acs_trt_16, tr2010_id, GEOID)
@@ -349,7 +349,7 @@ rm(v16)
 The 2020–2024 ACS input for stage 2 is imported at the **block-group** level, because
 2020-vintage block groups can be allocated to 2010 tracts using the NHGIS
 crosswalk loaded in Section 6.1. Aggregation to 2010 tracts happens downstream in
-`02_assemble.Rmd`. The request uses the subset defined in §2.2; the full 2024
+`02b_prepare_tract_sources.Rmd`. The request uses the subset defined in §2.2; the full 2024
 tract list is downloaded separately in §5. Expected: one row per CA 2020-vintage
 block group (~25,000+).
 
@@ -404,7 +404,7 @@ out
 
 Renames `GEOID` to `bg2020_id` (and tags the `rent_id` flag), then writes the
 output. **Output:** `acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates with one row
-per 2020 CA block group, consumed by `02_assemble.Rmd`.
+per 2020 CA block group, consumed by `02a_aggregate_2024_block_groups.Rmd`.
 
 ```{r save-acs-bg-24}
 acs_bg_24 <- rename_id(acs_bg_24, bg2020_id, GEOID)
@@ -471,7 +471,7 @@ rm(v24)
 We use the NHGIS block-group-to-tract crosswalk, which provides allocation
 weights (`wt_pop`, `wt_hh`, `wt_hu`, `wt_renthu`) giving the share of each source
 geography's population / households / housing units / renter housing units that
-falls into each target tract. Downstream aggregation (`02_assemble.Rmd`) uses
+falls into each target tract. Downstream aggregation (`02a_aggregate_2024_block_groups.Rmd`) uses
 these weights to apportion block-group estimates to 2010 tracts.
 
 Because a single block group can split across multiple tracts (and vice versa),
@@ -756,36 +756,36 @@ for (output_name in names(output_checks)) {
               all(vapply(df[check$keys], function(x) !anyNA(x) && all(nzchar(x)),
                          logical(1))))
   critical <- if (!is.null(check$variables)) {
-    c(check$keys, "NAME", "popE", "rentE", "rhuE", "rhu_baseE", "vac_forrentE", "vac_rentedE",
-      intersect(paste0(block_group_unavailable_vars, "E"), names(df)))
-    # c(
-    #   check$keys,
-    #   "NAME",
-    #   "popE",
-    #   "med_hhincE",
-    #   "rentE",
-    #   "rhuE",
-    #   "rhu_baseE",
-    #   "vac_forrentE",
-    #   "vac_rentedE",
+    # c(check$keys, "NAME", "popE", "rentE", "rhuE", "rhu_baseE", "vac_forrentE", "vac_rentedE",
+    #   intersect(paste0(block_group_unavailable_vars, "E"), names(df)))
+    c(
+      check$keys,
+      "NAME",
+      "popE",
+      "med_hhincE",
+      "rentE",
+      "rhuE",
+      "rhu_baseE",
+      "vac_forrentE",
+      "vac_rentedE",
 
-    #   paste0("grentcat", 1:24, "E"),
+      paste0("grentcat", 1:24, "E"),
 
-    #   "sfd_baseE",
-    #   "sfd_detE",
-    #   "sfd_attE",
-    #   "duplexE",
-    #   "quadplexE",
-    #   "mf_5_9E",
-    #   "mf_10_19E",
-    #   "mf_20_49E",
-    #   "mf_50E",
+      "sfd_baseE",
+      "sfd_detE",
+      "sfd_attE",
+      "duplexE",
+      "quadplexE",
+      "mf_5_9E",
+      "mf_10_19E",
+      "mf_20_49E",
+      "mf_50E",
 
-    #   intersect(
-    #     paste0(block_group_unavailable_vars, "E"),
-    #     names(df)
-    #   )
-    # )
+      intersect(
+        paste0(block_group_unavailable_vars, "E"),
+        names(df)
+      )
+    )
   } else {
     c(check$keys, weight_columns)
   }

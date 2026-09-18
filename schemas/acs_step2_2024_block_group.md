@@ -1,10 +1,10 @@
 # Schema: `acs_step2_2024_block_group_aggregated.feather`
 
-**Produced by:** `02_assemble.Rmd` (Step 2) · **Source:** `acs_step1_2024_block_group.feather` + `xwalk_bg24_tr10.feather`
+**Produced by:** `02a_aggregate_2024_block_groups.Rmd` (Step 2) · **Source:** `acs_step1_2024_block_group.feather` + `xwalk_bg24_tr10.feather`
 
 **Grain:** one row per 2010-vintage California tract **in the five Southern
-California plus nine Bay Area counties** configured in [02_assemble.Rmd](../02_assemble.Rmd)
-§1.3 (`target_counties`, shared by all three Step 2 products), built by weight-aggregating
+California plus nine Bay Area counties** configured in [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+§1.3 (`step2_target_counties()` in `R/geography_qa.R`, shared by all three Step 2 products), built by weight-aggregating
 2020 block groups to 2010 tracts.
 **Key:** `tr2010_id` (unique, non-missing).
 
@@ -92,7 +92,7 @@ vacancy rates, occupied `rhuE`, cash/bin counts, interpolation/income calculatio
 weights, MOEs, CVs, and flags retain their calculations. Inventory is never
 derived from the existing vacancy-rate input or used as a rent denominator.
 
-Before saving and after reloading (§5.6), keyed output missingness must equal
+Before saving and after reloading (§3.6), keyed output missingness must equal
 `inventory_incomplete`. Every complete target must have finite, nonnegative
 inventory equal to its three component totals. Source-first and target-first
 totals reconcile over **complete targets only**, with incomplete targets

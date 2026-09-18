@@ -78,7 +78,7 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
 
 | Area | Files |
 |---|---|
-| Notebooks | [01_acs.Rmd](../01_acs.Rmd), [02_assemble.Rmd](../02_assemble.Rmd), [04_merge.Rmd](../04_merge.Rmd) |
+| Notebooks | [01_acs.Rmd](../01_acs.Rmd), [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd), [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd), [04_merge.Rmd](../04_merge.Rmd) |
 | Helpers | [R/helpers.R](../R/helpers.R), [R/assemble_helpers.R](../R/assemble_helpers.R), [R/geography_qa.R](../R/geography_qa.R), [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R) |
 | Tests | [test_income_censoring.R](../tests/test_income_censoring.R), [test_rental_inventory.R](../tests/test_rental_inventory.R), [test_merge_diagnostics.R](../tests/test_merge_diagnostics.R) |
 | Step 1 schemas | [2016 tract](../schemas/acs_step1_2016_tract.md), [2024 block group](../schemas/acs_step1_2024_block_group.md), [2024 tract](../schemas/acs_step1_2024_tract.md) |
