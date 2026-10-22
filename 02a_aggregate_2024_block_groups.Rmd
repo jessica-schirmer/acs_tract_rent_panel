@@ -132,6 +132,10 @@ Any positive allocation weight requires exactly one matching ACS row. Unmatched
 links with all four weights zero remain as noncontributing rows, preserving
 targets represented entirely by such links. Inspect `zero_weight_unmatched`
 for these exceptions, including out-of-state sources absent from the CA cache.
+After contributor validation, set `rent_evidence_available = FALSE` on these
+unmatched rows when the column exists: no ACS row means no retained rent evidence.
+Their raw evidence remains missing; missing availability flags on matched ACS
+rows still fail rent validation.
 
 Keep `bg_reference_2024` fixed at the original target links and weights so
 subsequent joins and aggregation can be checked against an independent reference.
@@ -190,6 +194,10 @@ report_n(zero_weight_unmatched, "Unmatched all-zero links retained as noncontrib
 table(xwalk_join$merge)
 stopifnot("Crosswalk join must not multiply allocation pairs" =
             nrow(xwalk_join) == nrow(xwalk_target))
+
+if ("rent_evidence_available" %in% names(xwalk_join)) {
+  xwalk_join$rent_evidence_available[!xwalk_join$.acs_present] <- FALSE
+}
 
 acs_2024_bg_allocations <- xwalk_join |> select(-merge)
 report_n(acs_2024_bg_allocations, "Retained target allocations (expected original link count)")

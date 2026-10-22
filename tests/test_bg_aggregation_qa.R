@@ -202,6 +202,55 @@ stopifnot(identical(joined_reference, as.list(joined$bg_reference_2024)),
           joined$acs_2024_bg_aggregated$popE[3] == 0)
 cat("Passed: original join, cross-county/split links, full-source audit, and unmatched all-zero target retention.\n")
 
+# Retained evidence gains a missing flag on unmatched links during the actual join.
+join_source <- function(source, crosswalk = full_xwalk) {
+  env <- new.env(parent = environment())
+  env$xwalk <- crosswalk
+  env$acs_2024_bg_source <- source
+  env$target_counties <- "037"
+  env$southern_california_counties <- "037"
+  run_chunk("merge-and-restrict-2024-bg-aggregated", env, bg_notebook)
+  env
+}
+retained_source <- retain_rent_evidence(full_source, key = "bg2020_id") |>
+  mutate(rent_evidence_available = TRUE)
+retained_source$rent_evidence_available[1] <- FALSE
+with_evidence <- join_source(retained_source)
+allocations <- with_evidence$acs_2024_bg_allocations
+matched <- allocations |> filter(.acs_present)
+unmatched <- allocations |> filter(!.acs_present)
+stopifnot(identical(allocations[setdiff(names(allocations), rent_evidence_columns())],
+                    joined$bg_original_allocations_2024),
+          is.logical(allocations$rent_evidence_available),
+          !anyNA(allocations$rent_evidence_available),
+          identical(matched[rent_evidence_columns()],
+                    retained_source[match(matched$bg2020_id, retained_source$bg2020_id),
+                                    rent_evidence_columns()]),
+          nrow(unmatched) == 1L, identical(unmatched$rent_evidence_available, FALSE),
+          all(is.na(unmatched[setdiff(rent_evidence_columns(), "rent_evidence_available")])))
+for (chunk in c("relative-weights-and-tc-2024-bg-aggregated",
+                "censor-and-structure-2024-bg-aggregated")) {
+  run_chunk(chunk, with_evidence, bg_notebook)
+}
+rent_columns <- c("rentE", rent_metadata_columns("24"), "rent_status_reason", "rent_median_bin")
+stopifnot(identical(with_evidence$acs_2024_bg_allocations[rent_columns],
+                    joined$acs_2024_bg_allocations[rent_columns]),
+          identical(with_evidence$bg_reconciliation_source_2024[rent_columns],
+                    joined$bg_reconciliation_source_2024[rent_columns]))
+
+# Invalid evidence on matched rows and absent positive contributors still fail.
+missing_flag <- retained_source
+missing_flag$rent_evidence_available[1] <- NA
+invalid_evidence <- join_source(missing_flag)
+expect_error(run_chunk("relative-weights-and-tc-2024-bg-aggregated", invalid_evidence, bg_notebook),
+             "Invalid retained B25064 evidence types")
+for (weight in bg_weight_columns()) {
+  positive_unmatched <- full_xwalk
+  positive_unmatched[[weight]][positive_unmatched$bg2020_id == absent_zero$bg2020_id] <- 0.5
+  expect_error(join_source(retained_source, positive_unmatched), "no ACS source row")
+}
+cat("Passed: retained evidence on zero-weight unmatched links, unchanged matched evidence, and strict contributor/evidence validation.\n")
+
 # Every required bin gates interpolation, including bins after the median.
 bins <- assembly_sources |> mutate(.acs_present = TRUE)
 bins$grentcat24E[1] <- NA_real_
