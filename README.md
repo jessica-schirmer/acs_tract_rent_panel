@@ -24,6 +24,137 @@ target counties, with the original NHGIS fractions (no renormalization).
 
 
 
+## Rent metadata migration
+
+The producer implements the [2026-10-20 rent audit](../../analysis/tract_rent_acs/docs/acs_rent_flag_audit.md).
+No canonical datasets or downstream model/sample code were regenerated or changed.
+
+- `tc_flag_rent_16/24`: double 1 for confirmed upper censoring, 0 for confirmed
+  observed rent, NA for other unavailable/unresolved rent.
+- `rent_status_16/24`: character `observed`, `top_coded`, `unavailable_other`, or
+  `unresolved`. Only observed status has numeric cleaned rent; missing selected
+  source records are unresolved, with no availability fallback.
+- `rent_censor_bound_16/24`: NA except for confirmed top-codes. Source preparation
+  assigns $3,500 in the source year's dollars. Only Step 4 multiplies the 2016
+  bound and 2016 rent by `inflation_factor_2016()` (currently 1.307), yielding
+  $4,574.50 in 2024 dollars. The 2024 bound stays $3,500; flags/statuses never scale.
+
+Native classification uses original B25064 E/EA/M/MA, retained as character
+`rent_source_e/ea/m/ma` with logical `rent_evidence_available` in Step 1 and
+native Step 2 outputs. `3501` is an upper-interval code; genuine `3500` stays
+observed when finite MOE and complete non-top B25063 evidence corroborate it.
+Missing E/M alone is insufficient. Known source suppression/unavailability and
+lower interval `99` are unavailable; conflicting/insufficient evidence remains
+unresolved. Upstream `rent_status_reason` and `rent_median_bin` preserve detail.
+No native median is replaced with distribution interpolation.
+
+For the BG branch, the final allocated cash-renter distribution supplies rent,
+median bin, and status together. The first bin reaching **at least half** is
+the median bin; bin 24 confirms top-coding. Exactly half below bin 24 is not
+top-coded. All 24 bins and the cash-renter total must be complete and consistent;
+existing weights and interpolation bounds are unchanged. No positive contributors
+or inconsistent counts are unresolved; incomplete counts, zero renters, and
+bin 1 are unavailable. All metadata follows the existing 2024 geography hierarchy.
+
+**Component coverage correction approved by the analyst:** `pct_miss_rent`
+keeps its weighting, denominator, and interpretation as the share of allocated
+renter units associated with missing/censored BG source rent. Corrected source
+classification removes genuine $3,500 estimates from its numerator and treats
+source interval codes as unavailable. It remains distinct from final-tract
+status and is retained even where native tract rent is selected. Unrelated
+housing-inventory flags, allocation weights, and sample-selection rules are unchanged.
+
+**Retrieved evidence and dated impact (2026-10-21 local time):** all five native
+cases identified in the audit returned E `-666666666`, EA `-`, M `-222222222`,
+MA `**`, matching saved-vintage E/M missingness. They are `unavailable_other`,
+not confirmed top-codes. [Original evidence](docs/acs_rent_native_2024_evidence.csv)
+includes character GEOIDs, year, and UTC retrieval time.
+The read-only coverage check found 16 genuine $3,500 BGs and one lower-interval
+`99` BG whose coverage classification changes, affecting 17 destination tracts.
+Nine cross the `.05` screen threshold; eight cross zero. Six common-input
+tracts could change the rent quality screen after considering baseline rent/CV:
+these are potential changes, not rerun complete-case/model samples.
+[Source changes](docs/acs_rent_coverage_source_changes.csv),
+[tract changes and screen diagnostics](docs/acs_rent_coverage_tract_changes.csv),
+and [input hashes](docs/acs_rent_metadata_input_manifest.csv) record the evidence.
+All four native 2024 `$3,500` boundary records in the saved statewide input
+classify as observed. These counts describe the inspected artifacts, not fixed tests.
+
+The [unified tract comparison](docs/acs_rent_expected_tract_changes.csv) now
+records 23 distinct tracts: the five native evidence resolutions, 17 coverage
+changes, and native boundary case `06081601501`. It includes selected source,
+old/expected status, flag, numeric rent, coverage, screen components, and reasons.
+Old statuses come from the **prior independent audit**, because the old panel
+did not persist status; the four tracts outside that audit have NA old status,
+with an explicit provenance label. All `expected_*` values are **pending
+regeneration**. The five resolved native cases keep missing numeric rent and
+top-code flag; only their explanation changes to `unavailable_other`.
+
+Nine missingness-screen components are expected to change from 1 to 0. Two
+tracts are outside the current common input, and `06055200602` still fails the
+CV screen. The remaining six common-input tracts are `06037109200`,
+`06037577602`, `06059011402`, `06059042326`, `06075030202`, and `06111001602`:
+their combined rent-quality flag is expected to improve from 1 to 0 with the
+current baseline operands held fixed. The prior audit reports full complete
+cases for all six, but **new overall quality-sample membership is not verified**.
+The comparison explicitly marks that limitation rather than reporting six
+confirmed sample additions.
+
+For `06081601501`, selected native rent is expected to change from NA to
+**$3,500**, and `tc_flag_rent_24` from 1 to 0. The prior audit already classified
+its source estimate as observed: MOE 469, 198 cash renters, and exactly 99 below
+the top bin (median bin 23). Corrected numeric rent now matches that assessment.
+Its `pct_miss_rent` remains `0.344036697247706`, so its missingness and combined
+quality flags remain 1 despite recovery of numeric rent.
+
+The comparison uses preserved `../../../data/acs_full_260918.feather`, whose
+MD5 exactly matches the earlier `acs_full.feather` in both saved manifests.
+The [comparison input manifest](docs/acs_rent_expected_change_input_manifest.csv)
+records actual paths and unchanged hashes; the [diagnostic schema](schemas/acs_rent_expected_tract_changes.md)
+defines every field. Reproduce into a new directory with
+`Rscript --vanilla tests/report_rent_expected_changes.R <new-report-directory> ../../../data/acs_full_260918.feather`.
+This bounded check makes no API calls, runs no notebooks, and writes no canonical
+datasets. The earlier coverage-check command assumes the original panel filename.
+
+**Required downstream migration (outside this implementation):**
+
+| Consumer under `analysis/tract_rent_acs/` | Required update |
+|---|---|
+| `01_fe_rent.Rmd`, `01_fe_rhu.Rmd` | Rename baseline `tc_flag_rent` references to `tc_flag_rent_16`; remove `pct_tc_rent` selections/diagnostics; carry year-specific metadata. Preserve existing screen rules pending a separate model/sample task. Review corrected coverage effects. |
+| `R/model_sample.R`, `R/helpers.R` | Update required/optional field registries and diagnostic lists for the removed baseline flag/share. |
+| `diagnostics/acs_rent_flags/run_audit.R`, `R/acs_rent_flag_audit.R`, associated tests | Read new metadata and raw evidence, replace old missing-flag/share checks with status/bound/source checks, and retain independent distribution reconstruction. The old audit runner expects removed columns and needs this migration before rerunning. |
+| `00c_prep_tract_ACS.Rmd` and downstream schemas/artifacts | Regenerate the common input after producer regeneration; its checked joins already carry supplied ACS columns. Synchronize downstream column dictionaries and sample exports. |
+
+`m_flag_rent` is removed; use explicit statuses to distinguish causes, or
+`is.na(rentE_16)` only when a numeric-availability diagnostic is intended.
+`pct_tc_rent` has no replacement component share: `tc_flag_rent_24` classifies
+the selected final median and must not be substituted into legacy share rules.
+Only preserved-reference migration checks reconstruct old exposure calculations.
+
+**Focused validation:** `Rscript --vanilla tests/test_rent_metadata.R` plus the
+input, inventory, BG aggregation, income, and merge suites. The optional
+`Rscript --vanilla tests/check_rent_metadata_inputs.R /private/tmp/rent-metadata-qa`
+reads selected columns, verifies the five cases and boundaries, reports coverage
+changes, and verifies canonical hashes unchanged. It does not run notebooks.
+
+**Analyst-run regeneration and acceptance:**
+
+1. Preserve any desired parity snapshots; run `01_acs.Rmd` to retrieve raw
+   B25064 evidence for 2016 tracts and both 2024 sources. Inspect retrieval
+   availability; never treat missing annotations as observed or top-coded.
+2. Run `02a_aggregate_2024_block_groups.Rmd` and `02b_prepare_tract_sources.Rmd`
+   in either order. Inspect status/reason/bin counts, verified rent/coverage
+   parity changes, unchanged keys/unrelated values, and exact readback.
+3. Reuse the validated Step 3 crosswalk (regenerate `03_tract_change.Rmd` only
+   if needed), then run `04_merge.Rmd` with `write_panel <- FALSE`. Verify source
+   equality for the whole rent bundle, source/final-dollar bounds, unchanged
+   flags/statuses after inflation, and no confirmed top-codes in numeric rent
+   changes. Enable saving only after review; the notebook announces replacement.
+4. Migrate downstream consumers, rerun `00c`, then rerun the migrated existing
+   rent audit before models. Require source-consistent classifications and
+   zero unexplained provenance differences; explain recovered native $3,500
+   rents and coverage-driven screen changes without fixing old empirical counts.
+
 # Source / Inputs
 Census API
 
@@ -142,13 +273,22 @@ tests do not call the API or regenerate canonical data.
 
 **Stage-2 parity compatibility is implemented through a narrow allowlist.**
 `compare_socal_parity()` stays strict by default (`schema_migration = NULL`).
-The notebook opts into fixed migrations for all three products:
+The notebook opts into fixed migrations for all three products. The earlier
+cleanup allowances below also include the rent migration described afterward:
 
 | Vintage / `schema_migration` | Permitted additions relative to older references | Permitted removals |
 |---|---|---|
 | 2016 / `"2016"` | `vac_rentedE`, `vac_rentedM`, `rhu_inventoryE` | Estimate/MOE pairs for `rentmv1yr`, `rentmv5yr`, `rentyrblt`, `rentyrblt_14_16`, `rentyrblt_10_13`, `rentyrblt_00_09`, `rentyrblt_90_99`; `rhu_lrE`, `rhu_lr2E` |
-| 2024 block-group aggregated / `"2024"` | `rhu_inventoryE` | The 12 cleanup fields listed below |
+| 2024 block-group aggregated / `"2024"` | `rhu_inventoryE` | The earlier cleanup fields listed below |
 | 2024 native tract / `"2024_tract"` | None | `rhu_lrE`, `rhu_lr2E` |
+
+All products additionally allow their year-specific rent metadata triple and
+`rent_median_bin` / `rent_status_reason`; native products also retain the five
+raw-evidence fields. Obsolete `tc_flag_rent`, `m_flag_rent`, and `pct_tc_rent`
+are removed wherever present. Source-derived `expected_rent` checks verify both
+old and corrected native rent/CV, BG flag, and coverage cells. The BG
+`tc_flag_rent_24` may move beside the final-distribution metadata; unrelated
+shared column order and storage types remain strict.
 
 The block-group removal list is `rhu_lrE`, `rhu_lr2E`, `rentE`, `rentM`, `rentCV`,
 `lqcrentE`, `lqcrentM`, `med_hvalE`, `med_hvalM`, `med_hvalCV`, `hu_miss_hval`, and
@@ -161,7 +301,8 @@ output fields even when no reference exists. See the
 separate analysis-consumer migration needs.
 
 Actual additions/removals appear in `schema_changes`; unlisted differences fail.
-Shared columns retain strict order, storage type/class, and value checks,
+Apart from the documented BG flag move, shared columns retain strict order,
+storage type/class, and value checks,
 including the existing income-correction and geographic classifications.
 Inventory is validated independently before saving and after reloading even
 when absent from a reference. Save/reload schema checks remain strict for every
@@ -173,7 +314,7 @@ levels/change; `rhuPOST` remains occupied-renter change.
 ## Step 2: Assemble 2016 tract and separate 2024 block-group/tract measures
 Notebooks: [02a_aggregate_2024_block_groups.Rmd](02a_aggregate_2024_block_groups.Rmd) and
 [02b_prepare_tract_sources.Rmd](02b_prepare_tract_sources.Rmd). Either can run first; each reads, validates,
-and writes only its own products. Step 4 consumes all three products with unchanged schemas.
+and writes only its own products. Step 4 consumes all three current contracts.
 
 Inputs:
 - `../../../data/acs_step1_2024_block_group.feather` — 2020-2024 ACS estimates, one row per 2020 CA block group.
@@ -185,7 +326,7 @@ Inputs:
   `../../../data/parity_reference`.
 
 Outputs:
-- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020-2024 ACS block-group measures aggregated to 2010 tracts (`tr2010_id`), with inventory, interpolated rent, missing/top-coded-rent shares, structure, share, vacancy-rate, and CV measures.
+- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020-2024 ACS block-group measures aggregated to 2010 tracts (`tr2010_id`), with inventory, interpolated rent, rent metadata and component coverage, structure, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_2016_tract.feather` — 2012-2016 ACS tract measures (`tr2010_id`), with inventory, revised Step 1 pass-through columns including `vac_rentedE/M`, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
 - `../../../data/acs_step2_2024_tract.feather` — 2020-2024 ACS tract-source measures (`tr2020_id`), with direct inventory, retained native dollar and bedroom-rent pairs, top-code/missing/zero flags, structure, share, vacancy-rate, and CV measures.
 
@@ -199,7 +340,7 @@ Schema:
 Steps in 02a:
 1. Set up environment, shared county configuration, and the block-group parity reference.
 2. Assemble 2020–2024 ACS block-group measures to 2010 tracts: select and check allocations, capture income expectations, censor, aggregate, interpolate, construct inventory, validate parity, and save.
-3. Validate the reloaded block-group output, including reference-based contributor integrity, count/dependent completeness, rent-share decomposition, county coverage, and inventory reconciliation (§3.6).
+3. Validate the reloaded block-group output, including reference-based contributor integrity, count/dependent completeness, rent metadata and component coverage, county coverage, and inventory reconciliation (§3.6).
 
 **2024 BG contributor/count hardening:** `02a` constructs a locked reference
 before joining ACS, containing all original target links, four weights, target
@@ -232,8 +373,9 @@ No new columns/types or filenames are introduced, and reference snapshots stay i
 **Dependent-measure hardening (Pass 3):** `interp_rent` now requires complete
 `rhucashE` and all 24 rent bins, including bins after the median. Its category
 endpoints, interpolation formula, censoring, and zero-cash-renter rules remain.
-Pre-censoring rent shares and `tc_flag_rent_24` require complete renter counts;
-complete zero denominators retain missing shares and flag zero. Relative weights
+Final `tc_flag_rent_24` follows the complete allocated distribution: bin 24
+is top-coded; zero cash renters have unavailable status and a missing flag.
+Component coverage `pct_miss_rent` requires complete positive renter counts. Relative weights
 use strict count denominators. Income estimates require complete household
 counts; income MOEs require complete renter counts. Count MOEs require the base
 counts used by their relative weights. Missing income/MOE inputs retain their
@@ -243,7 +385,8 @@ existing treatment when required counts are complete.
 income, MOEs, CVs, and interpolation, reusing contributor/completeness metadata.
 Populated results with incomplete required counts fail after joins, before save,
 and after readback. Full missing-source details remain outside the Feather.
-`rent_share_incomplete_2024` records cases where all rent shares must be missing.
+Coverage QA compares `pct_miss_rent` against corrected BG source missingness;
+status QA validates the separate final-median metadata.
 The existing independent count reconciliation is retained and anchored to an
 original-source snapshot plus immutable crosswalk weights; it never reuses the
 production sum helper. Parity verifies both historical and corrected values for
@@ -465,10 +608,12 @@ no new change measures, flags, MOEs, CVs, or inflation adjustment. Input checks
 require numeric, finite, nonnegative observed counts; Section 7 reports each
 level's missingness and numeric distribution.
 
-The analyst chose to keep `pct_miss_rent` and `pct_tc_rent`
-under their existing names and values as block-group diagnostics, including on
-Census-selected/unresolved rows. They do not describe selected Census quality;
-downstream quality rules remain unchanged. Canonical `interp_rent` follows the
+`pct_miss_rent` remains BG component coverage, including on native-selected
+rows, with unchanged renter weights and denominator. The analyst approved
+correcting BG source classification so genuine $3,500 medians are observed;
+`pct_tc_rent` is removed. See [rent metadata migration](#rent-metadata-migration)
+for statuses, bounds, measured coverage changes, and consumer updates.
+Canonical `interp_rent` follows the
 geographic hierarchy: native tract median gross rent (`rentE_24_tract`) for consistent tracts, and the existing block-group
 interpolation for all other rows, including missing/unexpected status. Missing
 selected values remain missing, with no availability fallback.
@@ -497,7 +642,7 @@ inventory, structure-count levels, schema migration, and guarded save/reload
 checks. An analyst can run all diagnostics with writing disabled. Enable
 `write_panel <- TRUE` in setup and
 rerun from there only when the existing canonical panel should be written;
-replacement is announced. Only documented hierarchy/inventory/flag additions
+replacement is announced. Only documented hierarchy/inventory/flag and rent-metadata additions
 and the four `smfE` / `sfd_detE` levels, plus the fixed cleanup removals, are permitted against a prior panel;
 shared column order/types and saved-value
 checks remain strict. No prior reference is reported as not checked.
@@ -543,10 +688,11 @@ Analyst validation of assembly and the panel (after regenerating the revised sta
   household/renter counts, retaining the reference MOE when its counts are complete.
   Count expectations use validated BG sources and unchanged downstream formulas;
   dependent corrections include shares/rates, interpolated rent, count-weighted
-  income/MOEs, CVs, and the rent top-code flag. Every cell must match both
+  income/MOEs and CVs. Rent/coverage differences use separate `expected_rent`
+  expectations and `verified_rent_metadata_correction`. Every cell must match both
   expectations; unrelated changes and tract membership retain ordinary parity.
   The existing tolerance is unchanged,
-  and the helper stays strict when both optional expectation arguments are `NULL`; schema differences
+  and the helper stays strict when optional expectation arguments are `NULL`; schema differences
   require the explicit allowlist above. Review boundary differences with
   `socal_boundary_contributions_2024_bg_aggregated`, which identifies newly included sources and
   their weights/allocated counts. Use unchanged inputs for a valid comparison.
@@ -618,7 +764,8 @@ the stage's interface in [the shared pipeline document](../../PIPELINE.md).
 The notebook split preserves the post-cleanup calculations, operation order within
 each product, filenames, keys, column order/types, values, and missingness.
 This describes the historical split. The subsequent contributor/count hardening
-above intentionally changes incomplete BG counts and their natural dependent values.
+above intentionally changes incomplete BG counts and their natural dependent values;
+the rent metadata migration also permits the verified corrections described above.
 `read_step2_parity_references()` in `R/assemble_helpers.R` reads each notebook's
 explicit map, retaining historical filenames, named missing references, and the
 existing messages. The split itself left measurement helpers unchanged; the
@@ -628,8 +775,8 @@ Before full execution, preserve post-cleanup baseline outputs. Run both notebook
 on identical inputs, in either order, and compare all three products across their
 **full key universes**, including row/column order, storage types, values, and
 missingness. Southern California reference checks alone do not establish this
-refactor's full parity. Review allocation conservation, county coverage, rent-share
-decomposition, income retention, inventory reconciliation, and exact save/reload
+refactor's full parity. Review allocation conservation, county coverage, rent status
+and corrected component coverage, income retention, inventory reconciliation, and exact save/reload
 checks. Full execution and canonical regeneration remain analyst-run.
 
 The four affected synthetic suites are `tests/test_income_censoring.R`,

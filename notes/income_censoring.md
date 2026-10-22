@@ -97,13 +97,11 @@ because rent is missing or top-coded. Its available source values and existing
 missingness are retained. No independent income-censoring rule was found in the
 project code, and no new income threshold or missing-value rule is introduced.
 
-The sole executable change in [censor_tc_vars()](../R/assemble_helpers.R) removes
-`med_hhincE = ifelse(rentE >= 2000000, NA, med_hhincE)`. The two existing rent
-assignments remain:
+The income correction in [censor_tc_vars()](../R/assemble_helpers.R) removed
+`med_hhincE = ifelse(rentE >= 2000000, NA, med_hhincE)`. The current shared helper retains only the separate lower-quartile assignment:
 
 ```r
-mutate(rentE = ifelse(rentE >= 3500, NA, rentE),
-       lqcrentE = ifelse(lqcrentE >= 3500, NA, lqcrentE))
+mutate(lqcrentE = ifelse(lqcrentE >= 3500, NA, lqcrentE))
 ```
 
 This shared helper now leaves income unchanged for 2016 tracts and for 2024
@@ -112,7 +110,8 @@ contributions retain their existing `hhE * wt_hh` weights; missing source
 income is still omitted by `na.rm = TRUE`. An aggregate with all source incomes
 missing remains missing. The aggregation and CV formulas are unchanged.
 
-Rent and lower-quartile rent are still independently censored at 3500. Median
+Median gross rent now uses the [source-evidence classification](../README.md#rent-metadata-migration);
+this shared helper only censors lower-quartile rent at 3500. Median
 house value still receives its existing top-code flag at 2,000,000 without
 censoring the estimate. Other variables and derived-rent eligibility rules are
 unchanged.

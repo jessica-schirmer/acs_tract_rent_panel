@@ -60,6 +60,14 @@ both years; `vac_forrent` and `vac_rented` are retained in all three requests.
 The retired low-rent counts are not constructed. All gross-rent bins remain
 available for downstream interpolation.
 
+For each extract, a separate B25064 E/EA/M/MA request preserves original
+character codes in `rent_source_e`, `rent_source_ea`, `rent_source_m`, and
+`rent_source_ma`, with logical `rent_evidence_available`. Match GEOIDs and
+normalized E/M exactly before attaching evidence. If retrieval fails, preserve
+normalized E/M, missing annotations, and availability FALSE for cautious
+upstream classification. Dollar units remain the source-year basis; no bounds
+or classifications are constructed here.
+
 This step only **imports and stores** source data; it performs no row-level
 filtering or sample restriction. Geographic harmonization (aggregating the
 2020–2024 block-group data to 2010 tracts using these crosswalks) happens in
@@ -72,8 +80,7 @@ three required estimates with explicit missingness propagation, using `wt_renthu
 for block-group components and direct sums for both tract sources. Its narrow
 schema migration for the existing 2016 and block-group products permits
 the agreed additions/removals against older parity references while retaining
-strict checks on shared columns; see [README.md](README.md). This notebook's
-extraction and storage contracts remain unchanged.
+strict checks on shared columns; see [README.md](README.md).
 
 The block-group extract and allocation crosswalk pass structural assertions
 before saving. Section 6.1 reports statewide ACS-only and crosswalk-only block
@@ -102,6 +109,8 @@ library(here)          # project-root-relative paths via here::here()
 library(Hmisc)
 library(dplyr)
 library(tidycensus)
+library(httr)
+library(jsonlite)
 library(tidyverse)
 library(spatstat)
 library(matrixStats)
@@ -142,6 +151,7 @@ Step 1 input assertions, coverage diagnostics, and exact readback checks live
 in `R/acs_input_qa.R`.
 
 ```{r load-helpers}
+source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "helpers.R"))
 source(here::here("R", "acs_input_qa.R"))
 ```
@@ -332,6 +342,7 @@ flag), then writes the output. **Output:** `acs_step1_2016_tract.feather` — 20
 estimates with one row per 2010 CA tract, consumed by `02b_prepare_tract_sources.Rmd`.
 
 ```{r save-acs-tract-16}
+acs_trt_16 <- download_rent_evidence(acs_trt_16, 2016)
 acs_trt_16 <- rename_id(acs_trt_16, tr2010_id, GEOID)
 
 report_n(acs_trt_16, "2016 ACS tracts saved")
@@ -349,7 +360,7 @@ rm(v16)
 The 2020–2024 ACS input for stage 2 is imported at the **block-group** level, because
 2020-vintage block groups can be allocated to 2010 tracts using the NHGIS
 crosswalk loaded in Section 6.1. Aggregation to 2010 tracts happens downstream in
-`02b_prepare_tract_sources.Rmd`. The request uses the subset defined in §2.2; the full 2024
+`02a_aggregate_2024_block_groups.Rmd`. The request uses the subset defined in §2.2; the full 2024
 tract list is downloaded separately in §5. Expected: one row per CA 2020-vintage
 block group (~25,000+).
 
@@ -407,6 +418,7 @@ output. **Output:** `acs_step1_2024_block_group.feather` — 2020–2024 ACS est
 per 2020 CA block group, consumed by `02a_aggregate_2024_block_groups.Rmd`.
 
 ```{r save-acs-bg-24}
+acs_bg_24 <- download_rent_evidence(acs_bg_24, 2024, "block group")
 acs_bg_24 <- rename_id(acs_bg_24, bg2020_id, GEOID)
 assert_acs_bg_input(acs_bg_24, block_group_vars)
 stopifnot("BG rows changed before saving" = nrow(acs_bg_24) == acs_bg_24_n)
@@ -454,6 +466,7 @@ flag. **Output:** `acs_step1_2024_tract.feather` — one row per 2020 CA tract.
 Keep the shared variable vectors available for final output validation.
 
 ```{r save-acs-tract-24}
+acs_trt_24 <- download_rent_evidence(acs_trt_24, 2024)
 acs_trt_24 <- rename_id(acs_trt_24, tr2020_id, GEOID)
 
 report_n(acs_trt_24, "2024 ACS tracts saved")

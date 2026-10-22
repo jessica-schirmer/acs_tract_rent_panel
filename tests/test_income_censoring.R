@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
   library(matrixStats)
   library(stringr)
 })
+source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 
@@ -32,17 +33,15 @@ examples <- tibble(
   mutate(med_hvalE = rep(c(1999999, 2000000, 2000001, NA_real_), length.out = n()),
          rentM = 100, lqcrentM = 90, med_hhincM = 1000,
          rhuE = 100, rhucashE = 80) |>
-  flag_tc_vars(c("rentE", "lqcrentE", "med_hvalE"))
+  flag_tc_vars(c("lqcrentE", "med_hvalE"))
 
 corrected <- censor_tc_vars(examples)
 previous <- censor_before_income_fix(examples)
-other_columns <- setdiff(names(examples), "med_hhincE")
+other_columns <- setdiff(names(examples), c("med_hhincE", "rentE"))
 stopifnot(
   "Income must retain its source values and missingness" =
     identical(corrected$med_hhincE, examples$med_hhincE),
-  "Rent censoring must retain the 3500 boundary" = identical(
-    corrected$rentE,
-    c(1800, 3499, NA, NA, NA, 0, 1800, 1800, 1800, 1800, NA, NA, NA, NA)),
+  "Shared censor must leave separately classified B25064 untouched" = identical(corrected$rentE, examples$rentE),
   "Lower-quartile rent censoring must remain independent" = identical(
     corrected$lqcrentE,
     c(1200, 1200, 1200, 1200, 1200, 0, NA, NA, 1200, 1200, 1200, NA, NA, 1200)),
@@ -84,6 +83,7 @@ for (column in moe_columns) contributions[[column]] <- 10
 contributions <- calc_rel_wt(contributions, tr2010_id)
 
 corrected_tracts <- contributions |>
+  mutate(rentE = ifelse(rentE >= 3500, NA_real_, rentE)) |>
   censor_tc_vars() |>
   calc_agg_vars(tr2010_id) |>
   calc_pct_vars() |>
@@ -156,6 +156,7 @@ expect_parity_error <- function(expr, message = "Southern California parity fail
 tract_sources <- examples |>
   mutate(tr2010_id = sprintf("06037%06d", seq_len(n())))
 corrected_16 <- censor_tc_vars(tract_sources) |>
+  mutate(rentE = ifelse(rentE >= 3500, NA_real_, rentE)) |>
   mutate(med_hhincCV = (med_hhincM / 1.645) / med_hhincE)
 legacy_16 <- censor_before_income_fix(tract_sources) |>
   mutate(med_hhincCV = (med_hhincM / 1.645) / med_hhincE)
@@ -231,7 +232,7 @@ wrong_missing_income$med_hhincE[missing_row] <- 80000
 expect_parity_error(parity(wrong_missing_income, legacy_16, expected_16))
 
 # Candidate MOEs must match the reference even if income/CVs are otherwise valid.
-for (column in c("rentE", "rentM", "rhuE", "med_hhincM", "med_hvalE", "tc_flag_rent")) {
+for (column in c("rentE", "rentM", "rhuE", "med_hhincM", "med_hvalE", "tc_flag_lqcrent")) {
   unrelated <- corrected_16
   unrelated[[column]][1] <- unrelated[[column]][1] + 1
   expect_parity_error(parity(unrelated, legacy_16, expected_16))
@@ -318,6 +319,7 @@ zero_moe_sources$med_hhincM[zero_row] <- 0
 zero_moe_legacy <- censor_before_income_fix(zero_moe_sources) |>
   mutate(med_hhincCV = (med_hhincM / 1.645) / med_hhincE)
 zero_moe_corrected <- censor_tc_vars(zero_moe_sources) |>
+  mutate(rentE = ifelse(rentE >= 3500, NA_real_, rentE)) |>
   mutate(med_hhincCV = (med_hhincM / 1.645) / med_hhincE)
 zero_moe_expected <- income_expectations("16", zero_moe_sources, zero_moe_legacy)
 stopifnot(is.nan(zero_moe_corrected$med_hhincCV[zero_row]))

@@ -10,6 +10,7 @@ suppressPackageStartupMessages({
   library(stringr)
   library(arrow)
 })
+source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 source(here::here("R", "bg_aggregation_qa.R"))
@@ -267,6 +268,8 @@ for (bedroom in 1:3) {
   native_source[[paste0("rent", bedroom, "bdrE")]] <- 3600 + bedroom
   native_source[[paste0("rent", bedroom, "bdrM")]] <- 100
 }
+native_source[3, paste0("grentcat", 1:24, "E")] <- 0
+native_source$grentcat24E[3] <- native_source$rhucashE[3]
 native_source$rentE[1:4] <- c(3499, 3500, 3501, NA_real_)
 native_source$lqcrentE[1:4] <- c(3500, 3499, NA_real_, 3501)
 native_source$med_hvalE[1:3] <- c(1999999, 2000000, 2000001)
@@ -300,10 +303,10 @@ native_before <- filter(native_source, substr(tr2020_id, 3, 5) == "037")
 stopifnot(
   identical(native_out$tr2020_id, native_before$tr2020_id),
   !any(c("tr2010_id", "interp_rent", "pct_miss_rent", "inventory_incomplete") %in% names(native_out)),
-  identical(native_out$rentE[1:4], c(3499, NA_real_, NA_real_, NA_real_)),
+  identical(native_out$rentE[1:4], c(3499, 3500, NA_real_, NA_real_)),
   identical(native_out$lqcrentE[1:4], c(NA_real_, 3499, NA_real_, NA_real_)),
-  identical(native_out$tc_flag_rent[1:4], c(0, 1, 1, NA_real_)),
-  identical(native_out$m_flag_rent[1:4], c(0, 1, 1, 1)),
+  identical(native_out$tc_flag_rent_24[1:4], c(0, 0, 1, NA_real_)),
+  identical(native_out$rent_status_24[1:4], c("observed", "observed", "top_coded", "unresolved")),
   identical(native_out$zero_flag_rhu[3:5], c(1, NA_real_, 1)),
   identical(native_out$tc_flag_med_hval[1:3], c(0, 1, 1)),
   identical(native_out$med_hhincE, native_before$med_hhincE),
@@ -356,7 +359,7 @@ validate_saved_products <- function(env, notebook, saves, products, filenames, r
   on.exit(unlink(directory, recursive = TRUE))
   # Load notebook helpers into an isolated parent; fixture globals cannot leak in.
   helper_env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
+  for (file in c("rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
     sys.source(here::here("R", file), helper_env)
   }
   parent.env(env) <- helper_env
@@ -423,7 +426,7 @@ run_isolated_notebook <- function(notebook, inputs, outputs, helper_dir = here::
   on.exit(unlink(directory, recursive = TRUE))
   for (name in names(inputs)) write_feather(inputs[[name]], file.path(directory, name))
   env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
+  for (file in c("rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
     # Historical split baselines predate the BG-only QA file.
     if (file != "bg_aggregation_qa.R" || file.exists(file.path(helper_dir, file))) {
       sys.source(file.path(helper_dir, file), env)

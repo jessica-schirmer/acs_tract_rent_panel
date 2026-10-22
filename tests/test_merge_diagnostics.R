@@ -9,6 +9,7 @@ suppressPackageStartupMessages({
   library(arrow)
   library(matrixStats)
 })
+source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "merge_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 source(here::here("R", "merge_diagnostics.R"))
@@ -140,14 +141,16 @@ make_input <- function(ids, key, bg = FALSE) {
   x$sfd_detM <- rep(2, length(ids))
   if (bg) {
     x <- mutate(x, rhu_id = TRUE, left_id = TRUE, right_id = TRUE,
-                 pct_miss_rent = 0, pct_tc_rent = 0,
-                 tc_flag_rent_24 = 0, interp_rent = rentE * 1.05) |>
+                 pct_miss_rent = 0,
+                 tc_flag_rent_24 = 0, rent_status_24 = "observed", rent_censor_bound_24 = NA_real_, interp_rent = rentE * 1.05) |>
       select(-all_of(c("rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
                        "med_hvalE", "med_hvalM", "med_hvalCV")))
   } else {
-    x <- mutate(x, rent_id = TRUE, m_flag_rent = 0, m_flag_lqcrent = 0,
+    x <- mutate(x, rent_id = TRUE, m_flag_lqcrent = 0,
                  m_flag_rhu = 0, m_flag_med_hval = 0, zero_flag_rhu = 0, zero_flag_med_hval = 0,
-                 tc_flag_rent = 0, tc_flag_lqcrent = 0, tc_flag_med_hval = 0)
+                 tc_flag_lqcrent = 0, tc_flag_med_hval = 0)
+    year <- if (key == "tr2010_id") "16" else "24"
+    x <- add_rent_metadata(x, rep("observed", nrow(x)), year)
   }
   x
 }
@@ -237,13 +240,13 @@ all_fields <- mutate(small, geo_consistent = c(1, 0, NA, 2, 1, 0, NA, 2),
                      rentE_16 = as.double(51:58), pct_miss_rent = 0.25)
 for (i in seq_along(unique(fields$tract))) {
   column <- unique(fields$tract)[i]
-  value <- if (grepl("_flag_", column)) 0 else as.double(100 + i)
+  value <- if (grepl("rent_status", column)) "observed" else if (grepl("_flag_", column)) 0 else as.double(100 + i)
   all_fields[[column]] <- replace(rep(value, 8), c(3, 5), NA_real_)
 }
 for (i in seq_along(fields$bg_agg)) {
   column <- fields$bg_agg[i]
-  value <- if (grepl("_flag_", column)) 1 else as.double(200 + i)
-  all_fields[[column]] <- c(rep(value, 5), NA_real_, NA_real_, NaN)
+  value <- if (grepl("rent_status", column)) "top_coded" else if (grepl("_flag_", column)) 1 else as.double(200 + i)
+  all_fields[[column]] <- if (is.character(value)) c(rep(value, 5), rep(NA_character_, 3)) else c(rep(value, 5), NA_real_, NA_real_, NaN)
   all_fields[[fields$canonical[i]]] <- rep(-999, 8)
 }
 all_selected <- select_canonical_2024(all_fields)
@@ -255,9 +258,14 @@ stopifnot(identical(all_selected[untouched], all_fields[untouched]),
           all(assert_hierarchical_2024(all_selected)$n_mismatch == 0))
 for (i in seq_len(nrow(fields))) {
   column <- fields$canonical[i]
-  stopifnot(identical(all_selected[[column]][c(1, 5)], all_fields[[fields$tract[i]]][c(1, 5)]),
-            identical(all_selected[[column]][c(2, 3, 4, 6, 7, 8)],
-                      all_fields[[fields$bg_agg[i]]][c(2, 3, 4, 6, 7, 8)]))
+  expected_tract <- all_fields[[fields$tract[i]]]
+  expected_bg <- all_fields[[fields$bg_agg[i]]]
+  if (column == "rent_status_24") {
+    expected_tract <- coalesce(expected_tract, "unresolved")
+    expected_bg <- coalesce(expected_bg, "unresolved")
+  }
+  stopifnot(identical(all_selected[[column]][c(1, 5)], expected_tract[c(1, 5)]),
+            identical(all_selected[[column]][c(2, 3, 4, 6, 7, 8)], expected_bg[c(2, 3, 4, 6, 7, 8)]))
   bad_missing <- all_selected
   bad_missing[[column]][3] <- NA_real_
   expect_error(assert_hierarchical_2024(bad_missing), paste(column, "violates"))
@@ -269,7 +277,7 @@ correction <- summarize_hierarchy_correction(all_selected)
 stopifnot(identical(correction$measure, fields$canonical),
           all(correction$n_not_consistent == 6), all(correction$n_bg_observed == 3),
           all(correction$n_canonical_missing_before == 5),
-          all(correction$n_canonical_missing_after == 3),
+          all(correction$n_canonical_missing_after == ifelse(correction$measure == "rent_status_24", 0, 3)),
           all(correction$n_bg_observed_canonical_missing_before == 2),
           all(correction$n_bg_observed_canonical_missing_after == 0))
 legacy_selected <- all_selected
@@ -304,18 +312,22 @@ bg_cvs <- setdiff(cvs, c("rentCV", "med_hvalCV"))
 source_bg <- make_input(ids_bg, "tr2010_id", bg = TRUE) |>
   mutate(across(all_of(c(bg_estimates, "rhu_inventoryE")), ~ .x * 2),
          across(all_of(bg_moes), ~ .x * 10), across(all_of(bg_cvs), ~ .x * 2),
-         pct_miss_rent = 0.2, pct_tc_rent = 0.1, tc_flag_rent_24 = 1)
+         pct_miss_rent = 0.2)
 source_tract <- make_input(native_ids, "tr2020_id") |>
   mutate(across(all_of(c(estimates, "rhu_inventoryE")), ~ .x * 3),
          across(all_of(moes), ~ .x * 20), across(all_of(cvs), ~ .x * 3))
 source_16$rentE[c(2, 3)] <- c(0, NA_real_)
+source_16$rent_status_16[3] <- "unresolved"
+source_16$tc_flag_rent_16[3] <- NA_real_
 source_16$rhuE[4] <- 0
 source_16$rhu_inventoryE[5] <- 0
 source_tract$tr2020_id[6] <- paste0(substr(native_ids[6], 1, 5), "000300")
 source_tract$rentE[c(7, 14)] <- NA_real_
-source_tract$m_flag_rent[c(7, 14)] <- 1
+source_tract$rent_status_24[c(7, 14)] <- c("unresolved", "top_coded")
+source_tract$tc_flag_rent_24[7] <- NA_real_
+source_tract$rent_censor_bound_24[14] <- 3500
 source_tract$rentCV[c(7, 14)] <- NA_real_
-source_tract$tc_flag_rent[14] <- 1
+source_tract$tc_flag_rent_24[14] <- 1
 source_tract$med_hhincM[12] <- NA_real_
 source_tract$med_hhincCV[12] <- NA_real_
 source_tract$rhu_inventoryE[9] <- NA_real_
@@ -324,6 +336,8 @@ source_bg$rhu_inventoryE[9] <- source_bg$rhuE[9] - 1
 source_bg$med_hhincE[13] <- NA_real_
 source_bg$med_hhincCV[13] <- NA_real_
 source_bg$interp_rent[8] <- NA_real_
+source_bg$rent_status_24[8] <- "unavailable_other"
+source_bg$tc_flag_rent_24[8] <- NA_real_
 source_16$smfE[c(2, 3)] <- c(0, NA_real_)
 source_16$sfd_detE[c(4, 5)] <- c(0, NA_real_)
 source_tract$smfE[c(1, 7)] <- c(0, NA_real_)
@@ -395,7 +409,7 @@ stopifnot(nrow(canonical_before) == length(union(ids_16, ids_bg)),
           identical(canonical_before$med_hhincE_24[10:11], source_bg$med_hhincE[10:11]),
           canonical_before$acs_source_24[12] == "tract", is.na(canonical_before$med_hhincM_24[12]),
           is.na(canonical_before$med_hhincPOSTCV[12]), is.na(canonical_before$med_hhincE_24[13]),
-          canonical_before$tc_flag_rent_24[1] == 0, canonical_before$tc_flag_rent_24[2] == 1,
+          canonical_before$tc_flag_rent_24[1] == 0, canonical_before$tc_flag_rent_24[2] == 0,
           canonical_before$tc_flag_rent_24[14] == 1, is.na(canonical_before$interp_rent[14]),
           is.na(canonical_before$post_id[row_901]), !is.na(canonical_before$interp_rentPOST[row_901]),
           canonical_before$acs_source_24[row_903] == "bg_agg", is.na(canonical_before$interp_rent[row_903]),
@@ -416,7 +430,7 @@ for (measure in c("rhu", "med_hhinc")) {
             isTRUE(all.equal(canonical_before[[paste0(measure, "POSTCV")]][1], expected_moe/1.645/ratio)))
 }
 bg_rows <- match(canonical_before$tr2010_id, source_bg$tr2010_id)
-for (column in c("pct_miss_rent", "pct_tc_rent")) {
+for (column in c("pct_miss_rent")) {
   stopifnot(identical(canonical_before[[column]], source_bg[[column]][bg_rows]))
 }
 stopifnot(canonical_before$interp_rent[1] == 30,
@@ -460,7 +474,7 @@ stopifnot(identical(env$acs_full, canonical_before),
           all(env$hierarchy_correction_qa$n_bg_observed_canonical_missing_after == 0),
           all(filter(env$hierarchy_correction_qa, measure %in% c("interp_rent", "rhu_inventoryE_24"))$
                 n_bg_observed_canonical_missing_before == 2),
-          all(with(env$hierarchy_correction_qa,
+          all(with(filter(env$hierarchy_correction_qa, measure != "rent_status_24"),
                    n_canonical_missing_after == n_not_consistent - n_bg_observed)))
 
 # Section 5 retains every consistent key, including different-GEOID pairs and
@@ -552,11 +566,17 @@ cat("Section 5 synthetic checks passed: consistent population, source interpolat
 # for changes, even when the diagnostic copy has the same incorrect values.
 bad_change_env <- new.env(parent = env)
 bad_change_env$acs_full <- mutate(canonical_before,
-  interp_rentPOST = diagnostic_ratio(env$acs_diagnostics$interp_rent_24_bg_agg, rentE_16))
+  interp_rentPOST = if_else(tc_flag_rent_16 %in% 1 | tc_flag_rent_24 %in% 1,
+    NA_real_, diagnostic_ratio(env$acs_diagnostics$interp_rent_24_bg_agg, rentE_16)))
 bad_change_env$acs_diagnostics <- mutate(env$acs_diagnostics,
   interp_rentPOST = bad_change_env$acs_full$interp_rentPOST)
 expect_error(eval(notebook_chunk("validation-panel"), bad_change_env),
              "Interpolated rent change must use the canonical selected value")
+
+bad_change_env$acs_full <- mutate(canonical_before,
+  interp_rentPOST = if_else(tc_flag_rent_24 %in% 1, 1, interp_rentPOST))
+expect_error(eval(notebook_chunk("validation-panel"), bad_change_env),
+             "Confirmed top-codes must not enter numeric rent changes")
 
 # Disabled writes must not read/create/replace the canonical destination.
 run_chunk("save-panel")
@@ -572,7 +592,7 @@ stopifnot(identical(tools::md5sum(saved_path), sentinel_md5))
 
 # Fixed migration allowlist, strict shared order/types, and temporary round trips.
 # This independent list is the agreed removal contract, including sole-use flags.
-retired_panel <- c("rhu_lrE_16", "rhu_lrE_24", "rhu_lr2E_16", "rhu_lr2E_24",
+retired_panel <- c("tc_flag_rent", "m_flag_rent", "pct_tc_rent", "rhu_lrE_16", "rhu_lrE_24", "rhu_lr2E_16", "rhu_lr2E_24",
   "rhu_lrPOST", "rhu_lr2POST", "rentE_24", "rentM_24", "rentCV_24",
   "lqcrentE_24", "lqcrentM_24", "med_hvalE_24", "med_hvalM_24", "med_hvalCV_24",
   "rentPOST", "lqcrentPOST", "moe_rentPOST", "rentPOSTCV", "m_flag_rentPOST",

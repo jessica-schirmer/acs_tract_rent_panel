@@ -26,8 +26,8 @@ bg_inventory_measure_map <- function() {
 # uncensored allocation snapshot rather than the mutable production frame.
 bg_reconciliation_sources <- function(original) {
   original |>
-    mutate(rentE = if_else(rentE >= 3500, NA_real_, rentE),
-           mfE = mf_5_9E + mf_10_19E + mf_20_49E + mf_50E,
+    censor_bg_coverage_rent() |>
+    mutate(mfE = mf_5_9E + mf_10_19E + mf_20_49E + mf_50E,
            smfE = sfd_attE + duplexE + quadplexE)
 }
 
@@ -37,7 +37,7 @@ bg_dependent_count_map <- function() {
   c(bg_weighted_count_dependencies(), list(
     nsfaE = c("smfE", "mf5E"),
     pct_miss_rent = c("rhu_miss_rent", "rhuE"),
-    pct_m_rent = "rhuE", pct_tc_rent = "rhuE", tc_flag_rent_24 = "rhuE",
+    tc_flag_rent_24 = rent_count_columns(), rent_censor_bound_24 = rent_count_columns(),
     pctrhuE = c("rhuE", "huE"), pctvacE = c("tot_vacE", "tot_vac_baseE"),
     pctblkE = c("pop_blkE", "pop_raceE"), pcthspE = c("pop_hspE", "pop_ethnE"),
     pctaaE = c("pop_aaE", "pop_raceE"), pctsfdE = c("sfd_detE", "sfd_baseE"),
@@ -72,9 +72,9 @@ bg_dependent_diagnostics <- function(diagnostics, measures = names(bg_dependent_
   list(measure = summary, missing_sources = missing_sources)
 }
 
-# The default covers every saved dependent measure; pct_m_rent is diagnostic only.
+# The default covers every saved numeric dependent measure.
 assert_bg_dependent_measures <- function(output, diagnostics,
-                                         measures = setdiff(names(bg_dependent_count_map()), "pct_m_rent")) {
+                                         measures = names(bg_dependent_count_map())) {
   qa <- bg_dependent_diagnostics(diagnostics, measures)
   assert_tract_keys(output, unique(qa$measure$tr2010_id), "BG dependent completeness")
   if (!all(measures %in% names(output)) ||
@@ -336,32 +336,37 @@ bg_count_parity_expectations <- function(df, reference, uncensored_df) {
     corrected[[map$measure[i]]] <- expected$expected_total[match(corrected$tr2010_id, expected$tr2010_id)]
     legacy[[map$measure[i]]] <- old$value[match(legacy$tr2010_id, old$tr2010_id)]
   }
-  legacy_shares <- uncensored_df |> group_by(tr2010_id) |>
-    summarise(total = sum(rhuE * wt_renthu, na.rm = TRUE),
-              topcoded = sum((!is.na(rentE) & rentE >= 3500) * rhuE * wt_renthu, na.rm = TRUE),
-              .groups = "drop") |>
-    transmute(tr2010_id, pct_tc_rent = if_else(total > 0, topcoded / total, NA_real_),
-              tc_flag_rent_24 = if_else(!is.na(pct_tc_rent) & pct_tc_rent > 0, 1, 0))
-  corrected_shares <- calc_pct_tc_m(uncensored_df, tr2010_id) |>
-    select(tr2010_id, pct_tc_rent) |>
-    left_join(select(corrected, tr2010_id, rhuE), by = "tr2010_id", relationship = "one-to-one") |>
-    mutate(tc_flag_rent_24 = if_else(is.na(rhuE), NA_real_,
-                                    if_else(!is.na(pct_tc_rent) & pct_tc_rent > 0, 1, 0))) |>
-    select(-rhuE)
-  derive <- function(counts, shares) {
+  derive <- function(counts, old = FALSE) {
+    rents <- calc_interp_rent(counts)
+    if (old) {
+      # Frozen pre-metadata interpolation for parity against partial-count
+      # snapshots, before the audited cash/bin consistency check was added.
+      lower <- c(0, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600,
+                 650, 700, 750, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3500)
+      upper <- c(99, 149, 199, 249, 299, 349, 399, 449, 499, 549, 599, 649,
+                 699, 749, 799, 899, 999, 1249, 1499, 1999, 2499, 2999, 3499, NA)
+      for (i in seq_len(nrow(counts))) {
+        bins <- as.numeric(counts[i, paste0("grentcat", 1:24, "E")])
+        half <- counts$rhucashE[i] / 2
+        if (anyNA(c(bins, half)) || half <= 0) next
+        cumulative <- cumsum(bins)
+        k <- which(cumulative >= half)[1]
+        if (!is.na(k) && k > 1L && k < 24L) rents$interp_rent[i] <-
+          lower[k] + (upper[k] - lower[k]) * (half - cumulative[k - 1L]) / bins[k]
+      }
+    }
     counts |> calc_missing_vars() |> calc_pct_vars() |> calc_cv(source = "bg_agg") |>
       mutate(nsfaE = smfE + mf5E,
              pctrvacE = if_else((rhuE + vac_forrentE) > 0,
                                 vac_forrentE / (rhuE + vac_forrentE), NA_real_),
              pctsvacE = if_else((ohuE + vac_forsaleE) > 0,
                                 vac_forsaleE / (ohuE + vac_forsaleE), NA_real_)) |>
-      left_join(calc_interp_rent(counts), by = "tr2010_id", relationship = "one-to-one") |>
-      left_join(shares, by = "tr2010_id", relationship = "one-to-one") |>
+      left_join(select(rents, tr2010_id, interp_rent), by = "tr2010_id", relationship = "one-to-one") |>
       select(tr2010_id, all_of(bg_count_correction_columns())) |>
       pivot_longer(-tr2010_id, names_to = "variable", values_to = "value")
   }
-  left_join(derive(legacy, legacy_shares) |> rename(legacy = value),
-            derive(corrected, corrected_shares) |> rename(corrected = value),
+  left_join(derive(legacy, old = TRUE) |> rename(legacy = value),
+            derive(corrected) |> rename(corrected = value),
             by = c("tr2010_id", "variable"), relationship = "one-to-one") |>
     filter(xor(is.na(legacy), is.na(corrected)) |
              (!is.na(legacy) & !is.na(corrected) & legacy != corrected))

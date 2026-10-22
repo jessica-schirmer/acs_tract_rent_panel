@@ -60,7 +60,7 @@ assert_same_schema <- function(current, previous, label) {
 # Fixed cleanup removals; native tract dollar estimates remain valid input/output fields.
 step2_cleanup_columns <- function(product = c("2016", "2024", "2024_tract")) {
   product <- match.arg(product)
-  c("rhu_lrE", "rhu_lr2E", if (product == "2024") {
+  c("rhu_lrE", "rhu_lr2E", "tc_flag_rent", "m_flag_rent", "pct_tc_rent", if (product == "2024") {
     c("rentE", "rentM", "rentCV", "lqcrentE", "lqcrentM",
       "med_hvalE", "med_hvalM", "med_hvalCV", "hu_miss_hval", "pct_miss_hval")
   })
@@ -81,7 +81,7 @@ bg_count_correction_columns <- function() {
     paste0("grentcat", 1:24, "E"), "rhu_miss_rent", "nsfaE", "pct_miss_rent",
     "pctrhuE", "pctvacE", "pctblkE", "pcthspE", "pctaaE", "pctsfdE", "pctrvacE", "pctsvacE",
     "pctrhuM", "pctblkM", "pcthspM", "pctrhuCV", "pctblkCV", "pcthspCV",
-    "rhuCV", "huCV", "popCV", "interp_rent", "pct_tc_rent", "tc_flag_rent_24",
+    "rhuCV", "huCV", "popCV", "interp_rent",
     "med_hhincE", "med_hhincM", "med_hhincCV", "rhuM", "rhu_baseM",
     "tot_vacM", "tot_vac_baseM", "pop_blkM", "pop_hspM", "pop_aaM", "pop_raceM",
     "sfd_detM", "sfd_baseM", "huM", "popM")
@@ -100,7 +100,8 @@ bg_count_correction_columns <- function() {
 compare_socal_parity <- function(current, previous, socal_counties,
                                  boundary_ids = character(), tolerance = 1e-10,
                                  expected_income = NULL, schema_migration = NULL,
-                                 key = "tr2010_id", expected_count_corrections = NULL) {
+                                 key = "tr2010_id", expected_count_corrections = NULL,
+                                 expected_rent = NULL) {
   if (!is.null(schema_migration)) {
     if (!is.character(schema_migration) || length(schema_migration) != 1L ||
         is.na(schema_migration) || !schema_migration %in% c("2016", "2024", "2024_tract")) {
@@ -124,6 +125,10 @@ compare_socal_parity <- function(current, previous, socal_counties,
     allowed_added <- if (schema_migration == "2024_tract") character() else {
       c("rhu_inventoryE", if (schema_migration == "2016") c("vac_rentedE", "vac_rentedM"))
     }
+    rent_year <- if (schema_migration == "2016") "16" else "24"
+    allowed_added <- c(allowed_added, rent_metadata_columns(rent_year),
+                       "rent_status_reason", "rent_median_bin",
+                       if (schema_migration != "2024") rent_evidence_columns())
     allowed_removed <- c(step2_cleanup_columns(schema_migration), if (schema_migration == "2016") {
       c(paste0(removed_measures, "E"), paste0(removed_measures, "M"))
     })
@@ -138,11 +143,21 @@ compare_socal_parity <- function(current, previous, socal_counties,
         stop("Southern California parity: schema removals must be estimate/MOE pairs")
       }
     }
-    if (!all(vapply(current[added], is.numeric, logical(1)))) {
+    string_fields <- c("rent_status_16", "rent_status_24", "rent_status_reason",
+                       "rent_source_e", "rent_source_ea", "rent_source_m", "rent_source_ma")
+    if (!all(vapply(current[intersect(added, string_fields)], is.character, logical(1))) ||
+        ("rent_evidence_available" %in% added && !is.logical(current$rent_evidence_available)) ||
+        !all(vapply(current[setdiff(added, c(string_fields, "rent_evidence_available"))], is.numeric, logical(1)))) {
       stop("Southern California parity: added estimates/MOEs must be numeric")
     }
-    assert_same_schema(current[, !names(current) %in% added, drop = FALSE],
-                       previous[, !names(previous) %in% removed, drop = FALSE],
+    # The final-median flag moves into the interpolation bundle; all unrelated
+    # shared fields retain their order and types.
+    moved <- if (schema_migration == "2024") intersect("tc_flag_rent_24", intersect(names(current), names(previous))) else character()
+    if (length(moved) && (!is.double(current$tc_flag_rent_24) || !is.double(previous$tc_flag_rent_24))) {
+      stop("Southern California parity: rent flag must retain double storage")
+    }
+    assert_same_schema(current[, !names(current) %in% c(added, moved), drop = FALSE],
+                       previous[, !names(previous) %in% c(removed, moved), drop = FALSE],
                        "Southern California parity shared columns")
   }
   shared_columns <- intersect(names(current), names(previous))
@@ -172,6 +187,14 @@ compare_socal_parity <- function(current, previous, socal_counties,
       stop("Count expectations require keyed, allowed variables and numeric legacy/corrected values")
     }
     assert_unique_key(expected, c(key, "variable"), "Count expectations")
+  }
+  if (!is.null(expected_rent)) {
+    if (!all(c(key, "variable", "legacy", "corrected") %in% names(expected_rent)) ||
+        !all(expected_rent$variable %in% c("rentE", "rentCV", "tc_flag_rent_24", "rhu_miss_rent", "pct_miss_rent")) ||
+        !all(vapply(expected_rent[c("legacy", "corrected")], is.numeric, logical(1)))) {
+      stop("Rent expectations require keyed allowed variables and numeric legacy/corrected values")
+    }
+    assert_unique_key(expected_rent, c(key, "variable"), "Rent expectations")
   }
   values_match <- function(old, new) {
     same <- (is.na(old) & is.na(new)) | (!is.na(old) & !is.na(new) & old == new)
@@ -223,11 +246,20 @@ compare_socal_parity <- function(current, previous, socal_counties,
         values_match(old[changed], expected$legacy[expected_rows]) &
         values_match(new[changed], expected$corrected[expected_rows])
     }
+    verified_rent <- rep(FALSE, length(changed))
+    if (!is.null(expected_rent) && column %in% expected_rent$variable) {
+      expected <- expected_rent |> filter(variable == column)
+      expected_rows <- match(shared_ids[changed], expected[[key]])
+      verified_rent <- !is.na(expected_rows) &
+        values_match(old[changed], expected$legacy[expected_rows]) &
+        values_match(new[changed], expected$corrected[expected_rows])
+    }
     tibble(
       !!key := shared_ids[changed], variable = rep(column, length(changed)),
       prior = as.character(old[changed]), candidate = as.character(new[changed]),
       difference = if (is.numeric(old)) new[changed] - old[changed] else rep(NA_real_, length(changed)),
       classification = case_when(
+        verified_rent ~ "verified_rent_metadata_correction",
         verified_income ~ "verified_income_correction",
         verified_count ~ "verified_count_correction",
         shared_ids[changed] %in% boundary_ids ~ "boundary_review",
@@ -271,7 +303,7 @@ audit_panel_keys <- function(df, keys_16, keys_24) {
   }
   # Canonical 2024 availability is checked against the selected source in
   # assert_hierarchical_2024(); block-group membership alone cannot establish it.
-  measures_16 <- df[!audit$in_16, endsWith(names(df), "_16"), drop = FALSE]
+  measures_16 <- df[!audit$in_16, endsWith(names(df), "_16") & names(df) != "rent_status_16", drop = FALSE]
   if (!all(is.na(measures_16))) stop("Nonmissing measures for absent 16 input keys")
   change_columns <- grepl("POST$|POSTCV$|PPC$", names(df)) & !startsWith(names(df), "m_flag_")
   if (!all(is.na(df[!audit$in_16, change_columns, drop = FALSE]))) {

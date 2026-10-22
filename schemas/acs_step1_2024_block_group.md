@@ -21,8 +21,8 @@
 | `load_variables(2024, "acs5")` | Census variable code | Interactive lookup only; does not transform values or determine exclusions. |
 | NHGIS `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`, prepared as `xwalk_bg24_tr10.feather` | Allocation pair: raw (`bg2020ge`, `tr2010ge`), renamed (`bg2020_id`, `tr2010_id`) | Companion input for Step 1 coverage diagnostics and downstream allocation; supplies no columns to this extract. |
 
-The API request requires `CENSUS_API_KEY`. Geometry and ACS annotation fields
-are not requested. MOE confidence uses the [`get_acs()`
+The API request requires `CENSUS_API_KEY`. Geometry is not requested. A separate original B25064 E/EA/M/MA
+request preserves rent evidence before tidycensus normalization. MOE confidence uses the [`get_acs()`
 default](https://walker-data.com/tidycensus/reference/get_acs.html), defined in
 §5. Source dollar measures use the [2024 ACS dollar
 basis](https://www.census.gov/programs-surveys/acs/guidance/comparing-acs-data/2024.html).
@@ -63,7 +63,10 @@ first alias for each code; these duplicate aliases add no columns:
 
 ## 4. Join / allocation contract
 
-No join or allocation changes this saved table. BG→tract allocation occurs
+A one-to-one original B25064 join requires identical GEOIDs and normalized
+E/M, preserving every source row/value. If retrieval fails, normalized E/M
+strings, missing annotations, and availability FALSE are retained with a visible
+review message. No geographic allocation changes this saved table. BG→tract allocation occurs
 downstream in [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd),
 joining on `bg2020_id` to [xwalk_bg24_tr10.feather](xwalk_bg24_tr10.md).
 Crosswalk allocation pairs are many-to-many; the ACS table supplies one row per
@@ -71,8 +74,8 @@ source BG. Destination IDs and allocation weights are not persisted here.
 
 ## 5. Columns
 
-All **121 persisted columns** are listed below: two identifiers/labels, 59
-estimate/MOE pairs, and one flag. Rows are grouped by measure for readability;
+All **126 persisted columns** are listed below: two identifiers/labels, 59
+estimate/MOE pairs, one flag, and five B25064 evidence fields. Rows are grouped by measure for readability;
 consumers should select columns by name.
 
 - `E` = point estimate; `M` = 90% MOE for the corresponding estimate, in the
@@ -210,19 +213,23 @@ consumers should select columns by name.
 | `vac_forsaleM` | numeric | B25004_004M | MOE for `vac_forsaleE` | MOE |
 | `rent_id` | logical | `rename_id()` appends `TRUE` | ACS source-row join flag | Nonmissing; always `TRUE` |
 
+| `rent_source_e`, `rent_source_ea`, `rent_source_m`, `rent_source_ma` | character | Original B25064_001 E/EA/M/MA request | Preserved source evidence, including sentinels and annotations | API null → NA; never inflation-adjusted; fallback E/M are normalized strings |
+| `rent_evidence_available` | logical | Raw request availability | TRUE only when original E/EA/M/MA were retrieved and matched to the same-vintage extract | FALSE for normalized-E/M fallback; never missing |
+
 ## 6. Missingness and special-value rules
 
 - **Zero is observed data**, including a zero count or MOE; it is not missing.
   Step 1 neither converts zeros to `NA` nor replaces missing values with zero.
 - `tidycensus` converts ACS sentinel codes (`-111111111`, `-222222222`,
   `-333333333`, `-444444444`, `-555555555`, `-666666666`, `-777777777`,
-  `-888888888`, `-999999999`) to `NA` during import. The original missing-value
-  reason cannot be recovered from this file.
+  `-888888888`, `-999999999`) to `NA` during import. B25064 original values/annotations are retained in the five evidence fields;
+  other variables retain only their normalized missingness.
 - Numeric `NA` and `NaN` returned in either estimates or MOEs are preserved,
   including wholly missing measure columns. No imputation, estimate/MOE
   missingness coupling, or missingness threshold is applied.
 - Finite boundary/top-coded dollar values pass through. In particular, Step 1
-  does not censor `rentE` or `lqcrentE` at `>= 3500` as Step 2 does; missing or
+  does not censor rent; Step 2 distinguishes the upper `3501` code from genuine
+  `3500`, while lower-quartile rent retains its `>= 3500` rule; missing or
   top-coded rent does not alter `med_hhincE`. MOEs are not rescaled or recomputed.
 - Negative or infinite numeric values surviving import are retained for
   analyst review, not silently recoded or rejected by the structural checks.
@@ -274,7 +281,7 @@ separate from the coverage diagnostics above.
   exact temporary CSV/Feather round trips using a stubbed ACS call; it does not
   query ACS or write canonical outputs.
 - **Column-dictionary audit:** compare §5 names with
-  `c("bg2020_id", "NAME", acs_request_columns(block_group_vars), "rent_id")`
+  `c("bg2020_id", "NAME", acs_request_columns(block_group_vars), "rent_id", rent_evidence_columns())`
   as a set, and verify each numeric field's Census code against the first-alias
   mapping. This checks documentation completeness separately from row counts.
 - **Analyst-run regeneration:** execute `01_acs.Rmd` with its packages, Census

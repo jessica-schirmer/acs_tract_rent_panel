@@ -7,6 +7,8 @@ suppressPackageStartupMessages({
   library(arrow)
   library(matrixStats)
 })
+source(here::here("R", "rent_metadata.R"))
+download_rent_evidence <- function(df, year, geography = "tract") retain_rent_evidence(df)
 source(here::here("R", "helpers.R"))
 source(here::here("R", "acs_input_qa.R"))
 
@@ -224,7 +226,9 @@ local({
   env$acs24_bg_out <- read_feather(file.path(tmp_dir, "acs_step1_2024_block_group.feather"))
   env$xbg_out <- read_feather(file.path(tmp_dir, "xwalk_bg24_tr10.feather"))
   quiet(eval(chunks[["validate-bg-readback"]], env))
-  stopifnot(identical(env$acs24_bg_out, acs),
+  stopifnot(identical(env$acs24_bg_out[names(acs)], acs),
+            all(rent_evidence_columns() %in% names(env$acs24_bg_out)),
+            all(!env$acs24_bg_out$rent_evidence_available),
             identical(env$xbg_reloaded_weight_sums, env$xbg_weight_sums))
 
   # A failed pre-save check must leave an existing file unchanged.

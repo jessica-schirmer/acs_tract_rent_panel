@@ -51,12 +51,16 @@ values**; derived ratios use **aggregated tract values**.
 - **`CV(x)`** = `(xM / 1.645) / xE`, with zero/missing rules in §6.
   MOEs use the source 90% confidence basis; CVs and shares are unscaled ratios.
 
-Source `rentE` and `lqcrentE` at or above $3,500 are censored to `NA`.
-Rent-quality diagnostics use source median gross rent: `pct_tc_rent` is
-calculated before censoring, whereas `rhu_miss_rent` and `pct_miss_rent`
-include both originally missing and censored rent. Rent-bin counts are not
-censored. No weighted source rent, lower-quartile rent, or house-value estimate
-is saved.
+Source B25064 classification preserves genuine `3500` estimates using finite
+MOE and a complete non-top distribution; `3501` is upper censoring, and `99`
+is a lower-interval code. Other missing/conflicting evidence is retained in
+source preparation. `rhu_miss_rent` and `pct_miss_rent` use missing **cleaned BG
+source rent**, including censoring, with unchanged renter weights and denominator.
+The analyst approved correcting their old `>= 3500` source rule. The obsolete
+`pct_tc_rent` component-exposure share and `pct_m_rent` decomposition are removed.
+Neither component medians nor highest-bin mass determine final-tract status.
+Lower-quartile rent retains its separate `>= 3500` censor. No source mean of
+rent, lower-quartile rent, or house value is saved.
 
 ### Rental inventory
 
@@ -73,8 +77,14 @@ Require complete `rhucashE` and all 24 `grentcat*E` counts, with `rhucashE > 0`.
 Choose the first bin whose cumulative count reaches `rhucashE / 2`. For an
 interior bin, `interp_rent = lower + (upper - lower) * (rhucashE / 2 - prior_cumulative) / bin_count`,
 using the inclusive dollar bounds in §5 (e.g. $1,000–1,249 has width 249).
-Endpoint bins 1 and 24 are excluded. An incomplete distribution, zero cash-rent
-units, or no bin reaching the threshold yields missing rent.
+Rent and status come from this same allocated distribution. Bin 24 means
+`top_coded`, numeric rent NA, and a $3,500 bound in 2024 dollars. Exactly half
+reached below bin 24 is not top-coded. Bin 1, zero renters, or incomplete
+counts give `unavailable_other`; inconsistent totals (absolute tolerance `1e-6`)
+or no positive contributors give `unresolved`. Invalid negative/nonfinite counts
+are also unresolved in the helper; producer count validation stops them first.
+No tolerance alters the median threshold. All non-observed statuses have
+numeric rent NA, and unavailable/unresolved flags and bounds are NA.
 
 ## 4. Join / allocation contract
 
@@ -87,7 +97,7 @@ units, or no bin reaching the threshold yields missing rent.
   target IDs, and positive contributors by family. Any positive weight requires
   a matching ACS row, independently of estimate missingness. Unmatched links
   are allowed only when all four weights are zero; they retain their targets.
-- Supplemental counts, inventory, top-code diagnostics, and interpolation join
+- Supplemental counts, inventory, and the rent/metadata bundle join
   on `tr2010_id` with identical unique key sets and no row multiplication.
   Every `merge_df()` tract join must have `merge == "both"`; only the final
   `left_id`, `right_id`, and `merge` tags persist.
@@ -98,7 +108,7 @@ units, or no bin reaching the threshold yields missing rent.
 
 ## 5. Columns
 
-All **88 persisted columns** are listed below, grouped for readability; select
+All **91 persisted columns** are listed below, grouped for readability; select
 by name. `E` denotes an estimate, `M` its named MOE, and `CV` a coefficient of
 variation. Structure counts measure housing units, not buildings.
 
@@ -193,8 +203,11 @@ checks. Shares are expected in [0, 1], but are not clipped.
 | `popCV` | numeric | `CV(pop)` | Population coefficient of variation | CV |
 | `rhu_miss_rent` | numeric | `S_renthu(if_else(is.na(rentE), rhuE, 0))` after censoring | Renter units in BGs with missing/censored source rent | Count |
 | `pct_miss_rent` | numeric | `rhu_miss_rent / rhuE` | Share of renter units with missing/censored source rent | Share; [0, 1] within `1e-10`, or missing |
-| `pct_tc_rent` | numeric | `S_renthu(if_else(!is.na(rentE) & rentE >= 3500, rhuE, 0)) / rhuE` before censoring | Share of renter units with top-coded source rent | Share; [0, 1] within `1e-10`, or missing |
-| `tc_flag_rent_24` | numeric (double) | 1 if `pct_tc_rent > 0`; 0 otherwise when renter counts complete | Any positively weighted top-coded renter units | 0/1; `NA` if contributing `rhuE` incomplete; 0 for complete zero-renter targets |
+| `tc_flag_rent_24` | double | Final allocated median bin | Confirmed upper censoring | 1 top-coded; 0 observed; NA unavailable/unresolved |
+| `rent_status_24` | character | Same distribution as `interp_rent` | Final tract rent classification | observed / top_coded / unavailable_other / unresolved; never NA |
+| `rent_censor_bound_24` | double | Final median in bin 24 | Lower bound, 2024 dollars | 3500 for top_coded; NA otherwise |
+| `rent_median_bin` | integer | First cumulative count >= half | Final median category | 1–24; NA if incomplete/invalid/zero/no contributors |
+| `rent_status_reason` | character | Distribution/contributor evidence | Why rent is observed, censored, or missing | interior_distribution_median / median_in_open_top_bin / median_in_excluded_bottom_bin / incomplete_distribution / zero_cash_rent_units / cash_bin_total_conflict / invalid_distribution / no_positive_weight_sources |
 | `rhu_id` | logical | Added by `calc_agg_vars()` | Aggregation-row tag | Always `TRUE` |
 | `left_id` | logical | Final `merge_df()` | Row present on left of interpolated-rent join | Always `TRUE` |
 | `right_id` | logical | Final `merge_df()` | Row present on right of interpolated-rent join | Always `TRUE` |
@@ -223,14 +236,14 @@ checks. Shares are expected in [0, 1], but are not clipped.
   to zero. CVs are missing for zero estimates except `med_hhincCV`, whose
   unguarded division can yield `Inf` or `NaN`. Missing required counts propagate
   through dependent measures, including income CV's household/renter counts.
-- **Rent diagnostics:** incomplete renter counts make both rent shares and the
-  top-code flag missing. Complete zero-renter targets have missing shares and
-  flag zero. With complete positive counts, `pct_miss_rent` equals the
-  pre-censoring missing-rent share plus `pct_tc_rent` within `1e-10`; that
-  separate `pct_m_rent` is diagnostic only.
-- Step 1 has already converted ACS sentinel reasons to missing values; their
-  original reasons cannot be recovered. No missing counts are imputed; remaining
-  nonfinite income/uncertainty results are not globally recoded or rejected.
+- **Component coverage:** `pct_miss_rent` requires complete positive allocated
+  renter counts; zero or incomplete denominator gives NA. The numerator requires
+  renter counts where corrected BG source rent is missing. Its units and meaning
+  remain component coverage, independent of final-tract status and source selection.
+- `tc_flag_rent_24` and its bound depend on cash-renter/bin counts, not `rhuE`.
+  Zero cash renters yield unavailable status and a missing flag. Raw B25064 evidence
+  remains in Step 1; detailed BG-level reasons stay in allocation diagnostics,
+  while the persisted status/reason/bin describe only the final tract distribution.
 
 ## 7. Validation contract
 
@@ -245,13 +258,14 @@ uses `1e-10` relative tolerance with a unit floor; readback is exact.
 | Contributors, §§2.2–2.5, 2.8, 3.6 | Exact original keyed links/weights and target set preserved; every positive-weight link has an ACS row; unmatched links have four zero weights. Contributing counts are numeric and observed values finite/nonnegative; diagnostics agree with the reference. |
 | Tract joins/geography, §§2.5–2.8, 3.1, 3.5 | Original unique target set preserved and all tract joins complete; inventory join preserves prior rows/columns. Destination IDs are California tracts with exactly the configured county set. No fixed empirical row count. |
 | Counts/dependencies/inventory, §§2.5–2.8, 3.6 | Complete counts reconcile to independent source totals; incomplete counts and dependent cells are missing. Inventory source estimate/MOE columns must be numeric. Inventory missingness equals component incompleteness; complete inventory equals its three components; zero-contributor inventory is zero. Source-first/target-first inventory reconciles over complete targets only. |
-| Optional parity, §2.8 | Shared column names/order/types agree. `schema_migration = "2024"` permits only adding `rhu_inventoryE` and removing the fields below. Unexpected value changes or unaffected-tract membership changes fail; verified income/count corrections require reference and candidate to match source-derived expectations. |
+| Optional parity, §2.8 | Shared column names/order/types agree. `schema_migration = "2024"` permits inventory and rent metadata additions, retired rent-share removals, and the fields below. The final-median flag may move with its bundle; other shared order/types remain strict. Unexpected value changes or unaffected-tract membership changes fail; verified income/count/rent corrections require reference and candidate to match source-derived expectations. |
 | Saved output, §§3.1, 3.3, 3.6 | Exact in-memory/readback equality of rows, values, column names/order, types/classes; removed fields absent; numeric flags are double 0/1/missing. Count/dependent/inventory checks repeat independently of parity availability. |
-| Rent shares, §3.5 | Missingness agrees with count completeness; decomposition holds within `1e-10`; observed shares are finite and within [0, 1] with `1e-10` tolerance. |
+| Rent metadata/coverage, §3.5 | Valid status/flag/bound/value combinations; coverage agrees with corrected source missingness and unchanged weights/denominator within `1e-10`; observed shares finite in [0, 1]. |
 
 The fixed parity-removal list, also rejected in current outputs, is:
 `rhu_lrE`, `rhu_lr2E`, `rentE`, `rentM`, `rentCV`, `lqcrentE`, `lqcrentM`,
-`med_hvalE`, `med_hvalM`, `med_hvalCV`, `hu_miss_hval`, `pct_miss_hval`.
+`med_hvalE`, `med_hvalM`, `med_hvalCV`, `hu_miss_hval`, `pct_miss_hval`,
+`pct_tc_rent`, `tc_flag_rent`, `m_flag_rent`.
 
 ### Analyst-review diagnostics
 
@@ -289,8 +303,9 @@ objects; only the diagnostic/tag fields listed in §5 persist.
 
 - **Focused validation:** `Rscript --vanilla tests/test_bg_aggregation_qa.R`
   covers synthetic BG contributors, counts, dependencies, inventory, and
-  temporary readback; `tests/test_income_censoring.R` covers income retention.
-- **Documentation/column audit:** compare §5's 88 unique names with
+  temporary readback; `tests/test_income_censoring.R` covers income retention; `tests/test_rent_metadata.R`
+  covers distribution boundaries and source classification.
+- **Documentation/column audit:** compare §5's 91 unique names with
   `calc_agg_vars()` (24 rent bins and `mfE` → `mf5E`), supplemental/inventory
   joins, `calc_missing_vars()`, `calc_pct_vars()`, `calc_cv(source = "bg_agg")`,
   and final derived/flag/interpolation joins. Check local links and parse

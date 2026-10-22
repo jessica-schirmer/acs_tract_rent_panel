@@ -34,7 +34,7 @@ All files are under `../../../data/`, relative to the repository root.
 
 - **Hierarchy:** select the native-tract 2024 bundle only for `geo_consistent == 1`;
   select BG measurements for every other flag, including missing/unexpected
-  values. This covers retained estimates, MOEs, CVs, and three 2024 quality flags.
+  values. This covers retained estimates, MOEs, CVs, and 2024 renter flags and rent metadata.
   Missing selected fields/records have no availability fallback. Calculate
   changes after selection.
 - **Rent:** `interp_rent` uses post-censoring native tract median gross rent on
@@ -42,8 +42,9 @@ All files are under `../../../data/`, relative to the repository root.
   `lower + (upper - lower) * (cash_rent_units / 2 - prior_cumulative) / bin_count`.
   Select the first bin reaching half the cash-rent count, with inclusive dollar
   bounds. All 24 bins and the cash-rent total must be complete and the total
-  positive. Endpoint bins 1 (< $100) and 24 ($3,500+), or no bin reaching the
-  median threshold, yield missing rent.
+  positive. Bin 24 ($3,500+) confirms top-coding; bin 1 (< $100), zero renters,
+  incomplete counts, or invalid distributions yield missing rent with explicit
+  unavailable/unresolved status. Exactly half reached below bin 24 is not top-coded.
 - **Allocation:** copy upstream counts without rounding or renormalization.
   BG population/race/ethnicity uses `wt_pop`, housing/structure/vacancy counts
   use `wt_hu`, and renter/rent-bin counts use `wt_renthu`. BG income is an
@@ -54,8 +55,8 @@ All files are under `../../../data/`, relative to the repository root.
   BG inventory allocates each component with `wt_renthu`, so housing-weighted
   vacancy-rate components cannot reconstruct it.
 - **Inflation:** multiply 2016 rent, lower-quartile contract rent, income, and
-  house-value estimates/MOEs by exactly `1.307` (documented CPI-U annual averages:
-  313.689 / 240.007). Counts, shares, flags, and CVs are unscaled.
+  house-value estimates/MOEs and `rent_censor_bound_16` by exactly `1.307` (documented CPI-U annual averages:
+  313.689 / 240.007). The $3,500 source bound becomes $4,574.50; the 2024 bound stays $3,500. Counts, shares, flags, statuses, and CVs are unscaled.
 - **Changes:** `*POST` is a 2024/positive-2016 ratio; `*PPC` is a share/rate
   difference on the 0–1 scale (`0.01` = one percentage point). Structure counts
   are levels only. Inventory, rent, and share/rate changes have no MOE/CV.
@@ -76,7 +77,7 @@ remain visible; contradictory known combinations and invalid/ambiguous links fai
 
 ## 5. Columns
 
-The current inputs and producer yield **111 persisted columns**, grouped below;
+The current inputs and producer yield **113 persisted columns**, grouped below;
 select by name. `E`, `M`, and `CV` denote an estimate, its 90% margin of error,
 and its coefficient of variation. `_16` levels come from the baseline; `_24`
 levels follow §3. Source operands without suffixes refer to that Step 2 record,
@@ -147,24 +148,35 @@ For share MOEs, the implemented formulas are
 | `lqcrentE_16`, `lqcrentM_16` | double | B25057_001; E/M inflation-adjusted | Monthly lower-quartile contract rent and MOE | Dollars / MOE; E censored upstream |
 | `med_hvalE_16`, `med_hvalM_16`, `med_hvalCV_16` | double | B25077_001; E/M inflation-adjusted; `C(E, M)` unchanged | Median house value and uncertainty | Dollars / MOE / CV; top-coded E retained |
 | `interp_rent` | double | Selected tract median or BG interpolation (§3) | Canonical 2024 monthly gross rent | Dollars; selected-source missingness |
-| `pct_miss_rent` | double | BG renter-weighted share with missing post-censoring source median rent | Missing/censored BG rent exposure | Share; BG-only diagnostic on every row |
-| `pct_tc_rent` | double | BG renter-weighted share with raw median rent >= $3,500 | Top-coded portion of `pct_miss_rent` | Share; BG-only diagnostic on every row |
+| `pct_miss_rent` | double | BG renter-weighted share with missing/censored corrected source median rent | Missing/censored BG rent exposure | Share; BG-only diagnostic on every row |
 
 ### Quality flags
 
 Flags are double 0/1 when observed. Unsuffixed flags describe 2016 and are `NA`
-on rows without a baseline record. The three `_24` flags follow the selected
-source; an absent selected record leaves them `NA`.
+on rows without a baseline record. The `_24` renter flags follow the selected
+source; an absent selected record leaves them `NA`. Rent metadata uses the
+explicit contract below, with `unresolved` for an absent selected record.
 
 | Column | Type | Source / construction | Description | Valid values / missingness |
 |---|---|---|---|---|
-| `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | double | 2016 `is.na()` of corresponding E after censoring | Baseline missing-estimate flags | 0/1 within baseline records |
+| `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_med_hval` | double | 2016 `is.na()` of corresponding E after censoring | Baseline missing-estimate flags | 0/1 within baseline records |
 | `zero_flag_rhu` | double | 2016 `rhuE == 0` | Baseline zero occupied renters | NA if estimate missing |
-| `tc_flag_rent`, `tc_flag_lqcrent` | double | Raw 2016 corresponding E >= $3,500, before inflation | Baseline rent top-code flags | NA if raw estimate missing |
+| `tc_flag_lqcrent` | double | Raw 2016 corresponding E >= $3,500, before inflation | Baseline lower-quartile top-code flag | NA if raw estimate missing |
 | `tc_flag_med_hval` | double | Raw 2016 `med_hvalE >= 2000000`, before inflation | Baseline house-value top-code flag | NA if estimate missing |
 | `m_flag_rhu_24` | double | Selected tract flag or BG `is.na(rhuE)` before joining | Missing occupied-renter estimate | 0/1 within selected records |
 | `zero_flag_rhu_24` | double | Selected tract flag or BG `rhuE == 0` | Zero occupied renters | NA if estimate missing |
-| `tc_flag_rent_24` | double | Tract: raw median >= $3,500; BG: positive allocated renter units with top-coded rent | Selected-source rent top-code diagnostic | Tract NA for missing raw median; BG NA for incomplete renter counts, 0 for complete zero-renter targets |
+
+### Rent metadata
+
+| Column | Type | Source / construction | Description | Valid values / missingness |
+|---|---|---|---|---|
+| `tc_flag_rent_16`, `tc_flag_rent_24` | double | Source-specific status before inflation; 2024 uses the rent source mapping | Confirmed upper censoring | 1 top_coded; 0 observed; NA unavailable_other/unresolved |
+| `rent_status_16`, `rent_status_24` | character | Original native E/EA/M/MA or final BG distribution | Year-specific selected rent status | observed / top_coded / unavailable_other / unresolved; never NA |
+| `rent_censor_bound_16` | double | Source $3,500 multiplied at Step 4 by the rent inflation parameter | Lower bound in 2024 dollars | 4574.50 at current 1.307 factor for top_coded; NA otherwise |
+| `rent_censor_bound_24` | double | Selected source's $3,500 upper-interval bound | Lower bound in 2024 dollars | 3500 for top_coded; NA otherwise |
+
+Flags/statuses/bounds describe the same selected rent. Source reason codes,
+median-bin evidence, and original E/EA/M/MA remain in Steps 1/2, not this panel.
 
 ### Change measures
 
@@ -195,15 +207,20 @@ source; an absent selected record leaves them `NA`.
   Missing zero-weight values have no effect; empty contributor sets yield zero.
   Incomplete counts propagate through dependent source formulas. Income means
   omit missing values/weights; complete counts do not ensure observed income.
-- Native rent/lower-quartile estimates >= $3,500 are censored before inflation
-  or selection; their MOEs remain available independently. House values are
-  flagged at $2,000,000 but retained. Income is not censored by its value or rent
-  availability. Step 4 adds no source-sentinel recoding.
-- BG rent-quality shares are missing for an absent BG record, incomplete renter
-  counts, or a nonpositive renter total, including on tract-selected rows.
-  With complete positive counts, the top-coded share is a subset of the
-  missing/censored share. Neither these shares nor `tc_flag_rent_24` determines
-  whether interpolated rent is observed.
+- Native gross rent uses the verified `3501` upper code/annotation. Genuine
+  `3500` survives with finite MOE and complete non-top distribution evidence.
+  Known source unavailability/lower interval gives `unavailable_other`; missing
+  or conflicting classification evidence gives `unresolved`. Only `observed`
+  status permits numeric rent; confirmed top-codes never enter numeric change.
+  MOEs remain independent. Lower-quartile rent still uses `>= 3500`, and house
+  values retain their $2,000,000 flag without censoring. Income remains independent.
+- BG component coverage `pct_miss_rent` has unchanged weights/denominator but
+  corrected source classification: genuine $3,500 estimates are no longer
+  missing and source interval codes are unavailable. It remains BG coverage
+  even on native-selected rows. Missing BG records, incomplete renter counts,
+  or nonpositive totals yield NA. It never classifies the selected tract rent.
+- `tc_flag_rent`, `m_flag_rent`, and `pct_tc_rent` are removed. Consumer migration
+  is documented in [README](../README.md#rent-metadata-migration).
 - Missing inputs propagate through change/share-MOE formulas; negative radicands
   are clamped to zero. Count/share CVs are missing at zero estimates; unguarded
   dollar/change CVs can be `Inf`/`NaN`. BG count MOEs omit missing products, so
@@ -219,10 +236,10 @@ Section references in these tables refer to `04_merge.Rmd`.
 
 | Checkpoint | Required condition |
 |---|---|
-| Inputs, §2 | Unique nonmissing California tract keys; required fields present and cleanup exclusions respected. Rent/interpolation, occupied renters, inventory, `smfE`, and `sfd_detE` numeric and finite/nonnegative when observed. Both 2024 bundles numeric. Exactly 14 baseline counties; both 2024 inputs match that set. |
+| Inputs, §2 | Unique nonmissing California tract keys; required fields present and cleanup exclusions respected. Rent/interpolation, occupied renters, inventory, `smfE`, and `sfd_detE` numeric and finite/nonnegative when observed. Numeric fields numeric; statuses character. Exactly 14 baseline counties; both 2024 inputs match that set. |
 | Geography/joins, §§2.4–3.2 | Valid crosswalk storage, partner counts, retained IDs, and known flag/class combinations; consistent links unique on both keys. Preserve the input-key union, panel row order, and row count. |
-| Hierarchy, §§3.2, 4.2, 7 | Every row has the correct source label. All mapped fields match selected-source observed values exactly and preserve missingness (`NA`/`NaN` equivalent); no observed BG values lost on rows not flagged consistent. |
-| Changes/diagnostics, §7 | Occupied-renter/inventory changes agree with selected diagnostic ratios; rent change equals the canonical positive-baseline ratio with tolerance zero. Diagnostic work preserves every canonical column/value. |
+| Hierarchy, §§3.2, 4.2, 7 | Every row has the correct source label. All mapped fields match selected-source observed values exactly and preserve numeric missingness (`NA`/`NaN` equivalent), with absent source status explicitly unresolved; no observed BG values lost on rows not flagged consistent. |
+| Changes/diagnostics, §7 | Occupied-renter/inventory changes agree with selected diagnostic ratios; rent change equals the canonical positive-baseline ratio with tolerance zero. Diagnostic work preserves every canonical column/value; valid rent status/flag/bound/value combinations and no confirmed top-codes in numeric rent changes. |
 | Schema, §§7, 7.5 | `panel_schema_additions()` fields present with checked types; `panel_schema_removals()` fields absent; no duplicate column names. Selected 2024 quality flags and inventory-change missing flag double 0/1/NA. Prior-panel comparisons permit only those fixed additions/removals, with exact shared column order/types/classes. |
 | Saved output, §7.5 | Recheck input-key union/counties and exact column order/types/classes against memory. Values use `isTRUE(all.equal(acs_saved, acs_full))` with default numeric tolerance; prior output values are not compared. |
 
@@ -244,7 +261,7 @@ Section references in these tables refer to `04_merge.Rmd`.
   estimates and renter weights for MOEs. `pctrhuM` uses occupied-unit totals
   (`rhu_baseE/M`) while `pctrhuE` uses all housing units; `pcthspM` uses race-table
   totals while `pcthspE` uses Hispanic-origin totals. Step 4 retains these formulas.
-- The 111-column dictionary describes current inputs. `select_vars()` also
+- The 113-column dictionary describes current inputs. `select_vars()` also
   retains input names ending in `id` or the survey suffix; schema validation
   is not an exhaustive whitelist without a prior reference. Missing references
   leave the prior-schema comparison unchecked.

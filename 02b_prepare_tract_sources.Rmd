@@ -39,7 +39,8 @@ knitr::opts_chunk$set(
   ([schema](schemas/acs_step2_2024_tract.md)).
 
 Both outputs cover Southern California and Bay Area target counties and include
-rental inventory, quality flags, structure counts, shares, vacancy rates, and
+rental inventory, year-specific rent status/flags/source-dollar bounds, original
+B25064 evidence, structure counts, shares, vacancy rates, and
 CVs for `04_merge.Rmd`.
 
 **Steps:**
@@ -72,6 +73,7 @@ library(forcats)
 ## 1.2 Load helper functions
 
 ```{r load-helpers}
+source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 ```
@@ -126,12 +128,13 @@ n_before <- nrow(acs_16)
 acs_16 <- select_target_counties(acs_16, tr2010_id, target_counties)
 report_drop(acs_16, n_before, "tracts outside the target counties")
 target_tract_ids_16 <- acs_16$tr2010_id
+rent_source_16 <- acs_16
 rent_raw_qa_16 <- acs_16 |>
   group_by(county = substr(tr2010_id, 3, 5)) |>
   summarise(tracts = n(), raw_missing_rent = sum(is.na(rentE)),
-            topcoded_rent = sum(rentE >= 3500, na.rm = TRUE),
+            upper_code_rent = sum(rentE == 3501, na.rm = TRUE),
             raw_missing_share = mean(is.na(rentE)),
-            topcoded_share = sum(rentE >= 3500, na.rm = TRUE) / n(), .groups = "drop")
+            upper_code_share = sum(rentE == 3501, na.rm = TRUE) / n(), .groups = "drop")
 
 check_vars <- c("rhuE", "rentE")
 
@@ -141,18 +144,33 @@ out
 
 ## 2.2 Flag and censor top-coded, missing, and zero values
 
-### Decision: Preserve top-code information and income when censoring rent
+### Decision: Classify original B25064 evidence before adjusting dollars
 
-Capture top-code flags before setting `rentE` and `lqcrentE` values `>= 3500`
-to `NA`, so top-codes remain distinguishable from source missingness. Create
-missing flags afterward, including censored values. House value is flagged at
-`>= 2000000` without censoring its estimate; bedroom rents pass through.
+`prepare_native_rent()` uses the retained E/EA/M/MA evidence and B25063
+counts. The positive `3501` code (or a corroborated upper annotation) identifies
+upper censoring with a **$3,500 source-year bound**; it is never an exact rent.
+Exactly `3500` remains observed when a finite MOE and a complete non-top
+B25063 median establish the audited boundary case. Missing E/M alone does not
+establish top-coding. Known unavailable source codes and the lower-interval
+code `99` are `unavailable_other`; insufficient or conflicting evidence is
+`unresolved`. Numeric `rentE` is populated only for `observed` status.
+
+Persist `tc_flag_rent_16/24` (0 observed, 1 top-coded, NA otherwise),
+`rent_status_16/24`, and `rent_censor_bound_16/24` with unsuffixed upstream
+`rent_status_reason` and `rent_median_bin`. Original `rent_source_e/ea/m/ma`
+and `rent_evidence_available` survive cleaning. Older extracts lacking raw
+annotations retain normalized E/M with evidence availability FALSE.
+The 2016 bound is adjusted only in `04_merge.Rmd`, alongside 2016 rent.
+
+Lower-quartile rent retains its existing `>= 3500` flag/censor, and house value
+its `>= 2000000` flag without censoring. Their missing/zero flags and bedroom
+rents are unchanged.
 
 Retain source household income estimates, MOEs, and missingness independently
 of rent availability. The optional pre-censoring expectations below support
 the 2016 income/CV parity check in §2.4.
 
-Interpret missing rent alongside `zero_flag_rhu`: a tract with no occupied
+Interpret rent status alongside `zero_flag_rhu`: a tract with no occupied
 renter units has no occupied-renter rent to measure, but can have positive
 vacant rental inventory.
 
@@ -177,10 +195,11 @@ if (!is.null(prior_outputs[["16"]])) {
 ```
 
 ```{r flag-censor-16}
-tc_vars <- c("rentE", "lqcrentE", "med_hvalE")
+acs_16 <- prepare_native_rent(acs_16, "16", "tr2010_id")
+tc_vars <- c("lqcrentE", "med_hvalE")
 acs_16 <- flag_tc_vars(acs_16, tc_vars)
 
-table(acs_16$tc_flag_rent, useNA = "ifany")
+table(acs_16$tc_flag_rent_16, useNA = "ifany")
 table(acs_16$tc_flag_lqcrent, useNA = "ifany")
 table(acs_16$tc_flag_med_hval, useNA = "ifany")
 
@@ -188,7 +207,7 @@ summary(acs_16$rentE)
 acs_16 <- censor_tc_vars(acs_16)
 summary(acs_16$rentE)
 
-missing_vars <- c("rentE", "lqcrentE", "rhuE", "rhucashE", "med_hvalE")
+missing_vars <- c("lqcrentE", "rhuE", "rhucashE", "med_hvalE")
 acs_16 <- flag_missing_vars(acs_16, missing_vars)
 
 check_missing_vars(acs_16, missing_vars)
@@ -198,8 +217,8 @@ acs_16 <- flag_zero_vars(acs_16, zero_vars)
 table(acs_16$zero_flag_rhu, useNA = "ifany")
 table(acs_16$zero_flag_med_hval, useNA = "ifany")
 
-table(acs_16$m_flag_rent)
-table(acs_16$m_flag_rent, acs_16$zero_flag_rhu)
+table(acs_16$rent_status_16)
+table(acs_16$rent_status_16, acs_16$zero_flag_rhu)
 ```
 
 ## 2.3 Build structure-type, percentage, CV, and rental-inventory measures
@@ -274,6 +293,8 @@ print(inventory_reconciliation_16, width = Inf)
 Review `socal_parity_16$schema_changes`, `$difference_summary`, and `$differences`
 before saving. Only income/CV differences matching both source-derived reference
 and candidate expectations (§2.2) qualify as `verified_income_correction`.
+Rent/CV differences must match original-source reconstructions of both rules
+to qualify as `verified_rent_metadata_correction`.
 The expectations reconstruct the reference's rent-dependent income exclusion
 solely for parity. Other shared-value or tract-membership differences stop
 execution; no allocation-boundary exceptions apply.
@@ -284,7 +305,8 @@ report_tract_counties(acs_16, target_counties, "2016 destination counties")
 assert_rental_inventory(acs_16, inventory_16, "2016 inventory before save")
 socal_parity_16 <- compare_socal_parity(
   acs_16, prior_outputs[["16"]], southern_california_counties,
-  expected_income = expected_income_16, schema_migration = "2016"
+  expected_income = expected_income_16, schema_migration = "2016",
+  expected_rent = native_rent_parity_expectations(rent_source_16, "16", "tr2010_id")
 )
 ```
 
@@ -328,12 +350,13 @@ n_before_2024_tract <- nrow(acs_2024_tract)
 acs_2024_tract <- select_target_counties(acs_2024_tract, tr2020_id, target_counties)
 report_drop(acs_2024_tract, n_before_2024_tract, "2024 source tracts outside the target counties")
 target_tract_ids_2024_tract <- acs_2024_tract$tr2020_id
+rent_source_24 <- acs_2024_tract
 rent_raw_qa_2024_tract <- acs_2024_tract |>
   group_by(county = substr(tr2020_id, 3, 5)) |>
   summarise(tracts = n(), raw_missing_rent = sum(is.na(rentE)),
-            topcoded_rent = sum(rentE >= 3500, na.rm = TRUE),
+            upper_code_rent = sum(rentE == 3501, na.rm = TRUE),
             raw_missing_share = mean(is.na(rentE)),
-            topcoded_share = sum(rentE >= 3500, na.rm = TRUE) / n(), .groups = "drop")
+            upper_code_share = sum(rentE == 3501, na.rm = TRUE) / n(), .groups = "drop")
 map_dfr(c("rhuE", "rentE"), ~summ_var(acs_2024_tract, .x))
 ```
 
@@ -351,9 +374,10 @@ assert_tract_keys(source_income_2024_tract, target_tract_ids_2024_tract,
 ```
 
 ```{r flag-censor-2024-tract}
-tc_vars_2024_tract <- c("rentE", "lqcrentE", "med_hvalE")
+acs_2024_tract <- prepare_native_rent(acs_2024_tract, "24", "tr2020_id")
+tc_vars_2024_tract <- c("lqcrentE", "med_hvalE")
 acs_2024_tract <- flag_tc_vars(acs_2024_tract, tc_vars_2024_tract)
-table(acs_2024_tract$tc_flag_rent, useNA = "ifany")
+table(acs_2024_tract$tc_flag_rent_24, useNA = "ifany")
 table(acs_2024_tract$tc_flag_lqcrent, useNA = "ifany")
 table(acs_2024_tract$tc_flag_med_hval, useNA = "ifany")
 
@@ -361,7 +385,7 @@ summary(acs_2024_tract$rentE)
 acs_2024_tract <- censor_tc_vars(acs_2024_tract)
 summary(acs_2024_tract$rentE)
 
-missing_vars_2024_tract <- c("rentE", "lqcrentE", "rhuE", "rhucashE", "med_hvalE")
+missing_vars_2024_tract <- c("lqcrentE", "rhuE", "rhucashE", "med_hvalE")
 acs_2024_tract <- flag_missing_vars(acs_2024_tract, missing_vars_2024_tract)
 check_missing_vars(acs_2024_tract, missing_vars_2024_tract)
 
@@ -369,7 +393,7 @@ zero_vars_2024_tract <- c("rhuE", "rhucashE", "med_hvalE")
 acs_2024_tract <- flag_zero_vars(acs_2024_tract, zero_vars_2024_tract)
 table(acs_2024_tract$zero_flag_rhu, useNA = "ifany")
 table(acs_2024_tract$zero_flag_med_hval, useNA = "ifany")
-table(acs_2024_tract$m_flag_rent, acs_2024_tract$zero_flag_rhu, useNA = "ifany")
+table(acs_2024_tract$rent_status_24, acs_2024_tract$zero_flag_rhu, useNA = "ifany")
 ```
 
 ## 3.3 Build structure-type, percentage, CV, and rental-inventory measures
@@ -431,7 +455,8 @@ print(inventory_reconciliation_2024_tract, width = Inf)
 
 Review `socal_parity_2024_tract` against its own `tr2020_id` reference. Apart
 from the fixed schema allowance in §1.4, shared values and tract membership
-must retain parity; the 2016 income exception does not apply.
+must retain parity except independently verified rent/CV corrections;
+the 2016 income exception does not apply.
 
 After saving both products, run §4 for exact readback and inventory
 reconciliation, even when parity is unchecked.
@@ -452,7 +477,8 @@ assert_rental_inventory(acs_2024_tract, inventory_2024_tract,
                         "2024 tract-source inventory before save", key = "tr2020_id")
 socal_parity_2024_tract <- compare_socal_parity(
   acs_2024_tract, prior_outputs[["2024_tract"]], southern_california_counties,
-  key = "tr2020_id", schema_migration = "2024_tract"
+  key = "tr2020_id", schema_migration = "2024_tract",
+  expected_rent = native_rent_parity_expectations(rent_source_24, "24", "tr2020_id")
 )
 ```
 
@@ -489,7 +515,7 @@ assert_step2_cleanup(acs_2024_tract_out, "2024_tract")
 
 ## 4.2 Check missingness on critical variables
 
-Interpret missing `rentE` using the flags and renter counts (§2.2); no empirical
+Interpret missing `rentE` using year-specific statuses and renter counts (§2.2); no empirical
 missingness threshold is imposed.
 
 ```{r validate-missingness-step2}
@@ -507,6 +533,8 @@ Expect numeric 0/1 flags. Top-code and zero flags can be `NA` for missing source
 estimates; missing flags are always observed.
 
 ```{r validate-flags-step2}
+assert_rent_metadata(acs16_out, "rentE", "16")
+assert_rent_metadata(acs_2024_tract_out, "rentE", "24")
 flag_cols_16 <- grep("^(m_flag_|zero_flag_|tc_flag_)", names(acs16_out), value = TRUE)
 for (f in flag_cols_16) {
   cat("acs_step2_2016_tract", f, "-> class:", class(acs16_out[[f]]),

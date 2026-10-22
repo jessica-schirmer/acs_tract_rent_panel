@@ -239,6 +239,7 @@ assert_hierarchical_2024 <- function(df) {
     purrr::map_dfr(seq_len(nrow(fields)), function(i) {
       canonical <- df[[fields$canonical[i]]]
       selected <- df[[fields[[source]][i]]]
+      if (fields$canonical[i] == "rent_status_24") selected <- dplyr::coalesce(selected, "unresolved")
       other <- df[[fields[[alternative]][i]]]
       missing_mismatch <- is.na(canonical[mask]) != is.na(selected[mask])
       observed <- mask & !is.na(canonical) & !is.na(selected)

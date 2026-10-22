@@ -98,27 +98,6 @@ select_target_counties <- function(df, id, target_counties) {
 
 # ---- Top-code / missing / zero flagging --------------------------------------
 
-#' Check top-coded values
-#'
-#' @param df Data frame
-#' @param var_name ACS estimate name
-#' @return Summary statistics, including number top-coded
-check_tc <- function(df, var_name) {
-  moe_name <- sub("E$", "M", var_name)
-  cv_name <- sub("E$", "CV", var_name)
-  summarise(
-    df,
-    var        = var_name,
-    n          = sum(!is.na(.data[[var_name]])),
-    n_missing  = sum(is.na(.data[[var_name]])),
-    n_tc       = sum((.data[[var_name]]>=3500) , na.rm=TRUE),
-    n_no_tc   = sum((.data[[var_name]]<3500) , na.rm=TRUE),
-    # n_tc       = sum((.data[[var_name]]==3501 | .data[[var_name]]==3500), na.rm=TRUE),
-    min        = min(.data[[var_name]],  na.rm = TRUE),
-    max        = max(.data[[var_name]],  na.rm = TRUE),
-  )
-}
-
 #' Flag missing variables
 #'
 #' @param df
@@ -169,15 +148,14 @@ flag_zero_vars <- function(df, var_list) {
 
 #' Flag top-coded variables
 #'
-#' Rent variables are top-coded at $3,500; median house value at $2,000,000.
-#' (An earlier, superseded definition of this function — which top-coded any
-#' variable at 3500 conditional on rhuE — was removed; this grepl-dispatched
-#' version is the one the notebook actually used.)
+#' Median gross rent is classified separately by prepare_native_rent().
+#' Other rent variables retain their existing $3,500 threshold.
 #'
 #' @param df
 #' @param var_list
 #' @return Creates a flag equal to 1 if top-coded, 0 if not top-coded
 flag_tc_vars <- function(df, var_list) {
+    if ("rentE" %in% var_list) stop("Use prepare_native_rent() for B25064 rent")
     for (i in var_list){
         flag_name <- paste0("tc_flag_", sub("E.*", "", i))
         if (grepl("rent", i)) {
@@ -380,44 +358,10 @@ calc_rel_wt <- function(df, id) {
 }
 
 
-#' Calculate % missing / top-coded rent at the tract level
-#'
-#' Returns the weighted share of renter housing units per tract whose
-#' block-group rent is missing (`pct_m_rent`) or top-coded (`pct_tc_rent`),
-#' computed on the **uncensored** block-group rent. Both are true shares in
-#' `[0, 1]`: numerator is the weighted renter units in the qualifying block
-#' groups, denominator the tract's total weighted renter units.
-#'
-#' NOTE: the denominator summary is named `rhuE_tot` (not `rhuE`) deliberately.
-#' `summarise()` evaluates its expressions in order, so naming it `rhuE` would
-#' shadow the block-group `rhuE` column in the later numerator expressions,
-#' collapsing them to the tract total and turning each "share" into a sum of
-#' weights (values > 1). Keeping the names distinct preserves the intended
-#' per-block-group weighting.
-#'
-#' @param df
-#' @param id grouping geographic id (unquoted)
-#' @return dataframe with % missing / % top-coded rent calculations
-calc_pct_tc_m <- function(df, id) {
-  tr_df <- df |>
-    group_by({{id}}) |>
-    summarise(
-      rhuE_tot = strict_weighted_sum(rhuE, wt_renthu),
-      rhu_m_rent = strict_weighted_sum(if_else(is.na(rentE), rhuE, 0), wt_renthu),
-      rhu_tc_rent = strict_weighted_sum(if_else(!is.na(rentE) & rentE >= 3500, rhuE, 0), wt_renthu),
-      .groups = "drop"
-    )
-
-  tr_df <- tr_df |>
-    mutate(pct_m_rent = if_else(rhuE_tot > 0, rhu_m_rent / rhuE_tot, NA_real_),
-            pct_tc_rent = if_else(rhuE_tot > 0, rhu_tc_rent / rhuE_tot, NA_real_),
-
-         ) |>
-    select({{id}}, pct_m_rent, pct_tc_rent)
-
-  return(tr_df)
+# Coverage retains its renter weights/denominator, using corrected source rent.
+censor_bg_coverage_rent <- function(df) {
+  df |> prepare_native_rent("24", "bg2020_id") |> censor_tc_vars()
 }
-
 
 #' Censor top-coded rent
 #'
@@ -427,8 +371,7 @@ calc_pct_tc_m <- function(df, id) {
 #' @return dataframe with censored top-coded variables
 censor_tc_vars <- function(df) {
   df |>
-    mutate(rentE=ifelse(rentE>=3500,NA, rentE),
-           lqcrentE=ifelse(lqcrentE>=3500,NA, lqcrentE)
+    mutate(lqcrentE=ifelse(lqcrentE>=3500,NA, lqcrentE)
     )
 
 }
@@ -534,70 +477,15 @@ calc_agg_vars <- function(df, id) {
 }
 
 
-#' Calculate interpolated rent
-#'
-#' @param df
-#' @return dataframe with linearly interpolated median rent per tract
-calc_interp_rent <- function(df) {
-    required_counts <- c("rhucashE", paste0("grentcat", 1:24, "E"))
-    # Identify the median rent category
-    tr_rhu <- df |>
-      select(tr2010_id, rhucashE)
-
-    tr_median_cat <- df |>
-      select(tr2010_id, all_of(required_counts)) |>
-      filter(if_all(all_of(required_counts), ~ !is.na(.x)), rhucashE > 0) |>
-      pivot_longer(
-        cols = starts_with("grentcat"),
-        names_to = "grentcat",
-        values_to = "count",
-        names_pattern = "grentcat(\\d+)E",
-        names_transform = list(grentcat = as.integer)
-      ) |>
-      arrange(tr2010_id, grentcat) |>
-      group_by(tr2010_id) |>
-      mutate(
-        cum_count = cumsum(count),
-        median_threshold = first(rhucashE) / 2
-      ) |>
-      filter(cum_count >= median_threshold) |>
-      slice_min(grentcat, with_ties = FALSE) |>
-      ungroup() |>
-      rename(grentcat_median = grentcat) |>
-      select(tr2010_id, grentcat_median, count, cum_count, median_threshold)
-
-    # Define rent cat ranges
-    grentcat_ranges <- tibble(
-      grentcat = 1:24,
-      lower = c(0, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600,
-                650, 700, 750, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3500),
-      upper = c(99, 149, 199, 249, 299, 349, 399, 449, 499, 549, 599, 649,
-                699, 749, 799, 899, 999, 1249, 1499, 1999, 2499, 2999, 3499, NA)  # NA for open-ended
-    )
-
-
-    # Calculate interpolated rent
-    tr_interp_rent <- tr_rhu |>
-      select(tr2010_id, rhucashE) |>
-      left_join(tr_median_cat ,
-                by = "tr2010_id") |>
-      left_join(grentcat_ranges,
-                by = c("grentcat_median" = "grentcat")) |>
-      mutate(prop= (median_threshold-(cum_count-count))/count,
-            width=upper-lower,
-            interp_rent=lower+width*prop)
-
-
-    tr_interp_rent <- tr_interp_rent |>
-      mutate(interp_rent= case_when(grentcat_median>1 & grentcat_median<24 ~ interp_rent,
-                                      grentcat_median==1 | rhucashE==0 ~ NA,
-                                      grentcat_median==24 ~ NA)
-                                      )|>
-      select(c(tr2010_id, interp_rent))
-    #   select(c(tr2010_id, interp_rent,  lower, upper, width, prop, cum_count, median_threshold, count))
-
-    return(tr_interp_rent)
-
+#' Produce rent and metadata from the same final allocated distribution.
+calc_interp_rent <- function(df, n_contributing = rep(1L, nrow(df))) {
+  result <- rent_distribution(df, n_contributing)
+  out <- tibble(tr2010_id = df$tr2010_id, interp_rent = result$rent,
+                rent_median_bin = result$rent_median_bin,
+                rent_status_reason = result$rent_status_reason)
+  out <- add_rent_metadata(out, result$rent_status, "24")
+  assert_rent_metadata(out, "interp_rent", "24")
+  out
 }
 
 #' Calculate % missing vars

@@ -144,12 +144,13 @@ select_vars <- function(df, yr, var_list) {
 # ---- Hierarchical 2024 measurement ------------------------------------------
 
 merge_quality_columns <- function() {
-  c("m_flag_rhu", "zero_flag_rhu", "tc_flag_rent")
+  c("m_flag_rhu", "zero_flag_rhu")
 }
 
 # Fixed panel fields from the Step 2 schemas, including source-specific flags.
 merge_2024_field_map <- function() {
-  fields <- c(merge_measure_columns("bg_agg"), merge_quality_columns())
+  fields <- c(merge_measure_columns("bg_agg"), merge_quality_columns(),
+              "tc_flag_rent", "rent_status", "rent_censor_bound")
   tibble::tibble(canonical = c(paste0(fields, "_24"), "interp_rent"),
                  tract = c(paste0(fields, "_24_tract"), "rentE_24_tract"),
                  bg_agg = c(paste0(fields, "_24_bg_agg"), "interp_rent_24_bg_agg"))
@@ -160,20 +161,22 @@ prepare_2024_source <- function(df, source = c("tract", "bg_agg")) {
   key <- if (source == "tract") "tr2020_id" else "tr2010_id"
   measures <- merge_measure_columns("bg_agg")
   rent_source <- if (source == "tract") "rentE" else "interp_rent"
-  required <- c(key, measures, rent_source,
-                if (source == "tract") merge_quality_columns() else "tc_flag_rent_24")
+  required <- c(key, measures, rent_source, rent_metadata_columns("24"),
+                if (source == "tract") merge_quality_columns())
   missing <- setdiff(required, names(df))
   if (length(missing)) stop(source, ": missing bundle fields: ", paste(missing, collapse = ", "))
-  if (!all(vapply(df[setdiff(required, key)], is.numeric, logical(1)))) {
+  if (!all(vapply(df[setdiff(required, c(key, "rent_status_24"))], is.numeric, logical(1))) ||
+      !is.character(df$rent_status_24)) {
     stop(source, ": measurement bundles must be numeric")
   }
   if (source == "bg_agg") {
     df$m_flag_rhu <- as.double(is.na(df$rhuE))
     df$zero_flag_rhu <- as.double(df$rhuE == 0)
-    df$tc_flag_rent <- df$tc_flag_rent_24
   }
+  for (column in rent_metadata_columns("24")) df[[sub("_24$", "", column)]] <- df[[column]]
   df |>
-    dplyr::select(dplyr::all_of(c(key, measures, merge_quality_columns(), rent_source))) |>
+    dplyr::select(dplyr::all_of(c(key, measures, merge_quality_columns(),
+                                "tc_flag_rent", "rent_status", "rent_censor_bound", rent_source))) |>
     dplyr::rename_with(~ paste0(.x, "_24_", source), -dplyr::all_of(key))
 }
 
@@ -185,12 +188,11 @@ select_canonical_2024 <- function(df) {
   }
   df$acs_source_24 <- dplyr::if_else(df$geo_consistent %in% 1, "tract", "bg_agg")
   for (i in seq_len(nrow(fields))) {
-    df[[fields$canonical[i]]] <- dplyr::case_when(
-      df$acs_source_24 == "tract" ~ df[[fields$tract[i]]],
-      df$acs_source_24 == "bg_agg" ~ df[[fields$bg_agg[i]]],
-      .default = NA_real_
+    df[[fields$canonical[i]]] <- dplyr::if_else(
+      df$acs_source_24 == "tract", df[[fields$tract[i]]], df[[fields$bg_agg[i]]]
     )
   }
+  df$rent_status_24 <- dplyr::coalesce(df$rent_status_24, "unresolved")
   df
 }
 
@@ -200,12 +202,14 @@ panel_schema_additions <- function() {
     "m_flag_rhu_inventoryPOST", "tr2020_id", "geo_consistent",
     "relationship_class", "acs_source_24",
     "smfE_16", "smfE_24", "sfd_detE_16", "sfd_detE_24",
-    setdiff(paste0(merge_quality_columns(), "_24"), "tc_flag_rent_24"))
+    paste0(merge_quality_columns(), "_24"), rent_metadata_columns("16"),
+    "rent_status_24", "rent_censor_bound_24")
 }
 
 # Fixed removal allowlist for the obsolete measures and their sole-use companions.
 panel_schema_removals <- function() {
-  c("rhu_lrE_16", "rhu_lrE_24", "rhu_lr2E_16", "rhu_lr2E_24",
+  c("tc_flag_rent", "m_flag_rent", "pct_tc_rent",
+    "rhu_lrE_16", "rhu_lrE_24", "rhu_lr2E_16", "rhu_lr2E_24",
     "rhu_lrPOST", "rhu_lr2POST",
     "rentE_24", "rentM_24", "rentCV_24", "lqcrentE_24", "lqcrentM_24",
     "med_hvalE_24", "med_hvalM_24", "med_hvalCV_24",
@@ -222,7 +226,7 @@ assert_panel_schema <- function(current, previous = NULL) {
   if (!all(additions %in% names(current)) || anyDuplicated(names(current))) {
     stop("Panel schema: missing required fields or duplicate columns")
   }
-  strings <- c("tr2020_id", "relationship_class", "acs_source_24")
+  strings <- c("tr2020_id", "relationship_class", "acs_source_24", "rent_status_16", "rent_status_24")
   if (!all(vapply(current[strings], is.character, logical(1))) ||
       !all(vapply(current[setdiff(additions, strings)], is.double, logical(1)))) {
     stop("Panel schema: invalid required column storage types")
@@ -231,7 +235,7 @@ assert_panel_schema <- function(current, previous = NULL) {
       !all(is.na(current$tr2020_id) | grepl("^06[0-9]{9}$", current$tr2020_id))) {
     stop("Panel schema: invalid source label or linked 2020 key")
   }
-  flags <- c(paste0(merge_quality_columns(), "_24"), "m_flag_rhu_inventoryPOST")
+  flags <- c(paste0(merge_quality_columns(), "_24"), "tc_flag_rent_16", "tc_flag_rent_24", "m_flag_rhu_inventoryPOST")
   if (!all(vapply(current[flags], function(x) {
     is.double(x) && all(is.na(x) | x %in% c(0, 1))
   }, logical(1)))) stop("Panel schema: quality flags must be double 0/1/NA")
@@ -253,6 +257,8 @@ assert_panel_schema <- function(current, previous = NULL) {
 
 # ---- Inflation adjustment ----------------------------------------------------
 
+inflation_factor_2016 <- function() 1.307
+
 #' Apply inflation adjustment
 #'
 #' Scales the 2016 dollar-denominated variables to 2024 dollars (factor 1.307,
@@ -261,15 +267,15 @@ assert_panel_schema <- function(current, previous = NULL) {
 #'
 #' @param df Data frame
 #' @param yr year of survey
-#' @return Data frame with dollar values adjusted to 2023 values
+#' @return Data frame with dollar values and censoring bounds in 2024 dollars
 infl_adj_vars <- function(df, yr, var_list) {
     dollar_vars <- c("rentE", "lqcrentE", "med_hhincE", "med_hvalE",
-                    "rentM", "lqcrentM", "med_hhincM", "med_hvalM")
+                    "rentM", "lqcrentM", "med_hhincM", "med_hvalM", "rent_censor_bound")
     for (i in dollar_vars) {
         if (yr=="16"){
             var_name <- paste0(i, "_", yr)
             df <- df |>
-                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * 1.307)
+                dplyr::mutate(!!sym(var_name) := !!sym(var_name) * inflation_factor_2016())
 
     }
 

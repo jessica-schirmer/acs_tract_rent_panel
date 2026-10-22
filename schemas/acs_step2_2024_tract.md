@@ -30,8 +30,11 @@ Santa Clara (`085`), Solano (`095`), Sonoma (`097`). State FIPS is `06`.
 - Filter by state/county substrings of `tr2020_id`; preserve native geography,
   source column order/types, and selected row order. No aggregation or weighting
   changes source measurements.
-- Capture top-code flags before censoring `rentE` and `lqcrentE` at `>= 3500`.
-  Flag `med_hvalE >= 2000000` without censoring it. Create missing flags after
+- Classify original B25064 evidence before inflation: `3501` or a supported
+  upper annotation gives top-coding, with a $3,500 source-dollar bound. Genuine
+  `3500` requires a finite MOE and a complete non-top distribution and remains
+  observed. Only `observed` rent enters numeric `rentE`.
+  Keep lower-quartile censoring at `>= 3500`. Flag `med_hvalE >= 2000000` without censoring it. Create missing flags after
   censoring; bedroom rents and all source MOEs pass through unchanged.
 - Preserve income estimates/MOEs independently of rent availability, with no
   income threshold. Derive structures, shares, CVs, and inventory as listed below
@@ -52,8 +55,8 @@ in memory and are not persisted here.
 
 ## 5. Columns
 
-The current input contract yields **162 columns**: 124 source estimate/MOE
-columns, three identifiers/tags, and 35 added fields. Source pairs below list
+The current input contract yields **170 columns**: 124 source estimate/MOE
+columns, three identifiers/tags, five evidence fields, and 38 derived fields. Source pairs below list
 both persisted names: `E` is the estimate and `M` the 90% margin of error.
 Source measures are numeric doubles; counts are persons, households, or housing
 units as indicated, and dollar estimates are monthly rents, annual household
@@ -86,7 +89,7 @@ asserted for the inventory estimates (see §7).
 | `rhu_baseE`, `rhu_baseM` | double | `B25003_001` | Occupied units by tenure — total (denominator) | Source values / NA |
 | `rhuE`, `rhuM` | double | `B25003_003` | Renter-occupied housing units | Source values / NA |
 | `ohuE`, `ohuM` | double | `B25003_002` | Owner-occupied housing units | Source values / NA |
-| `rentE`, `rentM` | double | `B25064_001` | Median gross rent (dollars) | E < 3500 or NA after censoring; M retained |
+| `rentE`, `rentM` | double | `B25064_001` | Median gross rent (dollars) | E observed through 3500 or NA; M retained |
 | `rent1bdrE`, `rent1bdrM` | double | `B25031_003` | Median gross rent, 1 bedroom | Source values / NA |
 | `rent2bdrE`, `rent2bdrM` | double | `B25031_004` | Median gross rent, 2 bedrooms | Source values / NA |
 | `rent3bdrE`, `rent3bdrM` | double | `B25031_005` | Median gross rent, 3 bedrooms | Source values / NA |
@@ -131,6 +134,9 @@ asserted for the inventory estimates (see §7).
 | `vac_rentedE`, `vac_rentedM` | double | `B25004_003` | Vacant units rented, not occupied | Source values / NA |
 | `vac_forsaleE`, `vac_forsaleM` | double | `B25004_004` | Vacant units for sale only (available for-sale units) | Source values / NA |
 
+| `rent_source_e`, `rent_source_ea`, `rent_source_m`, `rent_source_ma` | character | Original B25064_001 E/EA/M/MA request | Preserved source evidence, including sentinels and annotations | API null → NA; never inflation-adjusted; fallback E/M are normalized strings |
+| `rent_evidence_available` | logical | Raw request availability | TRUE only when original E/EA/M/MA were retrieved and matched to the same-vintage extract | FALSE for normalized-E/M fallback; never missing |
+
 ### Added measures and flags
 
 All added fields are numeric doubles. `R(n, d)` means `n / d` when `d > 0`,
@@ -165,9 +171,14 @@ These definitions propagate missing inputs; dollar CVs are unguarded (§6).
 | `huCV` | double | Guarded `C(huE, huM)` | Housing-unit CV | Zero estimate → NA |
 | `popCV` | double | Guarded `C(popE, popM)` | Population CV | Zero estimate → NA |
 | `rhu_inventoryE` | double | `rhuE + vac_forrentE + vac_rentedE` | Occupied plus available and rented/unoccupied rental units | Finite nonnegative or NA; complete components required |
-| `tc_flag_rent`, `tc_flag_lqcrent` | double | Raw corresponding E >= 3500 | Rent top-code indicators | 0/1; NA for missing raw E |
+| `tc_flag_lqcrent` | double | Raw lower-quartile E >= 3500 | Lower-quartile top-code indicator | 0/1; NA for missing raw E |
+| `tc_flag_rent_24` | double | Original B25064 evidence | Confirmed upper censoring | 1 top-coded; 0 observed; NA otherwise |
+| `rent_status_24` | character | Source evidence classification | Selected native rent availability | observed / top_coded / unavailable_other / unresolved; never NA |
+| `rent_censor_bound_24` | double | Confirmed upper interval | Lower censoring bound in 2024 dollars | 3500 only for top_coded; NA otherwise |
+| `rent_status_reason` | character | Classifier reason | Detailed source/encoding/conflict explanation | Nonmissing reason code |
+| `rent_median_bin` | integer | Complete B25063 distribution | Supporting median-bin evidence, never a replacement native rent | 1–24 or NA |
 | `tc_flag_med_hval` | double | `med_hvalE >= 2000000` | House-value top-code indicator | 0/1; NA for missing E |
-| `m_flag_rent`, `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_rhucash`, `m_flag_med_hval` | double | `is.na()` of corresponding E after censoring | Missing-estimate indicators | 0/1; never NA |
+| `m_flag_lqcrent`, `m_flag_rhu`, `m_flag_rhucash`, `m_flag_med_hval` | double | `is.na()` of corresponding E after censoring | Missing-estimate indicators | 0/1; never NA |
 | `zero_flag_rhu`, `zero_flag_rhucash`, `zero_flag_med_hval` | double | Corresponding E == 0 | Zero-estimate indicators | 0/1; NA for missing E |
 
 ## 6. Missingness and special-value rules
@@ -181,10 +192,19 @@ These definitions propagate missing inputs; dollar CVs are unguarded (§6).
   Their denominator guard is `!= 0`, not `> 0`. Guarded count/share CVs are
   missing for zero or missing estimates. Dollar CVs can be `Inf`/`NaN` at zero
   estimates; the producer does not replace them.
-- Rent missing flags include source missingness and censoring; top-code flags
-  retain the distinction. Censoring changes estimates only, so an MOE can remain
-  observed beside a missing estimate. Step 2 applies no additional source-sentinel
-  recoding or general negative-value cleanup.
+- `top_coded` means confirmed upper code/annotation; its numeric rent is NA.
+  Known unavailable source codes/annotations (`-666666666` / `-`, `-999999999` /
+  `N`, `-888888888` / `(X)`) and lower interval `99` give `unavailable_other`.
+  Missing original evidence, unexplained boundary values, or conflicting source
+  estimate/annotation/distribution evidence give `unresolved`. Missing E or M
+  alone never creates a top-code. Ordinary numeric E can be observed without M.
+- Numeric rent is NA for every status except `observed`; an observed MOE may
+  remain beside missing rent. `rent_status_reason` records numeric/boundary,
+  upper/lower interval, source unavailable, insufficient-evidence, or conflict
+  reasons. `rent_median_bin` uses complete consistent counts and first cumulative
+  count >= half; it is supporting evidence only.
+- `tc_flag_rent` and `m_flag_rent` are removed. Unrelated flags retain their rules.
+  Raw B25064 strings are never altered by censoring or downstream inflation.
 
 ## 7. Validation contract
 
@@ -196,7 +216,7 @@ These definitions propagate missing inputs; dollar CVs are unguarded (§6).
 | Inventory construction/join | Three component estimate/MOE pairs numeric; observed estimates finite and nonnegative. One-to-one join preserves every existing column and row. |
 | Inventory before save/readback | Missingness matches keyed completeness diagnostics; complete inventories equal component sums and diagnostic estimates within `1e-10`. Source-first and target-first totals reconcile over complete targets only. |
 | Income | Source `med_hhincE/M` unchanged, including missingness; CV equals source-based formula within `1e-10`, independent of parity-reference availability. |
-| Optional parity | Southern California keys and shared values match the reference (numeric tolerance `1e-10`); shared column order/types match. Only removal of `rhu_lrE`/`rhu_lr2E` is allowed; no additions or income/allocation exceptions. Missing reference means **parity not checked**. |
+| Optional parity | Southern California keys and shared values match the reference (numeric tolerance `1e-10`); shared column order/types match. Only documented rent evidence/metadata additions and retired flags/low-rent removals are allowed. Shared rent/CV changes must match both source-derived old and corrected values; no unrelated income/allocation exceptions. Missing reference means **parity not checked**. |
 | Saved output | Exact in-memory/readback equality of rows, values, column order/types; retired low-rent fields absent even without parity. Numeric flags 0/1 or missing; missing flags nonmissing; `rent_id` logical TRUE. Vacancy rates missing or finite [0, 1]. |
 
 ### Analyst-review diagnostics
@@ -216,13 +236,13 @@ These definitions propagate missing inputs; dollar CVs are unguarded (§6).
 - No structure/inventory MOE or CV, interpolated rent, or block-group rent-quality
   shares are added. Step 4 uses post-censoring `rentE` as this source's counterpart
   for canonical `interp_rent`; this file contains no tract interpolation.
-- The 162-column list describes the current Step 1 contract. Step 2 retains input
+- The 170-column list describes the current Step 1 contract. Step 2 retains input
   columns rather than enforcing an exhaustive column whitelist; readback checks
-  compare against memory, not a fixed 162-column schema.
+  compare against memory, not a fixed 170-column schema.
 
 ## 9. Validation and regeneration
 
-- **Focused validation:** existing synthetic checks in
+- **Focused validation:** `tests/test_rent_metadata.R` covers native classification and raw evidence; existing synthetic checks in
   [tests/test_income_censoring.R](../tests/test_income_censoring.R) and
   [tests/test_rental_inventory.R](../tests/test_rental_inventory.R) cover censoring,
   inventory, and selected notebook acceptance/readback logic.

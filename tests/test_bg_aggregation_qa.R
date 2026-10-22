@@ -12,7 +12,7 @@ stopifnot(identical(strict_weighted_sum(c(0, 4), c(1, 0.25)), 1),
 complete <- with_24$acs_2024_bg_aggregated_interp
 expected <- list(popE = c(100, 50), hhE = c(100, 50), huE = c(160, 20),
                  rhuE = c(41.2, 75), mf5E = c(640, 80), smfE = c(480, 60),
-                 vac_forrentE = c(9.6, 2), rhu_miss_rent = c(25, 75))
+                 vac_forrentE = c(9.6, 2), rhu_miss_rent = c(0, 0))
 for (column in names(expected)) stopifnot(isTRUE(all.equal(complete[[column]], expected[[column]])))
 for (column in paste0("grentcat", 1:24, "E")) {
   stopifnot(identical(complete[[column]], c((100 / 24) * 0.25 + (100 / 24) * 0.4, (100 / 24) * 0.75)))
@@ -68,7 +68,7 @@ stopifnot(one_family_result$acs_2024_bg_aggregated$popE == 100,
 for (missing in c(NA_real_, NaN)) {
   conditional <- probe
   conditional$rhuE[1] <- missing
-  conditional$rentE[1] <- 3500
+  conditional$rentE[1] <- 3501
   censored <- assemble_allocations(conditional)
   stopifnot(identical(censored$acs_2024_bg_aggregated$rhu_miss_rent[1], NA_real_),
             is.na(censored$acs_2024_bg_allocations$rentE[1]))
@@ -225,15 +225,12 @@ stopifnot(all(c("pctrhuE", "pctrhuM", "pctrhuCV", "rhuCV", "pctrvacE", "pct_miss
                 dependent_expectations$variable),
           filter(dependent_expectations, variable == "pctrhuE")$legacy == 25 / 160,
           is.na(dependent_result$acs_2024_bg_aggregated$pctrhuM[1]))
-stopifnot(filter(dependent_expectations, variable == "pct_tc_rent")$legacy == 1,
-          filter(dependent_expectations, variable == "tc_flag_rent_24")$legacy == 1,
-          all(is.na(filter(dependent_expectations,
-                            variable %in% c("pct_tc_rent", "tc_flag_rent_24"))$corrected)))
+
 
 observed_zero <- assembly_sources[1, ] |> mutate(.acs_present = TRUE, rhuE = 0)
 zero_result <- assemble_allocations(observed_zero)$acs_2024_bg_aggregated_interp
 stopifnot(zero_result$rhuE == 0, zero_result$pctrhuE == 0, zero_result$pctrvacE == 1,
-          is.na(zero_result$rhuCV), is.na(zero_result$pct_tc_rent), zero_result$tc_flag_rent_24 == 0)
+          is.na(zero_result$rhuCV), zero_result$tc_flag_rent_24 == 0)
 
 # An interior median has an independently calculated dollar value. All 25 count
 # inputs gate it; missing MOEs and unrelated counts do not. Keep every target key.
@@ -276,7 +273,7 @@ stopifnot(is.finite(zero_bin_result$acs_2024_bg_aggregated_interp$interp_rent[1]
 # Run source-level incompleteness through each weighted denominator family.
 affected <- list(
   hhE = c("med_hhincE", "med_hhincCV"),
-  rhuE = c("rhuM", "med_hhincM", "med_hhincCV", "pct_tc_rent", "tc_flag_rent_24", "pct_miss_rent"),
+  rhuE = c("rhuM", "med_hhincM", "med_hhincCV", "pct_miss_rent"),
   huE = c("huM", "rhu_baseM", "tot_vacM", "tot_vac_baseM", "sfd_detM", "sfd_baseM", "pctrhuM"),
   popE = c("popM", "pop_blkM", "pop_hspM", "pop_aaM", "pop_raceM", "pctblkM", "pcthspM")
 )
@@ -299,7 +296,7 @@ for (count in names(affected)) {
     stopifnot(all(is.na(env$acs_2024_bg_allocations[[relative]][source$tr2010_id == tract_ids[1]])))
   }
 }
-stopifnot(is.na(result$tc_flag_rent_24[1]), result$tc_flag_rent_24[2] == 0,
+stopifnot(result$tc_flag_rent_24[1] == 0, is.na(result$tc_flag_rent_24[2]),
           is.na(result$interp_rent[2]), result$nsfaE[2] == 0)
 for (column in c("interp_rent", "nsfaE", "pctrvacE", "pctrhuE", "popCV")) {
   env <- if (column == "interp_rent") late_bin else mixed
@@ -321,7 +318,7 @@ cat("Passed: all-bin interpolation gate, endpoints, source/weight edge cases, de
 # and their dependencies. A missing reference remains explicitly unchecked.
 expectations <- count_expectations(mixed)
 stopifnot(all(c("popE", "rhuE", "mf5E", "nsfaE") %in% expectations$variable),
-          all(c("popM", "tc_flag_rent_24") %in% expectations$variable),
+          "popM" %in% expectations$variable,
           !"rhu_inventoryE" %in% expectations$variable)
 legacy <- result
 for (i in seq_len(nrow(expectations))) {
@@ -371,11 +368,11 @@ for (migration in c("2016", "2024")) {
 }
 cat("Passed: individually verified count parity, rejected unexplained differences, and shared-helper compatibility.\n")
 
-# Missing estimates survive readback; incomplete rent shares also decompose as NA.
+# Missing estimates survive readback; coverage still requires its denominator.
 mixed$acs_2024_bg_aggregated_out <- mixed$acs_2024_bg_aggregated_interp
 mixed$target_counties <- "037"
 run_chunk("validate-county-rent-step2", mixed, bg_notebook)
-stopifnot(nrow(mixed$rent_share_incomplete_2024) == 1L)
+stopifnot(all(is.na(mixed$acs_2024_bg_aggregated_out$pct_miss_rent)))
 path <- tempfile(fileext = ".feather")
 tryCatch({
   arrow::write_feather(result, path)
