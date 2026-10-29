@@ -1,13 +1,13 @@
 # Audit: 2024 rental housing unit aggregation
 
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
 Reviewed 2026-09-11 at commit `1e07d96`. Scope: renter **count estimates** in
-[02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd), from available block-group counts and
+[02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd), from available block-group counts and
 crosswalk fractions through the saved 2010-tract counts. This assessment does
 not validate the separate rent statistics, share measures, or MOEs/CVs.
 
@@ -27,8 +27,8 @@ is occupied housing units. Renter occupancy includes units occupied without
 payment of rent and excludes vacant units available for rent. Thus this is an
 occupied-rental count, rather than the entire rental inventory or a year-end
 2024 census. The variable mapping and period appear in
-[01_acs.Rmd](../01_acs.Rmd#22-specify-variables-to-extract) and its
-[2024 extraction](../01_acs.Rmd#41-download-2024-acs-block-group-estimates).
+[01_acs.Rmd](../01_import_acs.Rmd#22-specify-variables-to-extract) and its
+[2024 extraction](../01_import_acs.Rmd#41-download-2024-acs-block-group-estimates).
 ([Census B25003](https://api.census.gov/data/2024/acs/acs5/groups/B25003.html),
 [Census tenure definitions](https://www2.census.gov/programs-surveys/acs/tech_docs/subject_definitions/2024_ACSSubjectDefinitions.pdf).)
 
@@ -36,7 +36,7 @@ Related rental counts use the same allocation arithmetic: `rhucashE` is
 `B25063_002E`; `grentcat1E`–`grentcat24E` are `B25063_003E`–`B25063_026E` cash-rent
 bins. `rhu_lrE` sums bins 1–18 (gross rent below $1,250), and `rhu_lr2E` sums
 bins 1–20 (below $2,000). These are cash-renter subsets, not all renters.
-([Source derivation](../01_acs.Rmd#42-derive-low-rent-housing-unit-counts),
+([Source derivation](../01_import_acs.Rmd),
 [Census B25063](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html).)
 
 **Implemented calculation.** For source block group $b$, target tract $t$,
@@ -55,7 +55,7 @@ source's total across destinations. The supplied fraction is applied directly
 to the ACS count; there is no further division by a tract total. The crosswalk
 import only renames/selects columns.
 ([NHGIS weight definitions and method](https://www.nhgis.org/geographic-crosswalks),
-[crosswalk import](../01_acs.Rmd#61-crosswalk-2024-block-groups-to-2010-tracts).)
+[crosswalk import](../01_import_acs.Rmd#61-crosswalk-2024-block-groups-to-2010-tracts).)
 
 [calc_agg_vars()](../R/assemble_helpers.R#L278) groups by `tr2010_id` and computes
 `rhuE_agg = sum(rhuE * wt_renthu, na.rm = TRUE)`, then renames it `rhuE`.
@@ -76,7 +76,7 @@ fractions explain why these counts differ.
 Selection uses the destination tract's state/county, preserving all matched
 sources allocating there, including sources outside the 14 target counties.
 Original fractions are not renormalized after destination filtering.
-[The notebook](../02a_aggregate_2024_block_groups.Rmd) asserts unique source IDs, unique
+[The notebook](../02a_build_measures_from_block_groups.Rmd) asserts unique source IDs, unique
 `(bg2020_id, tr2010_id)` pairs, no join multiplication, and exact fraction
 preservation. Later tract joins assert unique, fully matched tract keys.
 The cached IDs are character GEOIDs with the expected 12-/11-digit lengths.
@@ -132,7 +132,7 @@ the excluded allocation explains the total difference. Rounding errors are
 well within the notebook's `1e-6` source-fraction tolerance. All 5,513 saved
 values matched for each of `rhuE`, `rhucashE`, `rhu_lrE`, and `rhu_lr2E`.
 There is no unexplained systematic loss or inflation in these cached counts.
-The existing [tract reconciliation](../02a_aggregate_2024_block_groups.Rmd) repeats the same
+The existing [tract reconciliation](../02a_build_measures_from_block_groups.Rmd) repeats the same
 `na.rm = TRUE` formula; it alone cannot detect missing-count omission.
 
 **Panel comparability.** The earlier measure is the same `B25003_003E` universe
@@ -144,9 +144,9 @@ allocation error remains even when conservation is exact. Applying renter
 fractions to cash/low-rent subsets further assumes their distribution follows
 all renters within each source. Earlier low-rent thresholds are below $1,000
 and $1,500, versus $1,250 and $2,000 in 2024, so their intended real-threshold
-comparability is approximate. ([Earlier extraction](../01_acs.Rmd#31-download-2016-acs-tract-estimates),
-[shared variable mapping](../01_acs.Rmd#22-specify-variables-to-extract),
-[earlier preparation](../02a_aggregate_2024_block_groups.Rmd),
+comparability is approximate. ([Earlier extraction](../01_import_acs.Rmd#31-download-2016-acs-tract-estimates),
+[shared variable mapping](../01_import_acs.Rmd#22-specify-variables-to-extract),
+[earlier preparation](../02a_build_measures_from_block_groups.Rmd),
 [threshold definitions](../schemas/acs_step1_2016_tract.md),
 [2016 B25003](https://api.census.gov/data/2016/acs/acs5/groups/B25003.html).)
 

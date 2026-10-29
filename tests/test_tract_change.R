@@ -18,7 +18,7 @@ expect_error <- function(expr, message) {
   error <- tryCatch({ quiet(expr); NULL }, error = identity)
   stopifnot(inherits(error, "error"), grepl(message, conditionMessage(error), fixed = TRUE))
 }
-notebook_chunk <- function(label, file = "03_tract_change.Rmd") {
+notebook_chunk <- function(label, file = "03_identify_tract_boundary_changes.Rmd") {
   lines <- readLines(here::here(file), warn = FALSE)
   start <- which(lines == paste0("```{r ", label, "}"))
   stopifnot(length(start) == 1L)
@@ -89,7 +89,7 @@ cat("Passed: classifications, mixed multiplicity, explicit changed-GEOID keys, e
 
 # Exercise the actual diagnostic chunk with the package order used by other notebooks.
 local({
-  notebook_lines <- readLines(here::here("03_tract_change.Rmd"), warn = FALSE)
+  notebook_lines <- readLines(here::here("03_identify_tract_boundary_changes.Rmd"), warn = FALSE)
   start <- which(notebook_lines == "```{r summarize-classification}")
   stopifnot(length(start) == 1L)
   end <- which(seq_along(notebook_lines) > start & notebook_lines == "```")[1]
@@ -123,7 +123,7 @@ local({
   env <- new.env(parent = environment())
   quiet(eval(notebook_chunk("target-county-config"), env))
   assembly_config <- new.env()
-  quiet(eval(notebook_chunk("set-paths", "02b_prepare_tract_sources.Rmd"), assembly_config))
+  quiet(eval(notebook_chunk("set-paths", "02b_build_measures_from_tracts.Rmd"), assembly_config))
   stopifnot(identical(env$southern_california_counties, assembly_config$southern_california_counties),
             identical(env$bay_area_counties, assembly_config$bay_area_counties))
   in_county <- function(x, county) mutate(x, tr2020_id = paste0("06", county, substr(tr2020_id, 6, 11)))

@@ -1,8 +1,8 @@
 # Income censoring: analyst decision and correction
 
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
@@ -34,7 +34,7 @@ findings below predate this change. See the [current BG schema](../schemas/acs_s
 **Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
 [R/geography_qa.R](../R/geography_qa.R),
 [tests/test_income_censoring.R](../tests/test_income_censoring.R), this note,
-[02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd) (income expectations, parity calls, and prose),
+[02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd) (income expectations, parity calls, and prose),
 [acs_step2_16.md](../schemas/acs_step2_16.md),
 [acs_step2_24.md](../schemas/acs_step2_24.md), and the income-status passage in
 [README.md](../README.md).
@@ -66,7 +66,7 @@ returns `NA`, so the absence of a true condition does **not** make it inactive.
 Already missing income stays missing. The helper does not consult renter counts
 or apply a threshold to income itself. No rows are dropped.
 
-The calls in [02_assemble.Rmd](../02a_aggregate_2024_block_groups.Rmd) applied this rule to 2024
+The calls in [02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd) applied this rule to 2024
 block-group allocation rows in §2.4, before tract aggregation, and directly to
 2016 tracts in §3.2. In 2024, `calc_agg_vars()` uses
 `weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`. Under the old helper,
@@ -81,7 +81,7 @@ contributions were lost. The correction restores those income contributions.
 | Previous [2016 step-2 schema](../schemas/acs_step2_16.md), introduced in commit `0a9ed5e` | Called the expression a "Known quirk (carried unchanged from source logic)" and claimed income was effectively not censored. This was a description of presumed execution, not an explicit decision to retain all available income. It overlooked missing-condition propagation. |
 | Notebook §2.4 and §3.2 decision prose before Task 03A | Explained censoring rent at 3500, but supplied no rationale or policy for income depending on rent. |
 | Previous [2024 step-2 schema](../schemas/acs_step2_24.md) | Describes rent censoring before aggregation and weighted means of income, but does not state the income exclusion. |
-| [01_acs.Rmd](../01_acs.Rmd) and [step-1 schemas](../schemas/acs_step1_2016_tract.md) | Import `rent` from `B25064_001` and `med_hhinc` from `B19013_001`; the revised tract and block-group lists retain these same codes for both years and grains. The project adds no upstream rule tying income availability to rent. |
+| [01_acs.Rmd](../01_import_acs.Rmd) and [step-1 schemas](../schemas/acs_step1_2016_tract.md) | Import `rent` from `B25064_001` and `med_hhinc` from `B19013_001`; the revised tract and block-group lists retain these same codes for both years and grains. The project adds no upstream rule tying income availability to rent. |
 | Helper and focused history | The same income expression appears in the initial notebook (`25da173`) and its extraction to `R/assemble_helpers.R` (`0a9ed5e`). These changes supply no income-censoring rationale. The 2,000,000 threshold also appears in median-house-value flagging; that is not evidence for an income threshold or authorization to change another variable. |
 | [R/merge_helpers.R](../R/merge_helpers.R) | Carries income and its CV into both vintages, inflation-adjusts 2016 dollar measures, and derives the income change ratio. This establishes downstream dependencies, not the desired censoring rule. |
 

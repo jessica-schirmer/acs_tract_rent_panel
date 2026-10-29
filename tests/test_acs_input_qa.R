@@ -20,7 +20,7 @@ expect_error <- function(expr, message) {
   error <- tryCatch({ quiet(expr); NULL }, error = identity)
   stopifnot(inherits(error, "error"), grepl(message, conditionMessage(error), fixed = TRUE))
 }
-notebook_lines <- readLines(here::here("01_acs.Rmd"), warn = FALSE)
+notebook_lines <- readLines(here::here("01_import_acs.Rmd"), warn = FALSE)
 chunk_starts <- grep("^```\\{r[ ,}]", notebook_lines)
 chunks <- lapply(chunk_starts, function(start) {
   end <- which(seq_along(notebook_lines) > start & notebook_lines == "```")[1]

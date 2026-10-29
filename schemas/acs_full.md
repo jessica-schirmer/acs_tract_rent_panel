@@ -4,7 +4,7 @@
 
 | Property | Contract |
 |---|---|
-| Producer | [04_merge.Rmd](../04_merge.Rmd), with [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R), and [R/geography_qa.R](../R/geography_qa.R). |
+| Producer | [04_assemble_tract_panel.Rmd](../04_assemble_tract_panel.Rmd), with [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R), and [R/geography_qa.R](../R/geography_qa.R). |
 | Output | `../../../data/acs_full.feather`, relative to the repository root; `write_panel` controls saving and is currently `TRUE`. |
 | Role / status | Canonical analysis panel: baseline and selected 2024 levels, changes, uncertainty, and provenance. Source comparisons remain notebook-only. |
 | Row grain | One 2010-vintage census tract in the union of the 2016 and block-group-aggregated 2024 input keys. |
@@ -230,7 +230,7 @@ median-bin evidence, and original E/EA/M/MA remain in Steps 1/2, not this panel.
 
 ## 7. Validation contract
 
-Section references in these tables refer to `04_merge.Rmd`.
+Section references in these tables refer to `04_assemble_tract_panel.Rmd`.
 
 ### Fail-fast invariants
 
@@ -275,7 +275,7 @@ Section references in these tables refer to `04_merge.Rmd`.
   notebook `var_list` selections, input join tags, `panel_schema_additions()`,
   and both change helpers. Check template headings, local links, notebook/helper
   parsing, and `git diff --check` without reading data.
-- **Analyst-run regeneration:** run `04_merge.Rmd` from setup through §7 with
+- **Analyst-run regeneration:** run `04_assemble_tract_panel.Rmd` from setup through §7 with
   current Step 2 products, the Step 3 crosswalk, and `write_panel <- FALSE` for
   in-memory review. Set it to `TRUE` and rerun from setup to save; §7.5 announces
   replacement, checks any prior schema, writes, and reloads the output. Review

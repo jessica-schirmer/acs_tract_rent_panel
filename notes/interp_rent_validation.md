@@ -38,7 +38,7 @@ rent-related columns, and ran targeted calculations in memory. It did not run
 or knit an entire notebook, download new ACS observations, or regenerate data.
 The only repository write is this note.
 
-The [configured sample](../02a_aggregate_2024_block_groups.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
+The [configured sample](../02a_build_measures_from_block_groups.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
 and nine Bay Area counties, selected by **destination 2010 tract**. Of 29,740
 statewide crosswalk rows, 19,807 point to the target tracts. Following the
 notebook, one unmatched source link with all four allocation weights equal to
@@ -71,7 +71,7 @@ the missing-source-median share.
 The [2024 Census B25063 variable definitions](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html)
 confirm `rhucashE = B25063_002E`, the cash-renter total. The 24 cash-rent bins
 are `_003E` through `_026E`; `_027E` is no-cash rent and is excluded.
-[Stage 1's mapping](../01_acs.Rmd#22-specify-variables-to-extract) and the helper's range table match the
+[Stage 1's mapping](../01_import_acs.Rmd#22-specify-variables-to-extract) and the helper's range table match the
 published category order. The helper converts category suffixes to integers
 and sorts them numerically, so categories 10–24 follow category 9 correctly.
 The saved aggregation supplies exactly the 24 estimate columns, without MOEs

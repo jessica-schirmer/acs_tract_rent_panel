@@ -1,6 +1,6 @@
 # Schema: `xwalk_tr20_tr10.feather`
 
-**Produced by:** `03_tract_change.Rmd` (Step 3).
+**Produced by:** `03_identify_tract_boundary_changes.Rmd` (Step 3).
 **Source:** U.S. Census Bureau 2020-to-2010 tract relationship file,
 `../../../data-raw-temp/census/tab20_tract20_tract10_st06.txt`.
 The UTF-8, pipe-delimited source describes geographic intersections between

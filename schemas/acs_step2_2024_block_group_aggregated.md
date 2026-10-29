@@ -4,9 +4,9 @@
 
 | Property | Contract |
 |---|---|
-| Producer | [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd), with [R/assemble_helpers.R](../R/assemble_helpers.R), [R/bg_aggregation_qa.R](../R/bg_aggregation_qa.R), and [R/geography_qa.R](../R/geography_qa.R). |
+| Producer | [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd), with [R/assemble_helpers.R](../R/assemble_helpers.R), [R/bg_aggregation_qa.R](../R/bg_aggregation_qa.R), and [R/geography_qa.R](../R/geography_qa.R). |
 | Output | `../../../data/acs_step2_2024_block_group_aggregated.feather`, relative to the repository root. |
-| Role / status | Step 2 source for [04_merge.Rmd](../04_merge.Rmd): canonical 2024 measurement bundles where `!(geo_consistent %in% 1)`, including missing/unexpected flags; source-comparison diagnostics elsewhere. Selection has no availability fallback. |
+| Role / status | Step 2 source for [04_assemble_tract_panel.Rmd](../04_assemble_tract_panel.Rmd): canonical 2024 measurement bundles where `!(geo_consistent %in% 1)`, including missing/unexpected flags; source-comparison diagnostics elsewhere. Selection has no availability fallback. |
 | Row grain | One row per 2010-vintage destination tract represented in the county-filtered crosswalk, including targets represented only by zero-weight links. |
 | Primary key | `tr2010_id`: unique, nonmissing character GEOID matching `^06[0-9]{9}$`; state (2) + county (3) + tract (6) digits, preserving leading zeros. |
 | Geographic scope | California destinations in the 14 counties below; contributing sources are not county-filtered. |
@@ -24,7 +24,7 @@ Paths below are relative to the repository root.
 
 | Input | Source grain / key | Role |
 |---|---|---|
-| `../../../data/acs_step1_2024_block_group.feather` ([schema](acs_step1_2024_block_group.md)) | Statewide California 2020 block group; `bg2020_id` | ACS counts, income, rent, and MOEs from `01_acs.Rmd`. |
+| `../../../data/acs_step1_2024_block_group.feather` ([schema](acs_step1_2024_block_group.md)) | Statewide California 2020 block group; `bg2020_id` | ACS counts, income, rent, and MOEs from `01_import_acs.Rmd`. |
 | `../../../data/xwalk_bg24_tr10.feather` ([schema](xwalk_bg24_tr10.md)) | Unique (`bg2020_id`, `tr2010_id`) allocation pair | NHGIS links and population, household, housing-unit, and renter-unit allocation fractions. |
 | `../../../data/parity_reference/acs_step2_24.feather` (optional) | Prior 2010 tract; `tr2010_id` | Preserved Southern California parity reference only; supplies no production measurements. Missing reference means parity not checked. |
 
@@ -310,7 +310,7 @@ objects; only the diagnostic/tag fields listed in §5 persist.
   joins, `calc_missing_vars()`, `calc_pct_vars()`, `calc_cv(source = "bg_agg")`,
   and final derived/flag/interpolation joins. Check local links and parse
   notebook chunks without executing them.
-- **Analyst-run regeneration:** execute `02a_aggregate_2024_block_groups.Rmd`
+- **Analyst-run regeneration:** execute `02a_build_measures_from_block_groups.Rmd`
   with current Step 1 files and repository packages. It writes the output
   above and validates readback in §3; handle existing outputs deliberately
   and keep parity snapshots separate. This producer requires no ACS API call

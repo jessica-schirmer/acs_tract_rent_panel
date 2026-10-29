@@ -125,7 +125,7 @@ cat("Unrelated columns match the previous helper before and after aggregation.\n
 # Exercise the actual notebook expectation chunks with synthetic inputs.
 income_expectations <- function(vintage, sources, reference) {
   lines <- readLines(here::here(if (vintage == "24")
-    "02a_aggregate_2024_block_groups.Rmd" else "02b_prepare_tract_sources.Rmd"))
+    "02a_build_measures_from_block_groups.Rmd" else "02b_build_measures_from_tracts.Rmd"))
   product <- if (vintage == "24") "2024_bg_aggregated" else "16"
   chunk_suffix <- if (vintage == "24") "2024-bg-aggregated" else "16"
   start <- match(paste0("```{r income-expectations-", chunk_suffix, "}"), lines)

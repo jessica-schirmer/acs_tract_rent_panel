@@ -4,7 +4,7 @@
 
 | Property | Contract |
 |---|---|
-| Producer | [01_acs.Rmd](../01_acs.Rmd) §4; final validation in §7. |
+| Producer | [01_import_acs.Rmd](../01_import_acs.Rmd) §4; final validation in §7. |
 | Output | `../../../data/acs_step1_2024_block_group.feather`, relative to the repository root. |
 | Role / status | Persisted Step 1 source extract for downstream aggregation; statewide, before geographic harmonization or analysis-sample restriction. |
 | Row grain | One row per returned 2020-vintage California census block group. |
@@ -17,7 +17,7 @@
 | Input | Source grain / key | Role |
 |---|---|---|
 | Census Bureau 2024 ACS 5-year detailed tables, via `tidycensus::get_acs()` | Block group × Census variable; `GEOID` + variable code | Supplies `NAME` and all estimates/MOEs. Request: `geography = "block group"`, `state = "CA"`, `year = 2024`, `survey = "acs5"`, `output = "wide"`. |
-| `tract_vars` and `block_group_unavailable_vars` in `01_acs.Rmd` §§1.2, 2.2 | Named alias → Census code mapping | Defines `block_group_vars` and the requested columns. |
+| `tract_vars` and `block_group_unavailable_vars` in `01_import_acs.Rmd` §§1.2, 2.2 | Named alias → Census code mapping | Defines `block_group_vars` and the requested columns. |
 | `load_variables(2024, "acs5")` | Census variable code | Interactive lookup only; does not transform values or determine exclusions. |
 | NHGIS `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`, prepared as `xwalk_bg24_tr10.feather` | Allocation pair: raw (`bg2020ge`, `tr2010ge`), renamed (`bg2020_id`, `tr2010_id`) | Companion input for Step 1 coverage diagnostics and downstream allocation; supplies no columns to this extract. |
 
@@ -67,7 +67,7 @@ A one-to-one original B25064 join requires identical GEOIDs and normalized
 E/M, preserving every source row/value. If retrieval fails, normalized E/M
 strings, missing annotations, and availability FALSE are retained with a visible
 review message. No geographic allocation changes this saved table. BG→tract allocation occurs
-downstream in [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd),
+downstream in [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd),
 joining on `bg2020_id` to [xwalk_bg24_tr10.feather](xwalk_bg24_tr10.md).
 Crosswalk allocation pairs are many-to-many; the ACS table supplies one row per
 source BG. Destination IDs and allocation weights are not persisted here.
@@ -238,7 +238,7 @@ consumers should select columns by name.
 
 ### Fail-fast invariants
 
-Implemented in [R/acs_input_qa.R](../R/acs_input_qa.R) and `01_acs.Rmd`.
+Implemented in [R/acs_input_qa.R](../R/acs_input_qa.R) and `01_import_acs.Rmd`.
 Checkpoint section numbers refer to the notebook.
 
 | Notebook checkpoint | Required condition |
@@ -267,7 +267,7 @@ separate from the coverage diagnostics above.
   or valid downstream contributors. Required-column checks do not reject
   arbitrary extra columns; key-format checks do not independently enforce the
   California prefix.
-- **Definition discrepancy:** the `rhutot` comment in `01_acs.Rmd` and related
+- **Definition discrepancy:** the `rhutot` comment in `01_import_acs.Rmd` and related
   tract-schema descriptions say rent is “computed.” The requested
   [B25063_001 total](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html)
   includes cash-rent and no-cash-rent units; `rhucashE` identifies the cash-rent
@@ -284,7 +284,7 @@ separate from the coverage diagnostics above.
   `c("bg2020_id", "NAME", acs_request_columns(block_group_vars), "rent_id", rent_evidence_columns())`
   as a set, and verify each numeric field's Census code against the first-alias
   mapping. This checks documentation completeness separately from row counts.
-- **Analyst-run regeneration:** execute `01_acs.Rmd` with its packages, Census
+- **Analyst-run regeneration:** execute `01_import_acs.Rmd` with its packages, Census
   API key, and raw NHGIS inputs available. The notebook writes all five Step 1
   outputs, so handle existing outputs deliberately. Accept this extract only
   after the validation contract above is satisfied; source-input

@@ -1,5 +1,5 @@
 # merge_helpers.R --------------------------------------------------------
-# Helper functions for 04_merge.Rmd (Step 4: merge the 2012-2016 and 2020-2024
+# Helper functions for 04_assemble_tract_panel.Rmd (Step 4: merge the 2012-2016 and 2020-2024
 # tract measures into a panel and compute change variables).
 #
 # This file carries its own copies of a few small generic/diagnostic

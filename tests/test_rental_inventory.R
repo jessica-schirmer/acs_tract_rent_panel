@@ -146,8 +146,8 @@ expect_error(calc_rental_inventory(bind_rows(one, one), tr2010_id), "unique trac
 cat("Passed: component sums, split/fractional allocations, missingness, zero links, and input validation.\n")
 
 # Run actual notebook joins and downstream measures with/without inventory.
-bg_notebook <- "02a_aggregate_2024_block_groups.Rmd"
-tract_notebook <- "02b_prepare_tract_sources.Rmd"
+bg_notebook <- "02a_build_measures_from_block_groups.Rmd"
+tract_notebook <- "02b_build_measures_from_tracts.Rmd"
 run_chunk <- function(label, env, notebook) {
   notebook_lines <- readLines(here::here(notebook))
   start <- match(paste0("```{r ", label, "}"), notebook_lines)
@@ -594,7 +594,7 @@ expect_error(assert_same_schema(current_24, previous_24, "Strict reload"), "orde
 cat("Passed: strict/default parity, narrow schema migration, income/boundary rules, and missing references.\n")
 
 # Exercise Step 1's actual source mapping and reduced schema without an API call.
-step1_lines <- readLines(here::here("01_acs.Rmd"))
+step1_lines <- readLines(here::here("01_import_acs.Rmd"))
 step1_chunk <- function(label, env) {
   start <- match(paste0("```{r ", label, "}"), step1_lines)
   stopifnot(!is.na(start))

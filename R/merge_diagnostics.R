@@ -1,4 +1,4 @@
-# Geographic alignment and diagnostic helpers for 04_merge.Rmd. Source after merge_helpers.R and
+# Geographic alignment and diagnostic helpers for 04_assemble_tract_panel.Rmd. Source after merge_helpers.R and
 # geography_qa.R; uses the notebook's existing dplyr/tidyr/purrr packages.
 
 merge_relationship_classes <- c(

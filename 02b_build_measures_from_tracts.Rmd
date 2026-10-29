@@ -41,7 +41,7 @@ knitr::opts_chunk$set(
 Both outputs cover Southern California and Bay Area target counties and include
 rental inventory, year-specific rent status/flags/source-dollar bounds, original
 B25064 evidence, structure counts, shares, vacancy rates, and
-CVs for `04_merge.Rmd`.
+CVs for `04_assemble_tract_panel.Rmd`.
 
 **Steps:**
 
@@ -160,7 +160,7 @@ Persist `tc_flag_rent_16/24` (0 observed, 1 top-coded, NA otherwise),
 `rent_status_reason` and `rent_median_bin`. Original `rent_source_e/ea/m/ma`
 and `rent_evidence_available` survive cleaning. Older extracts lacking raw
 annotations retain normalized E/M with evidence availability FALSE.
-The 2016 bound is adjusted only in `04_merge.Rmd`, alongside 2016 rent.
+The 2016 bound is adjusted only in `04_assemble_tract_panel.Rmd`, alongside 2016 rent.
 
 Lower-quartile rent retains its existing `>= 3500` flag/censor, and house value
 its `>= 2000000` flag without censoring. Their missing/zero flags and bedroom
@@ -329,7 +329,7 @@ summary(acs_16$med_hhincE)
 
 Keep `tr2020_id` so source estimates retain their native 2020 geography. Select
 the configured counties without crosswalking or aggregating; geographic
-matching is handled by `04_merge.Rmd`.
+matching is handled by `04_assemble_tract_panel.Rmd`.
 
 ```{r load-restrict-2024-tract}
 acs_2024_tract <- load_data(data_dir, NULL, "acs_step1_2024_tract.feather") |>

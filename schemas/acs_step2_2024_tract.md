@@ -4,7 +4,7 @@
 
 | Property | Contract |
 |---|---|
-| Producer | [02b_prepare_tract_sources.Rmd](../02b_prepare_tract_sources.Rmd) §3; readback validation in §4. |
+| Producer | [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd) §3; readback validation in §4. |
 | Output | `../../../data/acs_step2_2024_tract.feather`, relative to the repository root. |
 | Role / status | Native tract source for Step 4: canonical measurements on explicit `geo_consistent == 1` links, including different-GEOID pairs; source diagnostics otherwise. Selected missing values have no fallback to block-group aggregates. See the [panel contract](acs_full.md). |
 | Row grain | One native 2020-vintage California census tract. |
@@ -22,7 +22,7 @@ Santa Clara (`085`), Solano (`095`), Sonoma (`097`). State FIPS is `06`.
 
 | Input | Source grain / key | Role |
 |---|---|---|
-| `../../../data/acs_step1_2024_tract.feather` ([schema](acs_step1_2024_tract.md)) | Statewide native 2020 tract; `tr2020_id` | ACS estimates/MOEs downloaded by `01_acs.Rmd` using `tidycensus::get_acs`, California, year 2024, five-year survey. |
+| `../../../data/acs_step1_2024_tract.feather` ([schema](acs_step1_2024_tract.md)) | Statewide native 2020 tract; `tr2020_id` | ACS estimates/MOEs downloaded by `01_import_acs.Rmd` using `tidycensus::get_acs`, California, year 2024, five-year survey. |
 | `../../../data/parity_reference/acs_step2_2024_tract.feather` (optional) | Native 2020 tract; `tr2020_id` | Preserved Southern California comparison only; supplies no measurements. |
 
 ## 3. Construction rules
@@ -246,9 +246,9 @@ These definitions propagate missing inputs; dollar CVs are unguarded (§6).
   [tests/test_income_censoring.R](../tests/test_income_censoring.R) and
   [tests/test_rental_inventory.R](../tests/test_rental_inventory.R) cover censoring,
   inventory, and selected notebook acceptance/readback logic.
-- **Documentation/column audit:** compare §5 with `tract_vars` in `01_acs.Rmd`
+- **Documentation/column audit:** compare §5 with `tract_vars` in `01_import_acs.Rmd`
   (first alias per distinct code), producer §3, and the flag/share/CV helpers;
   verify local links and `git diff --check`. No data read or regeneration needed.
-- **Analyst-run regeneration:** run `02b_prepare_tract_sources.Rmd` from setup
+- **Analyst-run regeneration:** run `02b_build_measures_from_tracts.Rmd` from setup
   through §4 with current Step 1 inputs and optional preserved parity references.
   It writes both native tract products; review all diagnostics after readback.

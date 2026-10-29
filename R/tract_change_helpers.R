@@ -1,4 +1,4 @@
-# Land-only tract relationship helpers for 03_tract_change.Rmd.
+# Land-only tract relationship helpers for 03_identify_tract_boundary_changes.Rmd.
 # Source R/helpers.R and R/geography_qa.R first for shared reporting/key checks.
 
 assert_tract_relationship_source <- function(relationships) {

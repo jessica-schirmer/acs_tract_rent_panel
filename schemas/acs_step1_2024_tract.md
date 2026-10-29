@@ -4,7 +4,7 @@
 
 | Property | Contract |
 |---|---|
-| Producer | [01_acs.Rmd](../01_acs.Rmd) |
+| Producer | [01_import_acs.Rmd](../01_import_acs.Rmd) |
 | Output | `../../../data/acs_step1_2024_tract.feather` |
 | Role / status | Source extract before county filtering, censoring, or inflation |
 | Row grain | One 2020-vintage California tract |
@@ -15,7 +15,7 @@
 ## 2. Inputs and provenance
 
 `tidycensus::get_acs(geography = "tract", state = "CA", year = 2024, survey = "acs5", output = "wide")`
-uses `tract_vars` in `01_acs.Rmd`. A separate original Census ACS5 B25064 request
+uses `tract_vars` in `01_import_acs.Rmd`. A separate original Census ACS5 B25064 request
 retrieves E/EA/M/MA before normalization. Requests use the configured API key;
 keys are never persisted. B25064 evidence must match extract GEOIDs and normalized
 E/M exactly; conflicting requests stop before saving.
@@ -141,5 +141,5 @@ evidence remains insufficient. Retained MOEs do not establish observed rent.
 
 Run `Rscript --vanilla tests/test_rent_metadata.R` and
 `Rscript --vanilla tests/test_acs_input_qa.R` for synthetic checks.
-Analyst-run regeneration: `01_acs.Rmd`, then `02b_prepare_tract_sources.Rmd`.
+Analyst-run regeneration: `01_import_acs.Rmd`, then `02b_build_measures_from_tracts.Rmd`.
 See [migration and acceptance](../README.md#rent-metadata-migration).

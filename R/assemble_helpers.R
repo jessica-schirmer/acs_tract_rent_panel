@@ -7,7 +7,7 @@
 # its own copies of a few small generic/diagnostic
 # helpers (save_data, report_n, report_drop, print_numeric_summary, fmt_num) and
 # its own `summ_var()` — which is a DISTRIBUTION-focused variant, distinct from
-# the MOE/CV-focused `summ_var()` in R/helpers.R used by 01_acs.Rmd. Keeping the
+# the MOE/CV-focused `summ_var()` in R/helpers.R used by 01_import_acs.Rmd. Keeping the
 # two notebooks' helpers in separate files avoids a name collision.
 #
 # Assumes the calling notebook has already loaded dplyr/tidyr/stringr/purrr
@@ -590,7 +590,7 @@ summ_stats <- function(df, col) {
 #'
 #' Distribution-focused variant used in this stage (counts of zeros / small
 #' shares, quantiles). NOTE: distinct from the MOE/CV-focused `summ_var()` in
-#' R/helpers.R used by 01_acs.Rmd.
+#' R/helpers.R used by 01_import_acs.Rmd.
 #'
 #' @param df Data frame
 #' @param var_name ACS estimate name

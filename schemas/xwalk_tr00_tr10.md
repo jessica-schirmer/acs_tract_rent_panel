@@ -1,6 +1,6 @@
 # Schema: `xwalk_tr00_tr10.feather`
 
-**Produced by:** `01_acs.Rmd` (Step 1) · **Source:** NHGIS crosswalk `nhgis_tr2000_tr2010_06.csv`
+**Produced by:** `01_import_acs.Rmd` (Step 1) · **Source:** NHGIS crosswalk `nhgis_tr2000_tr2010_06.csv`
 
 **Purpose:** allocate 2000-vintage tract measures to 2010 census tracts (used to
 harmonize earlier-vintage tract data to the 2010-tract grain).

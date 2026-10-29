@@ -1,4 +1,4 @@
-# Geographic and key diagnostics shared by both Step 2 notebooks, 03_tract_change.Rmd, and 04_merge.Rmd.
+# Geographic and key diagnostics shared by both Step 2 notebooks, 03_identify_tract_boundary_changes.Rmd, and 04_assemble_tract_panel.Rmd.
 # Uses the notebooks' existing dplyr/tidyr packages; does not modify outputs.
 
 assert_unique_key <- function(df, key, label) {

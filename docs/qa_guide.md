@@ -2,7 +2,7 @@
 
 ## Notebook 1: crosswalk validation and completeness limits
 
-**Applies to:** [01_acs.Rmd](../01_acs.Rmd), especially §§6.1, 7.2, and 7.6.
+**Applies to:** [01_import_acs.Rmd](../01_import_acs.Rmd), especially §§6.1, 7.2, and 7.6.
 This notebook imports the NHGIS 2020 block-group-to-2010-tract crosswalk and
 writes `xwalk_bg24_tr10.feather` for the 2024 ACS aggregation.
 
@@ -58,7 +58,7 @@ link" means a link present in that imported reference.
 
 ## Notebook 2a: contributor integrity and missing estimates
 
-**Applies to:** [02a_aggregate_2024_block_groups.Rmd](../02a_aggregate_2024_block_groups.Rmd)
+**Applies to:** [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
 (Step 2a), which aggregates 2024 ACS block groups to 2010 tracts and writes
 `acs_step2_2024_block_group_aggregated.feather`.
 

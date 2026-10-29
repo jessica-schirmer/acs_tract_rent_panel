@@ -22,7 +22,7 @@ expect_error <- function(expr, message) {
   error <- tryCatch({ quiet(expr); NULL }, error = identity)
   stopifnot(inherits(error, "error"), grepl(message, conditionMessage(error), fixed = TRUE))
 }
-notebook_chunk <- function(label, file = "04_merge.Rmd") {
+notebook_chunk <- function(label, file = "04_assemble_tract_panel.Rmd") {
   lines <- readLines(here::here(file), warn = FALSE)
   start <- which(grepl(paste0("^```\\{r ", label, "([,}])"), lines))
   stopifnot(length(start) == 1L)
@@ -112,7 +112,7 @@ expect_error(diagnostic_summary(c(1, Inf)), "finite")
 # Exercise actual notebook chunks using all configured counties and temporary
 # inputs, including a baseline-only tract and a block-group-only tract.
 county_env <- new.env(parent = globalenv())
-eval(notebook_chunk("set-paths", "02a_aggregate_2024_block_groups.Rmd"), county_env)
+eval(notebook_chunk("set-paths", "02a_build_measures_from_block_groups.Rmd"), county_env)
 base_ids <- paste0("06", county_env$target_counties, "000100")
 ids_16 <- c(base_ids, tract_id(c(901, 903, 904)))
 ids_bg <- c(base_ids, tract_id(902))
@@ -651,7 +651,7 @@ run_chunk("reload-panel")
 
 # Parse actual chunks and check all section numbering and overview titles.
 for (file in c("R/merge_helpers.R", "R/merge_diagnostics.R")) invisible(parse(file = here::here(file)))
-lines <- readLines(here::here("04_merge.Rmd"), warn = FALSE)
+lines <- readLines(here::here("04_assemble_tract_panel.Rmd"), warn = FALSE)
 starts <- which(startsWith(lines, "```{r"))
 for (start in starts) {
   end <- which(seq_along(lines) > start & lines == "```")[1]
