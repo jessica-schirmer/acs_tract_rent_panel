@@ -3,6 +3,12 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 outputs/cache/
+.DS_Store
+.Rhistory
+/.claude/
+/task_spec_*.md
+/AGENTS.md
+/CLAUDE.md
 
 # Local configuration and credentials; keep the setup template public.
 .Renviron
