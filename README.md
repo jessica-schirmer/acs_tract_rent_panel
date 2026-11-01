@@ -1,16 +1,9 @@
-# ACS tract pipeline
+# ACS Tract Rent Panel: Geographic Harmonization and Mapping
 
-This ADU Rent stage prepares 2012–2016 and 2020–2024 ACS rent, rental
-inventory, change measures, and covariates for a panel of 2010 census tracts.
-It combines native tract estimates with 2024 block-group measures allocated to
-2010 tracts, using geographic consistency to select the final 2024 source.
-Assembly covers five Southern California and nine Bay Area counties; the
-[county definitions and panel contract](schemas/acs_full.md) specify that scope.
-ACS imports and the tract-consistency crosswalk are statewide. Downstream
-analysis stages apply their own sample restrictions; see the
-[shared pipeline](../../PIPELINE.md).
-Notebook 5 demonstrates the cleaned rent measures with paired static and HTML hover maps,
-independent of parcel data and downstream analysis samples.
+This R pipeline constructs comparable census-tract measures of rent, rental housing inventory, and neighborhood characteristics from the 2012–2016 and 2020–2024 American Community Survey. It addresses changes in tract boundaries by retaining native tract estimates where geography is unchanged and allocating block-group measures to 2010 tract boundaries elsewhere. The resulting panel covers 14 counties in Southern California and the Bay Area and supports static and interactive maps of rent levels and change.
+
+
+![Baseline rent and rent change in Alameda County](outputs/figures/tract_rent_baseline_and_change_alameda.png)
 
 ## Notebook overview
 
