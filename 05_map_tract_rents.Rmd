@@ -12,7 +12,7 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, error = FALSE, message = TRUE,
-                     fig.width = 14, fig.height = 9, dpi = 150)
+                     fig.width = 14, fig.height = 8, dpi = 150)
 ```
 
 ## Notebook Overview
@@ -216,9 +216,13 @@ The sequential **YlGnBu** baseline scale spans the full observed range; the
 diverging **RdBu** change scale runs blue for decreases to red for increases,
 symmetrically around zero at the largest absolute change. There is no trimming.
 Pad a constant baseline only enough to draw its colorbar; use ±1% for all-zero
-change. A panel without eligible values says so and retains its status fills.
+change. A panel without eligible values retains its status counts and fills.
 Use identical EPSG:3310 extents with 2.5% padding and thin tract outlines.
-Export a 14 × 9-inch PNG at 220 dpi and a vector PDF, with no online basemap.
+Export a 14 × 8-inch PNG at 220 dpi and a vector PDF, with no online basemap.
+Both exports use only this footnote; methodological explanations remain in
+the notebook sections above:
+
+> Source: U.S. Census Bureau, ACS 2012-2016 / 2020-2024; 2010 TIGER/Line tract boundaries.
 
 ```{r draw-and-save}
 maps <- draw_paired_maps(plot_data, paste0(county$name, " County, California"))
@@ -283,6 +287,6 @@ cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, s
   as references: baseline **357 colored, 0 top-coded, 3 unavailable**; change
   **316 colored, 42 top-coded, 2 unavailable**. These are acceptance references,
   not assertions for other counties or input versions.
-- Inspect both PNG/PDF exports for readable titles, colorbars, legends, notes,
-  distinct hatched/gray statuses, and removal of the three western water-only
-  pieces. The README example must remain an empirical figure.
+- Inspect both PNG/PDF exports for readable titles, colorbars, legends, and the
+  single source line, distinct hatched/gray statuses, and removal of the three
+  western water-only pieces. The README example must remain an empirical figure.

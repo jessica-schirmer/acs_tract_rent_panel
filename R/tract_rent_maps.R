@@ -297,9 +297,6 @@ draw_paired_maps <- function(mapped, county_label, synthetic = FALSE) {
       p <- p + ggplot2::geom_sf(data = eligible, ggplot2::aes(fill = .data[[value_column]]),
                                 colour = "#525c66", linewidth = 0.25 / 2.845) +
         map_color_scale(eligible[[value_column]], period)
-    } else {
-      p <- p + ggplot2::labs(caption = "No eligible values to color") +
-        ggplot2::theme(plot.caption = ggplot2::element_text(hjust = 0.5, margin = ggplot2::margin(t = 12, b = 20)))
     }
     if (nrow(top)) {
       p <- p + ggplot2::geom_sf(data = top, fill = "#fff6dd", colour = "#525c66", linewidth = 0.25 / 2.845) +
@@ -308,27 +305,20 @@ draw_paired_maps <- function(mapped, county_label, synthetic = FALSE) {
     p + ggplot2::coord_sf(crs = sf::st_crs(mapped), default_crs = sf::st_crs(mapped),
                           xlim = xlim, ylim = ylim, expand = FALSE, datum = NA)
   })
-  source <- if (synthetic) "Synthetic rents and polygons for validation; not empirical ACS results." else
-    "Source: U.S. Census Bureau, ACS 2012–2016 / 2020–2024; 2010 TIGER/Line tract boundaries."
-  notes <- paste(source,
-    "Later rent uses native tract medians on unchanged geography; elsewhere, block-group rent distributions are allocated to 2010 tracts.",
-    "Top-coded: baseline period at left; either period at right (including cases also missing the other period). Other unavailable tracts remain gray.",
-    "Change requires positive rents in both periods. Baseline dollars already include the pipeline’s 1.307 inflation factor; no further adjustment.",
-    paste0("Confirmed water-only tracts omitted from display. Full ranges; no trimming or CV/sample filters. Projection: ",
-           sf::st_crs(mapped)$input, "."), sep = "\n")
+  source <- "Source: U.S. Census Bureau, ACS 2012-2016 / 2020-2024; 2010 TIGER/Line tract boundaries."
   figure <- (patchwork::wrap_plots(panels, nrow = 1) /
     patchwork::wrap_elements(full = map_status_legend())) +
     patchwork::plot_layout(heights = c(1, 0.065)) +
     patchwork::plot_annotation(
       title = paste0(if (synthetic) "SYNTHETIC CHECK — " else "", "Gross rents across ", county_label),
-      subtitle = "ACS five-year estimates  |  2010 census tracts  |  Both periods in 2024 dollars", caption = notes,
+      subtitle = "ACS five-year estimates  |  2010 census tracts  |  Both periods in 2024 dollars", caption = source,
       theme = ggplot2::theme(
         text = ggplot2::element_text(family = font_family), plot.background = ggplot2::element_rect(fill = "white", colour = NA),
         plot.title = ggplot2::element_text(size = 21, face = "bold", colour = "#182536", margin = ggplot2::margin(b = 12)),
         plot.subtitle = ggplot2::element_text(size = 11, colour = "#4b5563", margin = ggplot2::margin(b = 10)),
         plot.caption = ggplot2::element_text(size = 8.5, hjust = 0, colour = "#4b5563", lineheight = 1.4,
                                              margin = ggplot2::margin(t = 10)),
-        plot.margin = ggplot2::margin(24, 32, 20, 32)))
+        plot.margin = ggplot2::margin(24, 32, 8, 32)))
   list(figure = figure, panels = panels)
 }
 
@@ -344,12 +334,12 @@ save_paired_figure <- function(figure, output_stem, overwrite = FALSE) {
   for (path in paths) {
     message(if (file.exists(path)) "Replacing " else "Saving ", path)
     if (endsWith(path, ".png")) {
-      grDevices::png(path, width = 14, height = 9, units = "in", res = 220,
+      grDevices::png(path, width = 14, height = 8, units = "in", res = 220,
                      type = if (quartz) "quartz" else "cairo", bg = "white")
     } else if (quartz) {
-      grDevices::quartz(type = "pdf", file = path, width = 14, height = 9, family = "sans", bg = "white")
+      grDevices::quartz(type = "pdf", file = path, width = 14, height = 8, family = "sans", bg = "white")
     } else {
-      grDevices::cairo_pdf(path, width = 14, height = 9, family = "sans", bg = "white")
+      grDevices::cairo_pdf(path, width = 14, height = 8, family = "sans", bg = "white")
     }
     tryCatch(print(figure), finally = grDevices::dev.off())
   }
