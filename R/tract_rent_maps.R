@@ -339,7 +339,7 @@ draw_paired_maps <- function(mapped, county_label, synthetic = FALSE, hover = FA
     patchwork::wrap_elements(full = map_status_legend())) +
     patchwork::plot_layout(heights = c(1, 0.065)) +
     patchwork::plot_annotation(
-      title = paste0(if (synthetic) "SYNTHETIC CHECK — " else "", "Gross rents across ", county_label),
+      title = paste0(if (synthetic) "SYNTHETIC CHECK — " else "", "Rent and rent change across ", county_label),
       subtitle = "ACS five-year estimates  |  2010 census tracts  |  Both periods in 2024 dollars", caption = source,
       theme = ggplot2::theme(
         text = ggplot2::element_text(family = font_family), plot.background = ggplot2::element_rect(fill = "white", colour = NA),

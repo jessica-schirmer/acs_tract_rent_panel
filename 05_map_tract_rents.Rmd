@@ -1,5 +1,5 @@
 ---
-title: "ACS Step 5 — Map baseline gross rent and real change"
+title: "Rent and rent change across Alameda County, California"
 author: "Jessica Schirmer"
 date: "`r Sys.Date()`"
 output:
