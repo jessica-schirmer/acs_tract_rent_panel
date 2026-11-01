@@ -25,20 +25,20 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step2_2016_tract.feather` — 2012–2016 ACS measures on `tr2010_id`.
-- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 block-group measures aggregated to `tr2010_id`.
-- `../../../data/acs_step2_2024_tract.feather` — Census-reported 2020–2024 tract measures on native `tr2020_id`.
-- `../../../data/xwalk_tr20_tr10.feather` — statewide geographic-consistency flags and explicit tract links, keyed by `tr2020_id`.
-- Existing `../../../data/acs_full.feather`, if saving is enabled and the file is present — column/type reference read before saving.
+- `${ACS_DATA_DIR}/acs_step2_2016_tract.feather` — 2012–2016 ACS measures on `tr2010_id`.
+- `${ACS_DATA_DIR}/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 block-group measures aggregated to `tr2010_id`.
+- `${ACS_DATA_DIR}/acs_step2_2024_tract.feather` — Census-reported 2020–2024 tract measures on native `tr2020_id`.
+- `${ACS_DATA_DIR}/xwalk_tr20_tr10.feather` — statewide geographic-consistency flags and explicit tract links, keyed by `tr2020_id`.
+- Existing `${ACS_DATA_DIR}/acs_full.feather`, if the file is present — column/type reference read before saving.
 
 **Outputs:**
 
 - Notebook-only `acs_diagnostics` and coverage, source-selection, source/change,
   and rental-inventory comparisons.
-- Optional `../../../data/acs_full.feather` — 2016 and selected 2024 measures on
+- `${ACS_DATA_DIR}/acs_full.feather` — 2016 and selected 2024 measures on
   `tr2010_id`, with inflation-adjusted dollars, changes, uncertainty, and
   year-specific rent status/flags/censoring bounds and source/quality fields. See the [panel schema](schemas/acs_full.md) for columns
-  and §1.3 for write controls.
+  and §1.3 for output configuration.
 
 **Steps:**
 
@@ -48,7 +48,7 @@ knitr::opts_chunk$set(
 4. Review geographic coverage and source-selection QA
 5. Compare 2024 sources and implied changes (diagnostic only)
 6. Compare occupied renter units and rental inventory (diagnostic only)
-7. Validate the panel and optionally save
+7. Validate and save the panel
 
 Step 2 supplies measures for the 14 configured Southern California and Bay Area
 counties. This notebook checks that coverage, merges the inputs, and derives
@@ -62,8 +62,8 @@ changes without further sample restrictions.
 rm(list = ls())
 
 library(here)          # project-root-relative paths via here::here()
-library(Hmisc)
 library(dplyr)
+library(arrow)
 library(tidycensus)
 library(tidyverse)
 library(spatstat)
@@ -75,23 +75,24 @@ library(srvyr)
 ## 1.2 Load helper functions
 
 ```{r load-helpers}
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "merge_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 source(here::here("R", "merge_diagnostics.R"))
 ```
 
-## 1.3 Set data directory and optional output write
+## 1.3 Set data directory and read any prior schema
 
-Saving is enabled below. For diagnostic review, set `write_panel <- FALSE`
-before running from setup; all in-memory validation still runs. With `TRUE`,
-§7.5 announces and writes/replaces `acs_full.feather`, then checks the saved file.
+Every successful run saves `acs_full.feather` for notebook 5. Existing output is
+announced before replacement and must pass the prior-schema checks. On a first
+run, no prior panel is required. Configure `ACS_DATA_DIR` using
+[setup](README.md#setup).
 
 ```{r set-paths}
-data_dir <- here::here("..", "..", "..", "data")
-write_panel <- TRUE
+data_dir <- acs_data_dir(create = TRUE)
 prior_panel_path <- file.path(data_dir, "acs_full.feather")
-prior_panel <- if (isTRUE(write_panel) && file.exists(prior_panel_path)) {
+prior_panel <- if (file.exists(prior_panel_path)) {
   arrow::read_feather(prior_panel_path)
 } else NULL
 ```
@@ -604,9 +605,9 @@ walk(inventory_change_diagnostics, function(result) {
 })
 ```
 
-# 7. Validate the panel and optionally save
+# 7. Validate and save the panel
 
-Validate the current in-memory panel before the optional save.
+Validate the current in-memory panel before saving.
 
 ```{r validation-panel}
 acs_out <- acs_full
@@ -697,41 +698,29 @@ Fractional allocated counts are valid; `*PPC` differences may be negative.
 print_numeric_summary(acs_out, "acs_full")
 ```
 
-## 7.5 Optionally save and validate the canonical output
+## 7.5 Save and validate the canonical output
 
-After reviewing diagnostics with writing disabled, set `write_panel <- TRUE`
-in §1.3 and rerun from setup to save. The prior panel supplies a schema
-reference; a missing reference leaves that comparison unchecked. Allowed schema
-differences are documented in the [panel schema](schemas/acs_full.md).
+Save the validated panel as the standard final step. A prior panel supplies a
+schema reference when present; its absence only skips that comparison. Allowed
+schema differences are documented in the [panel schema](schemas/acs_full.md).
 After writing, reload validation checks keys, column order/types, and all values.
 
 ```{r save-panel}
-panel_written <- FALSE
-if (isTRUE(write_panel)) {
-  report_n(acs_full, "Canonical ACS tract panel to save")
-  audit_panel_keys(acs_full, input_keys_16, input_keys_24_bg_agg)
-  report_tract_counties(acs_full, panel_counties, "Final panel destination counties")
-  assert_panel_schema(acs_full, prior_panel)
-  if (is.null(prior_panel)) {
-    cat("Prior panel schema comparison not checked: no existing acs_full.feather at setup.\n")
-  }
-  cat("Writing/replacing", file.path(data_dir, "acs_full.feather"), "\n")
-  arrow::write_feather(acs_full, file.path(data_dir, "acs_full.feather"))
-  panel_written <- TRUE
-} else {
-  cat("Canonical write disabled: validated in-memory panel; no output replaced.\n")
+report_n(acs_full, "Canonical ACS tract panel to save")
+audit_panel_keys(acs_full, input_keys_16, input_keys_24_bg_agg)
+report_tract_counties(acs_full, panel_counties, "Final panel destination counties")
+assert_panel_schema(acs_full, prior_panel)
+if (is.null(prior_panel)) {
+  cat("Prior panel schema comparison not checked: no existing acs_full.feather at setup.\n")
 }
+arrow::write_feather(acs_full, acs_prepare_output(file.path(data_dir, "acs_full.feather")))
 ```
 
 ```{r reload-panel}
-if (isTRUE(panel_written)) {
-  acs_saved <- arrow::read_feather(file.path(data_dir, "acs_full.feather"))
-  saved_panel_membership <- audit_panel_keys(acs_saved, input_keys_16, input_keys_24_bg_agg)
-  report_tract_counties(acs_saved, panel_counties, "Saved panel destination counties")
-  assert_same_schema(acs_saved, acs_full, "Saved panel schema")
-  stopifnot("Saved panel values must agree with the validated in-memory panel" =
-              isTRUE(all.equal(acs_saved, acs_full)))
-} else {
-  cat("Reload skipped: this run did not write a canonical panel.\n")
-}
+acs_saved <- arrow::read_feather(file.path(data_dir, "acs_full.feather"))
+saved_panel_membership <- audit_panel_keys(acs_saved, input_keys_16, input_keys_24_bg_agg)
+report_tract_counties(acs_saved, panel_counties, "Saved panel destination counties")
+assert_same_schema(acs_saved, acs_full, "Saved panel schema")
+stopifnot("Saved panel values must agree with the validated in-memory panel" =
+            isTRUE(all.equal(acs_saved, acs_full)))
 ```

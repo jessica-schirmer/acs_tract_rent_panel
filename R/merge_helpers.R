@@ -12,6 +12,7 @@
 # and arrow.
 #
 # Load at the top of the notebook with:
+#   source(here::here("R", "data_paths.R"))
 #   source(here::here("R", "merge_helpers.R"))
 
 
@@ -30,9 +31,7 @@ load_data <- function(path, folder = NULL, name) {
     file.path(path, name)
   }
 
-  if (!file.exists(file_path)) {
-    stop("File not found: ", file_path)
-  }
+  acs_require_input(file_path)
 
   arrow::read_feather(file_path)
 }
@@ -41,12 +40,12 @@ load_data <- function(path, folder = NULL, name) {
 #' Save data
 #'
 #' @param df Data frame
-#' @param dir Directory (with trailing slash)
+#' @param dir Output directory
 #' @param name File name including extension
 #' @return Invisibly, the input df (after writing)
 save_data <- function(df, dir, name) {
-    df |>
-        arrow::write_feather(paste0(dir,name))
+  path <- acs_prepare_output(file.path(dir, name))
+  arrow::write_feather(df, path)
 }
 
 

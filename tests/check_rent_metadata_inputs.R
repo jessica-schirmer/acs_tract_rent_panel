@@ -1,18 +1,20 @@
 # Read-only source checks and the analyst-requested BG coverage impact report.
-# Rscript --vanilla tests/check_rent_metadata_inputs.R /private/tmp/rent-metadata-qa
+# Rscript tests/check_rent_metadata_inputs.R /private/tmp/rent-metadata-qa
 # Reads only rent evidence/counts/keys; never executes notebooks or writes data/.
 # Run against the pre-regeneration panel: saved coverage must match the old rule.
 suppressPackageStartupMessages({ library(here); library(dplyr); library(tidyr); library(arrow) })
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
 args <- commandArgs(trailingOnly = TRUE)
 report_dir <- if (length(args)) args[1] else tempfile("rent-metadata-qa-")
 dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
-data_dir <- here::here("..", "..", "..", "data")
+data_dir <- acs_data_dir()
 paths <- file.path(data_dir, c("acs_step1_2016_tract.feather", "acs_step1_2024_tract.feather",
   "acs_step1_2024_block_group.feather", "xwalk_bg24_tr10.feather", "acs_full.feather",
   "tract_ADU_ACS_combined.feather"))
+invisible(lapply(paths, acs_require_input))
 before <- tools::md5sum(paths)
 source_columns <- c("rentE", "rentM", rent_count_columns())
 native24 <- read_feather(paths[2], col_select = all_of(c("tr2020_id", source_columns)))

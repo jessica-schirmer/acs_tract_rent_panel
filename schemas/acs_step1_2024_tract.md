@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [01_import_acs.Rmd](../01_import_acs.Rmd) |
-| Output | `../../../data/acs_step1_2024_tract.feather` |
+| Output | `${ACS_DATA_DIR}/acs_step1_2024_tract.feather` |
 | Role / status | Source extract before county filtering, censoring, or inflation |
 | Row grain | One 2020-vintage California tract |
 | Primary key | `tr2020_id`: unique, nonmissing 11-digit character GEOID |
@@ -139,7 +139,7 @@ evidence remains insufficient. Retained MOEs do not establish observed rent.
 
 ## 9. Validation and regeneration
 
-Run `Rscript --vanilla tests/test_rent_metadata.R` and
-`Rscript --vanilla tests/test_acs_input_qa.R` for synthetic checks.
+Run `Rscript tests/test_rent_metadata.R` and
+`Rscript tests/test_acs_input_qa.R` for synthetic checks.
 Analyst-run regeneration: `01_import_acs.Rmd`, then `02b_build_measures_from_tracts.Rmd`.
 See [migration and acceptance](../README.md#rent-metadata-migration).

@@ -28,18 +28,18 @@ knitr::opts_chunk$set(
 - US Census Bureau ACS 5-year API (via `tidycensus`): 2012–2016 ACS at the
   **tract** level and 2020–2024 ACS at both **tract** and **block-group** levels,
   California.
-- `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`
+- `${ACS_RAW_DATA_DIR}/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`
   — NHGIS geographic crosswalk, 2020 block groups → 2010 tracts (allocation weights).
-- `../../../data-raw-temp/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv`
+- `${ACS_RAW_DATA_DIR}/nhgis/nhgis_tr2000_tr2010_06/nhgis_tr2000_tr2010_06.csv`
   — NHGIS geographic crosswalk, 2000 tracts → 2010 tracts (allocation weights).
 
 **Outputs:**
 
-- `../../../data/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
-- `../../../data/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
-- `../../../data/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract, consumed by the separate Step 2 tract-source path.
-- `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
-- `../../../data/xwalk_tr00_tr10.feather` — 2000 tract → 2010 tract crosswalk (weights).
+- `${ACS_DATA_DIR}/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
+- `${ACS_DATA_DIR}/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
+- `${ACS_DATA_DIR}/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract, consumed by the separate Step 2 tract-source path.
+- `${ACS_DATA_DIR}/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract crosswalk (weights).
+- `${ACS_DATA_DIR}/xwalk_tr00_tr10.feather` — 2000 tract → 2010 tract crosswalk (weights).
 
 This notebook:
 
@@ -95,19 +95,9 @@ in-memory objects, including every allocation weight.
 ```{r load-packages, message=FALSE, warning=FALSE}
 rm(list = ls())
 
-# One-time installs (left commented for reference):
-# install.packages("tidycensus")
-# install.packages("Hmisc")
-# install.packages("spatstat")
-# install.packages("matrixStats")
-# install.packages("survey")
-# install.packages("srvyr")
-# install.packages("here")
-# install.packages("arrow")
-
 library(here)          # project-root-relative paths via here::here()
-library(Hmisc)
 library(dplyr)
+library(arrow)
 library(tidycensus)
 library(httr)
 library(jsonlite)
@@ -117,12 +107,10 @@ library(matrixStats)
 library(survey)        # core survey analysis functions
 library(srvyr)         # tidyverse-style wrapper for survey
 
-# Census API key:
-# tidycensus requires a Census API key. Do NOT hard-code the key in this file.
-# Set it once per machine with the line below (run interactively, then remove),
-# or store CENSUS_API_KEY in your .Renviron so it loads automatically.
-# census_api_key(Sys.getenv("CENSUS_API_KEY"), install = TRUE)
 ```
+
+Set `CENSUS_API_KEY` in the environment or ignored `.Renviron`, then restart R;
+see [setup](README.md#setup). No notebook installs packages or stores a key.
 
 ## 1.2 Variables unavailable at block-group grain
 
@@ -151,6 +139,7 @@ Step 1 input assertions, coverage diagnostics, and exact readback checks live
 in `R/acs_input_qa.R`.
 
 ```{r load-helpers}
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "helpers.R"))
 source(here::here("R", "acs_input_qa.R"))
@@ -158,14 +147,18 @@ source(here::here("R", "acs_input_qa.R"))
 
 ## 1.4 Set data paths
 
-All paths are relative to this repository, which is the integration point
-between pipeline stages. Raw source files are read from `../../../data-raw-temp/`
-(never modified); processed outputs are written to `../../../data/`.
+Configure `ACS_RAW_DATA_DIR` and `ACS_DATA_DIR` as described in
+[setup](README.md#setup). Relative settings resolve from the repository root.
+Check both manually supplied crosswalks before any ACS downloads. The processed
+directory receives generated files; existing destinations are announced before replacement.
 
 ```{r set-paths}
-# Trailing slash on data_dir is intentional: save_data() builds paths with paste0().
-data_dir <- "../../../data/"
-raw_dir  <- "../../../data-raw-temp"
+raw_dir <- acs_data_dir("raw")
+nhgis_bg_path <- acs_require_input(file.path(raw_dir, "nhgis", "nhgis_bg2020_tr2010_06",
+                                            "nhgis_bg2020_tr2010_06.csv"), raw = TRUE)
+nhgis_tract_path <- acs_require_input(file.path(raw_dir, "nhgis", "nhgis_tr2000_tr2010_06",
+                                               "nhgis_tr2000_tr2010_06.csv"), raw = TRUE)
+data_dir <- acs_data_dir(create = TRUE)
 ```
 
 # 2. Define target ACS variables
@@ -511,8 +504,8 @@ in `bg_coverage_24`. Coverage differences alone do not stop Step 1 or filter
 either input; Step 2 handles contributor completeness for its target tracts.
 
 ```{r import-xwalk-bg-tr}
-xwalk <- read_csv(file.path(raw_dir, "nhgis", "nhgis_bg2020_tr2010_06",
-                            "nhgis_bg2020_tr2010_06.csv"),
+xwalk <- read_csv(acs_require_input(file.path(raw_dir, "nhgis", "nhgis_bg2020_tr2010_06",
+                            "nhgis_bg2020_tr2010_06.csv"), raw = TRUE),
                   col_types = cols(bg2020ge = col_character(),
                                    tr2010ge = col_character())) |>
   mutate(x_id = TRUE)
@@ -575,7 +568,7 @@ print(head(bg_coverage_24$crosswalk_only, 10L))
 # Output: xwalk_bg24_tr10.feather — 2020 block group -> 2010 tract weights
 report_n(xwalk_bg_24, "bg2020->tr2010 crosswalk saved")
 xwalk_bg_24 |>
-  arrow::write_feather(paste0(data_dir, "xwalk_bg24_tr10.feather"))
+  save_data(data_dir, "xwalk_bg24_tr10.feather")
 
 rm(xwalk)
 ```
@@ -587,8 +580,8 @@ tract geographies to 2010 tracts. As in Section 6.1 the crosswalk is
 many-to-many, keyed on the (`tr2000_id`, `tr2010_id`) pair.
 
 ```{r import-xwalk-tr-tr}
-xwalk <- read_csv(file.path(raw_dir, "nhgis", "nhgis_tr2000_tr2010_06",
-                            "nhgis_tr2000_tr2010_06.csv")) |>
+xwalk <- read_csv(acs_require_input(file.path(raw_dir, "nhgis", "nhgis_tr2000_tr2010_06",
+                            "nhgis_tr2000_tr2010_06.csv"), raw = TRUE)) |>
   mutate(x_id = TRUE)
 
 report_n(xwalk, "tr2000->tr2010 crosswalk imported")
@@ -638,14 +631,14 @@ xwalk <- xwalk |>
 # Output: xwalk_tr00_tr10.feather — 2000 tract -> 2010 tract weights
 report_n(xwalk, "tr2000->tr2010 crosswalk saved")
 xwalk |>
-  arrow::write_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
+  save_data(data_dir, "xwalk_tr00_tr10.feather")
 
 rm(xwalk)
 ```
 
 # 7. Validate outputs
 
-Re-load all five outputs from `../../../data/` and check required/omitted
+Re-load all five outputs from `${ACS_DATA_DIR}/` and check required/omitted
 columns, row preservation from import through save/reload, key uniqueness,
 critical missingness, logical flags, and numeric distributions. These checks
 run when the analyst executes the notebook. Assertions stop on contract
@@ -654,11 +647,11 @@ For the two block-group allocation inputs, §7.6 also revalidates structure and
 requires exact equality with the in-memory objects validated before saving.
 
 ```{r reload-outputs}
-acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step1_2016_tract.feather"))
-acs24_bg_out <- arrow::read_feather(paste0(data_dir, "acs_step1_2024_block_group.feather"))
-acs24_trt_out <- arrow::read_feather(paste0(data_dir, "acs_step1_2024_tract.feather"))
-xbg_out <- arrow::read_feather(paste0(data_dir, "xwalk_bg24_tr10.feather"))
-xtr_out <- arrow::read_feather(paste0(data_dir, "xwalk_tr00_tr10.feather"))
+acs16_out <- arrow::read_feather(file.path(data_dir, "acs_step1_2016_tract.feather"))
+acs24_bg_out <- arrow::read_feather(file.path(data_dir, "acs_step1_2024_block_group.feather"))
+acs24_trt_out <- arrow::read_feather(file.path(data_dir, "acs_step1_2024_tract.feather"))
+xbg_out <- arrow::read_feather(file.path(data_dir, "xwalk_bg24_tr10.feather"))
+xtr_out <- arrow::read_feather(file.path(data_dir, "xwalk_tr00_tr10.feather"))
 
 output_checks <- list(
   acs_step1_2016_tract = list(

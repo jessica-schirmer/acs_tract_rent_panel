@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [01_import_acs.Rmd](../01_import_acs.Rmd) §4; final validation in §7. |
-| Output | `../../../data/acs_step1_2024_block_group.feather`, relative to the repository root. |
+| Output | `${ACS_DATA_DIR}/acs_step1_2024_block_group.feather`, under the configured processed-data directory. |
 | Role / status | Persisted Step 1 source extract for downstream aggregation; statewide, before geographic harmonization or analysis-sample restriction. |
 | Row grain | One row per returned 2020-vintage California census block group. |
 | Primary key | `bg2020_id`: unique, nonmissing character string matching `^[0-9]{12}$`; leading zeros retained. Structure: state (2) + county (3) + tract (6) + block group (1) digits. |
@@ -19,7 +19,7 @@
 | Census Bureau 2024 ACS 5-year detailed tables, via `tidycensus::get_acs()` | Block group × Census variable; `GEOID` + variable code | Supplies `NAME` and all estimates/MOEs. Request: `geography = "block group"`, `state = "CA"`, `year = 2024`, `survey = "acs5"`, `output = "wide"`. |
 | `tract_vars` and `block_group_unavailable_vars` in `01_import_acs.Rmd` §§1.2, 2.2 | Named alias → Census code mapping | Defines `block_group_vars` and the requested columns. |
 | `load_variables(2024, "acs5")` | Census variable code | Interactive lookup only; does not transform values or determine exclusions. |
-| NHGIS `../../../data-raw-temp/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`, prepared as `xwalk_bg24_tr10.feather` | Allocation pair: raw (`bg2020ge`, `tr2010ge`), renamed (`bg2020_id`, `tr2010_id`) | Companion input for Step 1 coverage diagnostics and downstream allocation; supplies no columns to this extract. |
+| NHGIS `${ACS_RAW_DATA_DIR}/nhgis/nhgis_bg2020_tr2010_06/nhgis_bg2020_tr2010_06.csv`, prepared as `xwalk_bg24_tr10.feather` | Allocation pair: raw (`bg2020ge`, `tr2010ge`), renamed (`bg2020_id`, `tr2010_id`) | Companion input for Step 1 coverage diagnostics and downstream allocation; supplies no columns to this extract. |
 
 The API request requires `CENSUS_API_KEY`. Geometry is not requested. A separate original B25064 E/EA/M/MA
 request preserves rent evidence before tidycensus normalization. MOE confidence uses the [`get_acs()`
@@ -276,7 +276,7 @@ separate from the coverage diagnostics above.
 ## 9. Validation and regeneration
 
 - **Focused validation:** from the repository root, run
-  `Rscript --vanilla tests/test_acs_input_qa.R`. It parses Step 1 chunks and
+  `Rscript tests/test_acs_input_qa.R`. It parses Step 1 chunks and
   exercises request-derived columns, malformed inputs, coverage cases, and
   exact temporary CSV/Feather round trips using a stubbed ACS call; it does not
   query ACS or write canonical outputs.

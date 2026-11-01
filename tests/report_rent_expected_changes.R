@@ -1,7 +1,8 @@
 # Bounded, read-only comparison for the previously reported rent corrections.
-# Rscript --vanilla tests/report_rent_expected_changes.R docs [preserved-panel-path]
+# Rscript tests/report_rent_expected_changes.R <new-report-directory> <preserved-panel-path> <downstream-analysis-directory>
 # Writes new diagnostic CSVs only; refuses to replace existing reports.
 suppressPackageStartupMessages({ library(here); library(dplyr); library(arrow) })
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 
@@ -10,9 +11,15 @@ report_dir <- if (length(args)) args[1] else tempfile("expected-rent-changes-")
 output_names <- c("acs_rent_expected_tract_changes.csv", "acs_rent_expected_change_input_manifest.csv")
 stopifnot("Preserve existing reports; choose another output directory" =
             !any(file.exists(file.path(report_dir, output_names))))
-data_dir <- here::here("..", "..", "..", "data")
-panel_path <- if (length(args) > 1L) normalizePath(args[2], mustWork = TRUE) else file.path(data_dir, "acs_full.feather")
-audit_dir <- here::here("..", "..", "analysis", "tract_rent_acs", "outputs", "tables", "acs_rent_flags")
+if (length(args) != 3L) {
+  stop("This optional historical report requires: <new-report-directory> ",
+       "<preserved-panel-path> <downstream-analysis-directory>. ",
+       "See schemas/acs_rent_expected_tract_changes.md#9-validation-and-regeneration.")
+}
+data_dir <- acs_data_dir()
+panel_path <- acs_require_input(acs_resolve_path(args[2]))
+analysis_dir <- acs_resolve_path(args[3])
+audit_dir <- file.path(analysis_dir, "outputs", "tables", "acs_rent_flags")
 paths <- c(
   panel = panel_path,
   native = file.path(data_dir, "acs_step1_2024_tract.feather"),
@@ -27,8 +34,9 @@ paths <- c(
   audit_manifest = file.path(audit_dir, "input_manifest.csv"),
   classifier = here::here("R", "rent_metadata.R"),
   aggregation_helpers = here::here("R", "assemble_helpers.R"),
-  quality_rule = here::here("..", "..", "analysis", "tract_rent_acs", "01_fe_rent.Rmd"),
+  quality_rule = file.path(analysis_dir, "01_fe_rent.Rmd"),
   diagnostic_script = here::here("tests", "report_rent_expected_changes.R"))
+invisible(lapply(paths, acs_require_input))
 before <- tools::md5sum(paths)
 stopifnot(!anyNA(before))
 same_numeric <- function(x, y) {

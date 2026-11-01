@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [04_assemble_tract_panel.Rmd](../04_assemble_tract_panel.Rmd), with [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R), and [R/geography_qa.R](../R/geography_qa.R). |
-| Output | `../../../data/acs_full.feather`, relative to the repository root; `write_panel` controls saving and is currently `TRUE`. |
+| Output | `${ACS_DATA_DIR}/acs_full.feather`, saved after validation on every successful run. |
 | Role / status | Canonical analysis panel: baseline and selected 2024 levels, changes, uncertainty, and provenance. Source comparisons remain notebook-only. |
 | Row grain | One 2010-vintage census tract in the union of the 2016 and block-group-aggregated 2024 input keys. |
 | Primary key | `tr2010_id`: unique, nonmissing character GEOID matching `^06[0-9]{9}$`; leading zeros retained. |
@@ -20,7 +20,7 @@ Solano (`095`), and Sonoma (`097`). State FIPS is `06`.
 
 ## 2. Inputs and provenance
 
-All files are under `../../../data/`, relative to the repository root.
+All files are under the configured `${ACS_DATA_DIR}/`; see [setup](../README.md#setup).
 
 | Input | Source grain / key | Role |
 |---|---|---|
@@ -28,7 +28,7 @@ All files are under `../../../data/`, relative to the repository root.
 | `acs_step2_2024_block_group_aggregated.feather` ([schema](acs_step2_2024_block_group_aggregated.md)) | 2010 destination tract; `tr2010_id` | NHGIS-allocated 2020 block-group (BG) measurements, rent diagnostics, and panel membership. |
 | `acs_step2_2024_tract.feather` ([schema](acs_step2_2024_tract.md)) | Native 2020 tract; `tr2020_id` | Census tract measurements for geographically consistent links. |
 | `xwalk_tr20_tr10.feather` ([schema](xwalk_tr20_tr10.md)) | Statewide native 2020 tract; unique `tr2020_id` | Step 3 geographic status and explicit consistent 2010–2020 links. |
-| Existing `acs_full.feather` (optional) | 2010 tract; `tr2010_id` | Schema reference read at setup only when saving is enabled; supplies no measurements or value-parity target. |
+| Existing `acs_full.feather` (optional) | 2010 tract; `tr2010_id` | Schema reference read at setup when present; supplies no measurements or value-parity target. |
 
 ## 3. Construction rules
 
@@ -268,7 +268,7 @@ Section references in these tables refer to `04_assemble_tract_panel.Rmd`.
 
 ## 9. Validation and regeneration
 
-- **Focused validation:** existing `Rscript --vanilla tests/test_merge_diagnostics.R`
+- **Focused validation:** existing `Rscript tests/test_merge_diagnostics.R`
   covers synthetic bundles, geography, changes, schema guards, and temporary
   Feather writes/readback; it does not regenerate canonical data.
 - **Documentation/column audit:** compare §5 with `merge_measure_columns()`,
@@ -276,7 +276,6 @@ Section references in these tables refer to `04_assemble_tract_panel.Rmd`.
   and both change helpers. Check template headings, local links, notebook/helper
   parsing, and `git diff --check` without reading data.
 - **Analyst-run regeneration:** run `04_assemble_tract_panel.Rmd` from setup through §7 with
-  current Step 2 products, the Step 3 crosswalk, and `write_panel <- FALSE` for
-  in-memory review. Set it to `TRUE` and rerun from setup to save; §7.5 announces
-  replacement, checks any prior schema, writes, and reloads the output. Review
-  the diagnostics above.
+  current Step 2 products and the Step 3 crosswalk. Section 7.5 announces
+  replacement, checks any prior schema, saves to `${ACS_DATA_DIR}/acs_full.feather`,
+  and reloads the output. A first run needs no prior panel. Review the diagnostics above.

@@ -1,4 +1,4 @@
-# Run from the repository root: Rscript --vanilla tests/test_merge_diagnostics.R
+# Run from the repository root: Rscript tests/test_merge_diagnostics.R
 # Synthetic inputs and temporary Feathers only; never reads canonical data.
 suppressPackageStartupMessages({
   library(here)
@@ -9,6 +9,9 @@ suppressPackageStartupMessages({
   library(arrow)
   library(matrixStats)
 })
+source(here::here("R", "data_paths.R"))
+Sys.setenv(ACS_DATA_DIR = tempfile("acs-test-data-"),
+           ACS_RAW_DATA_DIR = tempfile("acs-test-raw-"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "merge_helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -362,9 +365,9 @@ write_feather(source_bg, file.path(tmp_dir, "acs_step2_2024_block_group_aggregat
 write_feather(source_tract, file.path(tmp_dir, "acs_step2_2024_tract.feather"))
 write_feather(notebook_xwalk, file.path(tmp_dir, "xwalk_tr20_tr10.feather"))
 env <- new.env(parent = globalenv())
-env$data_dir <- tmp_dir
-env$write_panel <- FALSE
-env$prior_panel <- NULL
+Sys.setenv(ACS_DATA_DIR = tmp_dir)
+eval(notebook_chunk("set-paths"), env)
+stopifnot(is.null(env$prior_panel), !file.exists(env$prior_panel_path))
 run_chunk <- function(label) quiet(eval(notebook_chunk(label), env))
 for (label in c("prep-24-bg-agg", "prep-24-tract", "prep-16", "load-geography",
                 "merge-surveys", "build-diagnostic-panel")) run_chunk(label)
@@ -578,17 +581,16 @@ bad_change_env$acs_full <- mutate(canonical_before,
 expect_error(eval(notebook_chunk("validation-panel"), bad_change_env),
              "Confirmed top-codes must not enter numeric rent changes")
 
-# Disabled writes must not read/create/replace the canonical destination.
-run_chunk("save-panel")
-run_chunk("reload-panel")
+# First-run configuration needs no previous panel; saving and readback are standard.
 saved_path <- file.path(tmp_dir, "acs_full.feather")
-stopifnot(!file.exists(saved_path), !env$panel_written,
-          !exists("acs_saved", envir = env, inherits = FALSE), identical(env$acs_out, canonical_before))
-writeLines("stale reference sentinel", saved_path)
-sentinel_md5 <- tools::md5sum(saved_path)
+stopifnot(!file.exists(saved_path), is.null(env$prior_panel), identical(env$acs_out, canonical_before))
 run_chunk("save-panel")
 run_chunk("reload-panel")
-stopifnot(identical(tools::md5sum(saved_path), sentinel_md5))
+stopifnot(file.exists(saved_path), isTRUE(all.equal(env$acs_saved, canonical_before)))
+# A later run loads the saved panel as a schema reference.
+run_chunk("set-paths")
+stopifnot(isTRUE(all.equal(env$prior_panel, canonical_before)))
+sentinel_md5 <- tools::md5sum(saved_path)
 
 # Fixed migration allowlist, strict shared order/types, and temporary round trips.
 # This independent list is the agreed removal contract, including sole-use flags.
@@ -629,14 +631,13 @@ for (column in c("rentE_16", "med_hhincE_24", "med_hhincM_24", "med_hhincCV_24",
 expect_error(assert_panel_schema(mutate(canonical_before, rentE_16 = as.integer(rentE_16)), legacy), "types")
 expect_error(assert_panel_schema(select(canonical_before, rentE_16, everything()), legacy), "order")
 expect_error(assert_panel_schema(mutate(canonical_before, m_flag_rhu_inventoryPOST = TRUE)), "storage")
-env$write_panel <- TRUE
 env$prior_panel <- mutate(legacy, unexpected = 1)
 expect_error(eval(notebook_chunk("save-panel"), env), "schema")
-stopifnot(identical(tools::md5sum(saved_path), sentinel_md5), !env$panel_written)
+stopifnot(identical(tools::md5sum(saved_path), sentinel_md5))
 env$prior_panel <- legacy
 run_chunk("save-panel")
 run_chunk("reload-panel")
-stopifnot(env$panel_written, isTRUE(all.equal(env$acs_saved, canonical_before)))
+stopifnot(isTRUE(all.equal(env$acs_saved, canonical_before)))
 env$prior_panel <- prior_structure_levels
 run_chunk("save-panel")
 run_chunk("reload-panel")

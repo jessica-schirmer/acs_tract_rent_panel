@@ -2,13 +2,13 @@
 
 **Produced by:** `03_identify_tract_boundary_changes.Rmd` (Step 3).
 **Source:** U.S. Census Bureau 2020-to-2010 tract relationship file,
-`../../../data-raw-temp/census/tab20_tract20_tract10_st06.txt`.
+`${ACS_RAW_DATA_DIR}/census/tab20_tract20_tract10_st06.txt`.
 The UTF-8, pipe-delimited source describes geographic intersections between
 2020 and 2010 census tracts. It is read without modification.
 
 **Grain:** one row per California 2020 tract present in the complete source.
 **Key:** `tr2020_id` (11-digit character, unique and non-missing).
-**Output:** `../../../data/xwalk_tr20_tr10.feather`.
+**Output:** `${ACS_DATA_DIR}/xwalk_tr20_tr10.feather`.
 
 ## Columns
 

@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd), with [R/assemble_helpers.R](../R/assemble_helpers.R), [R/bg_aggregation_qa.R](../R/bg_aggregation_qa.R), and [R/geography_qa.R](../R/geography_qa.R). |
-| Output | `../../../data/acs_step2_2024_block_group_aggregated.feather`, relative to the repository root. |
+| Output | `${ACS_DATA_DIR}/acs_step2_2024_block_group_aggregated.feather`, under the configured processed-data directory. |
 | Role / status | Step 2 source for [04_assemble_tract_panel.Rmd](../04_assemble_tract_panel.Rmd): canonical 2024 measurement bundles where `!(geo_consistent %in% 1)`, including missing/unexpected flags; source-comparison diagnostics elsewhere. Selection has no availability fallback. |
 | Row grain | One row per 2010-vintage destination tract represented in the county-filtered crosswalk, including targets represented only by zero-weight links. |
 | Primary key | `tr2010_id`: unique, nonmissing character GEOID matching `^06[0-9]{9}$`; state (2) + county (3) + tract (6) digits, preserving leading zeros. |
@@ -24,9 +24,9 @@ Paths below are relative to the repository root.
 
 | Input | Source grain / key | Role |
 |---|---|---|
-| `../../../data/acs_step1_2024_block_group.feather` ([schema](acs_step1_2024_block_group.md)) | Statewide California 2020 block group; `bg2020_id` | ACS counts, income, rent, and MOEs from `01_import_acs.Rmd`. |
-| `../../../data/xwalk_bg24_tr10.feather` ([schema](xwalk_bg24_tr10.md)) | Unique (`bg2020_id`, `tr2010_id`) allocation pair | NHGIS links and population, household, housing-unit, and renter-unit allocation fractions. |
-| `../../../data/parity_reference/acs_step2_24.feather` (optional) | Prior 2010 tract; `tr2010_id` | Preserved Southern California parity reference only; supplies no production measurements. Missing reference means parity not checked. |
+| `${ACS_DATA_DIR}/acs_step1_2024_block_group.feather` ([schema](acs_step1_2024_block_group.md)) | Statewide California 2020 block group; `bg2020_id` | ACS counts, income, rent, and MOEs from `01_import_acs.Rmd`. |
+| `${ACS_DATA_DIR}/xwalk_bg24_tr10.feather` ([schema](xwalk_bg24_tr10.md)) | Unique (`bg2020_id`, `tr2010_id`) allocation pair | NHGIS links and population, household, housing-unit, and renter-unit allocation fractions. |
+| `${ACS_DATA_DIR}/parity_reference/acs_step2_24.feather` (optional) | Prior 2010 tract; `tr2010_id` | Preserved Southern California parity reference only; supplies no production measurements. Missing reference means parity not checked. |
 
 ## 3. Construction rules
 
@@ -301,7 +301,7 @@ objects; only the diagnostic/tag fields listed in §5 persist.
 
 ## 9. Validation and regeneration
 
-- **Focused validation:** `Rscript --vanilla tests/test_bg_aggregation_qa.R`
+- **Focused validation:** `Rscript tests/test_bg_aggregation_qa.R`
   covers synthetic BG contributors, counts, dependencies, inventory, and
   temporary readback; `tests/test_income_censoring.R` covers income retention; `tests/test_rent_metadata.R`
   covers distribution boundaries and source classification.

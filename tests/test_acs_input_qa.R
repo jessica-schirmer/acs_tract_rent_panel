@@ -1,4 +1,4 @@
-# Run from the repository root: Rscript --vanilla tests/test_acs_input_qa.R
+# Run from the repository root: Rscript tests/test_acs_input_qa.R
 # Synthetic inputs only; notebook API calls are stubbed and outputs are temporary.
 suppressPackageStartupMessages({
   library(here)
@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
   library(arrow)
   library(matrixStats)
 })
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 download_rent_evidence <- function(df, year, geography = "tract") retain_rent_evidence(df)
 source(here::here("R", "helpers.R"))

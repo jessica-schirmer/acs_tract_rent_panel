@@ -257,6 +257,7 @@ save_tract_crosswalk <- function(crosswalk, path, overwrite = FALSE) {
   } else {
     message("Writing new tract crosswalk: ", path)
   }
+  acs_ensure_output_dir(dirname(path))
   arrow::write_feather(crosswalk, path)
   invisible(path)
 }

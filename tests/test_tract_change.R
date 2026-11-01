@@ -1,4 +1,4 @@
-# Run from the repository root: Rscript --vanilla tests/test_tract_change.R
+# Run from the repository root: Rscript tests/test_tract_change.R
 # Synthetic relationships, the notebook diagnostic chunk, and a temporary Feather round trip.
 suppressPackageStartupMessages({
   library(here)
@@ -6,6 +6,9 @@ suppressPackageStartupMessages({
   library(arrow)
   library(matrixStats)
 })
+source(here::here("R", "data_paths.R"))
+Sys.setenv(ACS_DATA_DIR = tempfile("acs-test-data-"),
+           ACS_RAW_DATA_DIR = tempfile("acs-test-raw-"))
 source(here::here("R", "helpers.R"))
 source(here::here("R", "geography_qa.R"))
 source(here::here("R", "tract_change_helpers.R"))

@@ -4,6 +4,7 @@
 # These functions assume the calling script has already loaded dplyr (for the
 # data-masking helpers used below) and arrow (for feather I/O). Load them at the
 # top of a notebook with:
+#   source(here::here("R", "data_paths.R"))
 #   source(here::here("R", "helpers.R"))
 
 
@@ -59,12 +60,12 @@ rename_id <- function(df, new_name, old_name) {
 #' Write a data frame to a feather file
 #'
 #' @param df Data frame to write.
-#' @param dir Character directory path, with a trailing slash (e.g. `"../../../data/"`).
+#' @param dir Character output directory path.
 #' @param name Character file name (e.g. `"acs_step1_2016_tract.feather"`).
 #' @return Invisibly, the input `df` (after writing).
 save_data <- function(df, dir, name) {
-    df |>
-        arrow::write_feather(paste0(dir,name))
+  path <- acs_prepare_output(file.path(dir, name))
+  arrow::write_feather(df, path)
 }
 
 

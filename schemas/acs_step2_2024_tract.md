@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd) §3; readback validation in §4. |
-| Output | `../../../data/acs_step2_2024_tract.feather`, relative to the repository root. |
+| Output | `${ACS_DATA_DIR}/acs_step2_2024_tract.feather`, under the configured processed-data directory. |
 | Role / status | Native tract source for Step 4: canonical measurements on explicit `geo_consistent == 1` links, including different-GEOID pairs; source diagnostics otherwise. Selected missing values have no fallback to block-group aggregates. See the [panel contract](acs_full.md). |
 | Row grain | One native 2020-vintage California census tract. |
 | Primary key | `tr2020_id`: unique, nonmissing character GEOID matching `^06[0-9]{9}$`. |
@@ -22,8 +22,8 @@ Santa Clara (`085`), Solano (`095`), Sonoma (`097`). State FIPS is `06`.
 
 | Input | Source grain / key | Role |
 |---|---|---|
-| `../../../data/acs_step1_2024_tract.feather` ([schema](acs_step1_2024_tract.md)) | Statewide native 2020 tract; `tr2020_id` | ACS estimates/MOEs downloaded by `01_import_acs.Rmd` using `tidycensus::get_acs`, California, year 2024, five-year survey. |
-| `../../../data/parity_reference/acs_step2_2024_tract.feather` (optional) | Native 2020 tract; `tr2020_id` | Preserved Southern California comparison only; supplies no measurements. |
+| `${ACS_DATA_DIR}/acs_step1_2024_tract.feather` ([schema](acs_step1_2024_tract.md)) | Statewide native 2020 tract; `tr2020_id` | ACS estimates/MOEs downloaded by `01_import_acs.Rmd` using `tidycensus::get_acs`, California, year 2024, five-year survey. |
+| `${ACS_DATA_DIR}/parity_reference/acs_step2_2024_tract.feather` (optional) | Native 2020 tract; `tr2020_id` | Preserved Southern California comparison only; supplies no measurements. |
 
 ## 3. Construction rules
 

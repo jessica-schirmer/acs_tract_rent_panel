@@ -11,7 +11,8 @@
 # two notebooks' helpers in separate files avoids a name collision.
 #
 # Assumes the calling notebook has already loaded dplyr/tidyr/stringr/purrr
-# (tidyverse), Hmisc / matrixStats (for weightedMean), and arrow.
+# (tidyverse), matrixStats (for weightedMean), and arrow.
+# Source R/data_paths.R before using the I/O helpers.
 #
 # Load at the top of the notebook with:
 #   source(here::here("R", "assemble_helpers.R"))
@@ -32,9 +33,7 @@ load_data <- function(path, folder = NULL, name) {
     file.path(path, name)
   }
 
-  if (!file.exists(file_path)) {
-    stop("File not found: ", file_path)
-  }
+  acs_require_input(file_path)
 
   arrow::read_feather(file_path)
 }
@@ -43,12 +42,12 @@ load_data <- function(path, folder = NULL, name) {
 #' Save data
 #'
 #' @param df Data frame
-#' @param dir Directory (with trailing slash)
+#' @param dir Output directory
 #' @param name File name including extension
 #' @return Invisibly, the input df (after writing)
 save_data <- function(df, dir, name) {
-    df |>
-        arrow::write_feather(paste0(dir,name))
+  path <- acs_prepare_output(file.path(dir, name))
+  arrow::write_feather(df, path)
 }
 
 

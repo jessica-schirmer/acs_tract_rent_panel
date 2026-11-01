@@ -1,4 +1,4 @@
-# Run: Rscript --vanilla tests/test_tract_rent_maps.R --preview-dir /tmp/acs_tract_map_preview_r
+# Run: Rscript tests/test_tract_rent_maps.R --preview-dir /tmp/acs_tract_map_preview_r
 # Offline synthetic inputs only; no canonical reads, downloads, or empirical exports.
 suppressPackageStartupMessages({
   library(here)
@@ -17,6 +17,9 @@ suppressPackageStartupMessages({
   library(rmarkdown)
   library(xml2)
 })
+source(here::here("R", "data_paths.R"))
+Sys.setenv(ACS_DATA_DIR = tempfile("acs-test-data-"),
+           ACS_RAW_DATA_DIR = tempfile("acs-test-raw-"))
 source(here::here("R", "tract_rent_maps.R"))
 
 quiet <- function(expr) {

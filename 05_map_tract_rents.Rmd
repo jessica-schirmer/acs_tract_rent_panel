@@ -24,7 +24,7 @@ the default, and both panels use 2010 tract geography.
 
 **Inputs:**
 
-- `../../../data/acs_full.feather` — canonical wide panel, one row per
+- `${ACS_DATA_DIR}/acs_full.feather` — canonical wide panel, one row per
   `tr2010_id`; see the [panel schema](schemas/acs_full.md).
 - Census 2010 TIGER/Line county tract ZIP. Alameda's
   [tl_2010_06001_tract10.zip](https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_06001_tract10.zip)
@@ -76,6 +76,7 @@ library(ggiraph)
 library(htmlwidgets)
 library(rmarkdown)
 
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "tract_rent_maps.R"))
 cat(R.version.string, "| sf", as.character(packageVersion("sf")),
     "| ggplot2", as.character(packageVersion("ggplot2")),
@@ -86,7 +87,7 @@ cat(R.version.string, "| sf", as.character(packageVersion("sf")),
 county_fips <- "001"
 overwrite_figures <- TRUE
 map_crs <- "EPSG:3310"
-panel_path <- here::here("..", "..", "..", "data", "acs_full.feather")
+panel_path <- file.path(acs_data_dir(), "acs_full.feather")
 boundary_cache_dir <- here::here("outputs", "cache", "tiger2010")
 figure_dir <- here::here("outputs", "figures")
 county <- county_scope(county_fips)

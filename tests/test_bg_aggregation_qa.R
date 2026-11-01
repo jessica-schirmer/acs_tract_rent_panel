@@ -1,4 +1,4 @@
-# Rscript --vanilla tests/test_bg_aggregation_qa.R
+# Rscript tests/test_bg_aggregation_qa.R
 # Synthetic helper tests and selected 02a chunks; all Feather I/O is temporary.
 source(here::here("tests", "test_rental_inventory_bg.R"))
 

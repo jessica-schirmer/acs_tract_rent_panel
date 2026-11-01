@@ -13,9 +13,9 @@
 
 ## 2. Inputs and provenance
 
-- Existing `../../../data/acs_full.feather`: selected source/key, saved flag/rent/coverage,
+- Existing `${ACS_DATA_DIR}/acs_full.feather`: selected source/key, saved flag/rent/coverage,
   and baseline rent/CV/top-code flag. `tract_ADU_ACS_combined.feather`: common-input keys only.
-  A relocated panel may be supplied explicitly, but must match both saved hashes.
+  The panel path is supplied explicitly and must match both saved hashes.
   This comparison uses `acs_full_260918.feather`, byte-identical to the old panel.
 - Existing Step 1 native/BG rent estimates, MOEs, cash-renter counts, and all 24
   bins; `xwalk_bg24_tr10.feather`: unchanged destination links and renter weights.
@@ -115,8 +115,19 @@ the saved audit/common universe; their old status and audit diagnostics are NA.
 
 ## 9. Validation and regeneration
 
-Run `Rscript --vanilla tests/report_rent_expected_changes.R <new-report-directory> [preserved-panel-path]`
-against the preserved pre-regeneration inputs. The script refuses to overwrite
+This optional report is separate from notebooks 1–5 and their synthetic tests.
+Configure `ACS_DATA_DIR` to the preserved pre-regeneration inputs, including the
+external `tract_ADU_ACS_combined.feather`. Run from the repository root:
+
+```sh
+Rscript tests/report_rent_expected_changes.R <new-report-directory> <preserved-panel-path> <downstream-analysis-directory>
+```
+
+The third argument explicitly locates the separate downstream analysis checkout:
+`01_fe_rent.Rmd`, `outputs/tables/acs_rent_flags/tract_status.csv`, and
+`outputs/tables/acs_rent_flags/input_manifest.csv` must exist there. Panel and
+analysis paths may be absolute or relative to this repository. No original
+research-project layout is inferred. The script refuses to overwrite
 reports or silently use changed canonical versions. It makes no API calls,
 runs no notebooks, and writes only the two diagnostic CSVs. Producer and
 downstream regeneration/audit remain separate analyst-run work.

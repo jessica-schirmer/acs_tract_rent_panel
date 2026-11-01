@@ -25,17 +25,17 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
-- `../../../data/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract.
+- `${ACS_DATA_DIR}/acs_step1_2016_tract.feather` — 2012–2016 ACS estimates, one row per 2010 CA tract.
+- `${ACS_DATA_DIR}/acs_step1_2024_tract.feather` — 2020–2024 ACS estimates, one row per 2020 CA tract.
 - Optional parity snapshots (§1.4):
-  `../../../data/parity_reference/acs_step2_16.feather` and
-  `../../../data/parity_reference/acs_step2_2024_tract.feather`.
+  `${ACS_DATA_DIR}/parity_reference/acs_step2_16.feather` and
+  `${ACS_DATA_DIR}/parity_reference/acs_step2_2024_tract.feather`.
 
 **Outputs:**
 
-- `../../../data/acs_step2_2016_tract.feather` — 2012–2016 measures on `tr2010_id`
+- `${ACS_DATA_DIR}/acs_step2_2016_tract.feather` — 2012–2016 measures on `tr2010_id`
   ([schema](schemas/acs_step2_2016_tract.md)).
-- `../../../data/acs_step2_2024_tract.feather` — 2020–2024 measures on `tr2020_id`
+- `${ACS_DATA_DIR}/acs_step2_2024_tract.feather` — 2020–2024 measures on `tr2020_id`
   ([schema](schemas/acs_step2_2024_tract.md)).
 
 Both outputs cover Southern California and Bay Area target counties and include
@@ -58,8 +58,8 @@ CVs for `04_assemble_tract_panel.Rmd`.
 rm(list = ls())
 
 library(here)          # project-root-relative paths via here::here()
-library(Hmisc)
 library(dplyr)
+library(arrow)
 library(assertr)
 library(tidycensus)
 library(tidyverse)
@@ -73,6 +73,7 @@ library(forcats)
 ## 1.2 Load helper functions
 
 ```{r load-helpers}
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -81,15 +82,14 @@ source(here::here("R", "geography_qa.R"))
 ## 1.3 Set data directory and target counties
 
 ```{r set-paths}
-# Trailing slash is intentional: save_data() builds paths with paste0().
-data_dir <- "../../../data/"
+data_dir <- acs_data_dir(create = TRUE)
 
 county_config <- step2_target_counties()
 southern_california_counties <- county_config$southern_california_counties
 bay_area_counties <- county_config$bay_area_counties
 target_counties <- county_config$target_counties
 
-parity_reference_dir <- "../../../data/parity_reference"
+parity_reference_dir <- file.path(data_dir, "parity_reference")
 ```
 
 ## 1.4 Read prior outputs for parity checks
@@ -494,8 +494,8 @@ Reload both native tract outputs and check them against the in-memory results
 and source inventory diagnostics.
 
 ```{r reload-step2}
-acs16_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2016_tract.feather"))
-acs_2024_tract_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2024_tract.feather"))
+acs16_out <- arrow::read_feather(file.path(data_dir, "acs_step2_2016_tract.feather"))
+acs_2024_tract_out <- arrow::read_feather(file.path(data_dir, "acs_step2_2024_tract.feather"))
 ```
 
 ## 4.1 Check key uniqueness and duplicates

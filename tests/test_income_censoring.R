@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
   library(matrixStats)
   library(stringr)
 })
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))

@@ -125,11 +125,11 @@ After analyst regeneration:
    completeness/reconciliation, and strict save/reload checks. Confirm retained
    gross-rent bins and `interp_rent` match the corresponding pre-cleanup results
    on identical inputs. Native rent/value uncertainty must remain available.
-3. Run Step 4 with `write_panel <- FALSE` using cleaned Step 2 products and the
+3. Run Step 4 using cleaned Step 2 products and the
    existing Step 3 crosswalk. Check the unchanged panel key union, exact source
    equality for every retained mapped field, unchanged 2016 native fields,
    retained income, and unchanged `interp_rent`/`interp_rentPOST`. Review the
-   reduced schema before enabling the existing canonical write.
+   reduced schema; the notebook validates, saves, and reloads the canonical panel.
 4. Complete the separate consumer migration before running analyses on the
    reduced panel. [tract_rent_acs/R/helpers.R](../../../analysis/tract_rent_acs/R/helpers.R)
    and [R/model_sample.R](../../../analysis/tract_rent_acs/R/model_sample.R)

@@ -5,7 +5,7 @@
 | Property | Contract |
 |---|---|
 | Producer | [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd) §2; readback validation in §4. |
-| Output | `../../../data/acs_step2_2016_tract.feather`, relative to the repository root. |
+| Output | `${ACS_DATA_DIR}/acs_step2_2016_tract.feather`, under the configured processed-data directory. |
 | Role / status | Baseline tract source for Step 4. Rent and its bound remain in 2016 source dollars here; both are multiplied by the existing inflation parameter only in Step 4. See the [panel contract](acs_full.md). |
 | Row grain | One native 2010-vintage California census tract. |
 | Primary key | `tr2010_id`: unique, nonmissing character GEOID matching `^06[0-9]{9}$`. |
@@ -22,8 +22,8 @@ Santa Clara (`085`), Solano (`095`), Sonoma (`097`). State FIPS is `06`.
 
 | Input | Source grain / key | Role |
 |---|---|---|
-| `../../../data/acs_step1_2016_tract.feather` ([schema](acs_step1_2016_tract.md)) | Statewide native 2010 tract; `tr2010_id` | ACS estimates/MOEs downloaded by `01_import_acs.Rmd` using `tidycensus::get_acs`, California, year 2016, five-year survey. |
-| `../../../data/parity_reference/acs_step2_16.feather` (optional) | Native 2010 tract; `tr2010_id` | Preserved Southern California comparison only; supplies no measurements. |
+| `${ACS_DATA_DIR}/acs_step1_2016_tract.feather` ([schema](acs_step1_2016_tract.md)) | Statewide native 2010 tract; `tr2010_id` | ACS estimates/MOEs downloaded by `01_import_acs.Rmd` using `tidycensus::get_acs`, California, year 2016, five-year survey. |
+| `${ACS_DATA_DIR}/parity_reference/acs_step2_16.feather` (optional) | Native 2010 tract; `tr2010_id` | Preserved Southern California comparison only; supplies no measurements. |
 
 ## 3. Construction rules
 

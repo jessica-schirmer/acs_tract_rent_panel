@@ -10,6 +10,9 @@ suppressPackageStartupMessages({
   library(stringr)
   library(arrow)
 })
+source(here::here("R", "data_paths.R"))
+Sys.setenv(ACS_DATA_DIR = tempfile("acs-test-data-"),
+           ACS_RAW_DATA_DIR = tempfile("acs-test-raw-"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -359,7 +362,7 @@ validate_saved_products <- function(env, notebook, saves, products, filenames, r
   on.exit(unlink(directory, recursive = TRUE))
   # Load notebook helpers into an isolated parent; fixture globals cannot leak in.
   helper_env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
+  for (file in c("data_paths.R", "rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
     sys.source(here::here("R", file), helper_env)
   }
   parent.env(env) <- helper_env
@@ -426,7 +429,7 @@ run_isolated_notebook <- function(notebook, inputs, outputs, helper_dir = here::
   on.exit(unlink(directory, recursive = TRUE))
   for (name in names(inputs)) write_feather(inputs[[name]], file.path(directory, name))
   env <- new.env(parent = parent.env(globalenv()))
-  for (file in c("rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
+  for (file in c("data_paths.R", "rent_metadata.R", "assemble_helpers.R", "geography_qa.R", "bg_aggregation_qa.R")) {
     # Historical split baselines predate the BG-only QA file.
     if (file != "bg_aggregation_qa.R" || file.exists(file.path(helper_dir, file))) {
       sys.source(file.path(helper_dir, file), env)

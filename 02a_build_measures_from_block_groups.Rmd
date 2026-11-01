@@ -25,14 +25,14 @@ knitr::opts_chunk$set(
 
 **Inputs:**
 
-- `../../../data/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
-- `../../../data/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
-- `../../../data/parity_reference/acs_step2_24.feather` (optional, §1.4) —
+- `${ACS_DATA_DIR}/acs_step1_2024_block_group.feather` — 2020–2024 ACS estimates, one row per 2020 CA block group.
+- `${ACS_DATA_DIR}/xwalk_bg24_tr10.feather` — 2020 block group → 2010 tract allocation weights.
+- `${ACS_DATA_DIR}/parity_reference/acs_step2_24.feather` (optional, §1.4) —
   preserved output for schema and Southern California parity checks.
 
 **Outputs:**
 
-- `../../../data/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 ACS
+- `${ACS_DATA_DIR}/acs_step2_2024_block_group_aggregated.feather` — 2020–2024 ACS
   measures on Southern California and Bay Area 2010 tracts for `04_assemble_tract_panel.Rmd`,
   including rental inventory, interpolated rent with median-bin evidence and
   status/flag/source-dollar bound, component rent coverage, shares, vacancy rates, and
@@ -52,8 +52,8 @@ knitr::opts_chunk$set(
 rm(list = ls())
 
 library(here)          # project-root-relative paths via here::here()
-library(Hmisc)
 library(dplyr)
+library(arrow)
 library(assertr)
 library(tidycensus)
 library(tidyverse)
@@ -67,6 +67,7 @@ library(forcats)
 ## 1.2 Load helper functions
 
 ```{r load-helpers}
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))
@@ -76,15 +77,14 @@ source(here::here("R", "bg_aggregation_qa.R"))
 ## 1.3 Set data directory and target counties
 
 ```{r set-paths}
-# Trailing slash is intentional: save_data() builds paths with paste0().
-data_dir <- "../../../data/"
+data_dir <- acs_data_dir(create = TRUE)
 
 county_config <- step2_target_counties()
 southern_california_counties <- county_config$southern_california_counties
 bay_area_counties <- county_config$bay_area_counties
 target_counties <- county_config$target_counties
 
-parity_reference_dir <- "../../../data/parity_reference"
+parity_reference_dir <- file.path(data_dir, "parity_reference")
 ```
 
 ## 1.4 Read prior outputs for parity checks
@@ -559,7 +559,7 @@ Reload the saved output and check it against the in-memory result and original
 source diagnostics.
 
 ```{r reload-step2}
-acs_2024_bg_aggregated_out <- arrow::read_feather(paste0(data_dir, "acs_step2_2024_block_group_aggregated.feather"))
+acs_2024_bg_aggregated_out <- arrow::read_feather(file.path(data_dir, "acs_step2_2024_block_group_aggregated.feather"))
 ```
 
 ## 3.1 Check key uniqueness and duplicates

@@ -1,6 +1,7 @@
-# Rscript --vanilla tests/test_rent_metadata.R
+# Rscript tests/test_rent_metadata.R
 # Synthetic classifications, source selection, inflation, and raw-evidence joins.
 suppressPackageStartupMessages({ library(dplyr); library(tidyr); library(here) })
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "rent_metadata.R"))
 source(here::here("R", "assemble_helpers.R"))
 source(here::here("R", "geography_qa.R"))

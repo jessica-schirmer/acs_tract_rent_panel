@@ -3,3 +3,34 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 outputs/cache/
+
+# Local configuration and credentials; keep the setup template public.
+.Renviron
+.Renviron.*
+!.Renviron.example
+.env
+.env.*
+*.pem
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+.claude/settings.local.json
+.Rproj.user/
+
+# Package libraries and generated caches, not renv bootstrap/configuration.
+renv/library/
+renv/staging/
+renv/cache/
+renv/local/
+renv/cellar/
+/cache/
+/*_cache/
+/*_files/
+/*.html
+/*.nb.html
+
+# Supported repository-local data locations (external locations are also valid).
+/data-raw/
+/data-raw-temp/
+/data/

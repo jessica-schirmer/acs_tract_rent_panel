@@ -121,7 +121,7 @@ unchanged.
 On an analyst rerun, the following existing outputs may change. No canonical
 output has been regenerated as part of this implementation.
 
-| Output under `../../../data/` | Potentially affected variables |
+| Output under `${ACS_DATA_DIR}/` | Potentially affected variables |
 |---|---|
 | `acs_step2_16.feather` | `med_hhincE` and `med_hhincCV` for tracts with available source income and missing/top-coded source rent. |
 | `acs_step2_24.feather` | Household-weighted `med_hhincE` and its `med_hhincCV` wherever restored income contributions affect a tract estimate or its missingness. |
@@ -185,8 +185,8 @@ expectations or geographic classifications. Inventory is independently checked
 against its three source components before saving and after reloading, including
 when absent from a reference. Save/reload schema comparisons remain strict.
 
-References load from the configured `../../../data/parity_reference` before
-saving candidates to `../../../data/`. Preserve those snapshots. Missing
+References load from the configured `${ACS_DATA_DIR}/parity_reference` before
+saving candidates to `${ACS_DATA_DIR}/`. Preserve those snapshots. Missing
 references explicitly remain **PARITY NOT CHECKED**; no expectation or pass is
 fabricated. Income expectations and parity diagnostics never enter production
 output schemas.
@@ -247,7 +247,7 @@ request was made and no production output was written.
 ## Cached-input assembly validation (2026-09-11)
 
 Executed the notebook's assembly and validation code using the existing step-1
-Feathers and crosswalk, with references from `../../../data/parity_reference`.
+Feathers and crosswalk, with references from `${ACS_DATA_DIR}/parity_reference`.
 The two save chunks were skipped and reload validation used the in-memory
 candidates. This verifies the calculations and assertions, not a Feather
 write/read round trip. Input and reference file hashes were unchanged.

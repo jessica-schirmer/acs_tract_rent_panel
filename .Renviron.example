@@ -1,0 +1,8 @@
+# Copy to .Renviron in the repository root, fill in values, then restart R.
+# Absolute paths are accepted; relative paths resolve from the repository root.
+# Supported local choices: data-raw/ and data/. Both are ignored by Git.
+# Raw files are read-only. ACS_DATA_DIR receives generated/replaced files.
+ACS_RAW_DATA_DIR=""
+ACS_DATA_DIR=""
+# Request and activate your own key: https://api.census.gov/data/key_signup.html
+CENSUS_API_KEY=""

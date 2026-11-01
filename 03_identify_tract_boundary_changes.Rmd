@@ -18,13 +18,13 @@ knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = TRUE, message = TRUE
 
 **Inputs:**
 
-- `../../../data-raw-temp/census/tab20_tract20_tract10_st06.txt` — the U.S.
+- `${ACS_RAW_DATA_DIR}/census/tab20_tract20_tract10_st06.txt` — the U.S.
   Census Bureau's UTF-8, pipe-delimited 2020-to-2010 California tract relationship
   file. Each row describes a geographic intersection; the raw file is read-only.
 
 **Outputs:**
 
-- `../../../data/xwalk_tr20_tr10.feather` — one row per California 2020 tract,
+- `${ACS_DATA_DIR}/xwalk_tr20_tr10.feather` — one row per California 2020 tract,
   with consistency/classification diagnostics and a 2010 key wherever uniquely
   defined. See [the output schema](schemas/xwalk_tr20_tr10.md).
 - Pair-level `tract_relationships`, statewide/target-county QA summaries, and
@@ -63,6 +63,7 @@ library(readr)
 library(arrow)
 library(knitr)
 
+source(here::here("R", "data_paths.R"))
 source(here::here("R", "helpers.R"))
 source(here::here("R", "geography_qa.R"))
 source(here::here("R", "tract_change_helpers.R"))
@@ -75,9 +76,8 @@ Each replacement is announced and validated before saving and after reloading.
 Set `overwrite_output <- FALSE` to opt back into refusing an existing destination.
 
 ```{r set-paths}
-source_path <- here::here("..", "..", "..", "data-raw-temp", "census",
-                          "tab20_tract20_tract10_st06.txt")
-output_path <- here::here("..", "..", "..", "data", "xwalk_tr20_tr10.feather")
+source_path <- file.path(acs_data_dir("raw"), "census", "tab20_tract20_tract10_st06.txt")
+output_path <- file.path(acs_data_dir(create = TRUE), "xwalk_tr20_tr10.feather")
 overwrite_output <- TRUE
 ```
 
@@ -127,7 +127,7 @@ total stop execution rather than being repaired or discarded. Other source
 fields, including water areas, are not imported or used in diagnostics.
 
 ```{r read-relationships}
-stopifnot("Missing Census relationship file" = file.exists(source_path))
+acs_require_input(source_path, raw = TRUE)
 source_md5 <- unname(tools::md5sum(source_path))
 source_provenance <- tibble(
   source_file = source_path,
