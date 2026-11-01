@@ -135,7 +135,8 @@ print(count(county_panel, acs_source_24, rent_status_16, rent_status_24, name = 
 ### Decision: Retain the full county boundary frame on 2010 geography
 
 Reuse the original Census ZIP, checking its required shapefile members and
-checksums; invalid cached files stop execution and are never silently replaced.
+checksums with system `unzip -tqq`; invalid cached files stop execution and
+are never silently replaced.
 Each run prints its source URL and SHA-256. The 2010 record fields `GEOID10`,
 `STATEFP10`, and `COUNTYFP10` identify the tract/county, while `ALAND10` and
 `AWATER10` give land/water area in square meters. Missing areas stay unknown.
@@ -225,6 +226,9 @@ Pad a constant baseline only enough to draw its colorbar; use ±1% for all-zero
 change. A panel without eligible values retains its status counts and fills.
 Use identical EPSG:3310 extents with 2.5% padding and thin tract outlines.
 Export a 14 × 8-inch PNG at 220 dpi and a vector PDF, with no online basemap.
+The export helper uses Quartz when R reports Aqua support (normally macOS),
+and otherwise requires Cairo for PNG and vector PDF output. System and package
+setup is documented in [Getting started](README.md#getting-started).
 All three exports use only this footnote; methodological explanations remain in
 the notebook sections above:
 
@@ -321,3 +325,13 @@ cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, s
   top-coded, and unavailable tooltips, including each part of multipart tracts
   and areas crossed by hatching. Confirm panel-specific values, fixed extents,
   proportional resizing, and absence of persistent or cross-panel selection.
+
+For an inexpensive offline helper check after restoring the environment, run:
+
+```sh
+Rscript tests/test_tract_rent_maps.R --preview-dir /tmp/acs_tract_map_preview_r
+```
+
+Its synthetic PNG/PDF/HTML previews exercise numeric, top-coded, unavailable,
+and multipart tracts. Use them for local rendering and hover checks; they do
+not replace empirical acceptance or the README's real-data example.

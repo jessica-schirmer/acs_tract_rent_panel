@@ -133,9 +133,20 @@ For investigation, §2.5 retains `bg_count_qa_2024$measure` and `$missing_source
 plus `bg_county_family_qa_2024`. Inventory has separate missing-component and
 county diagnostics. These tables remain outside the production Feather.
 
-This rule covers additive counts. Weighted income, interpolation, relative
-weights, rent-quality flags/shares, and MOE methods retain their existing behavior.
-Dependent formulas inherit missing counts where those counts are required.
-Interpolation can still be observed when a later rent bin is missing. The
-rent-share decomposition assertion applies only to complete required counts;
-`rent_share_deferred_2024` retains other cases for Pass 3 review (§3.5).
+Dependent formulas require their own complete count inputs. In particular,
+`calc_interp_rent()` uses `rent_distribution()` in
+[R/rent_metadata.R](../R/rent_metadata.R) and requires the cash-renter total
+`rhucashE` and **all 24 rent bins**, including bins above the median. Missing
+any of these yields missing numeric rent and `unavailable_other` with reason
+`incomplete_distribution`; a positive total and consistent bin sum are also
+required for an observed median. See the
+[current construction rules](../schemas/acs_step2_2024_block_group_aggregated.md#3-construction-rules)
+for endpoint and unresolved-distribution cases.
+
+`pct_miss_rent` measures allocated renter coverage associated with missing or
+censored **cleaned BG source rent**. It remains a BG diagnostic even where
+Step 4 selects native tract rent. The year-specific `tc_flag_rent_24` instead
+describes the final tract median; it is not a component-exposure share. The
+old `pct_tc_rent` / `pct_m_rent` decomposition and `rent_share_deferred_2024`
+review instructions are superseded by the
+[rent-metadata contract](../schemas/acs_full.md#6-missingness-and-special-value-rules).

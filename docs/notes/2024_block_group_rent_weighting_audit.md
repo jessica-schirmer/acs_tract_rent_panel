@@ -1,13 +1,21 @@
 # Audit: 2024 block-group-to-tract rent weighting
 
+**Historical audit — superseded as current guidance.** This describes the
+2026-09-11 implementation. Weighted block-group rent/value estimates and the
+old rent-share/flag semantics were subsequently retired. Preserve the findings
+as evidence for that version; use the
+[current block-group schema](../../schemas/acs_step2_2024_block_group_aggregated.md)
+and [migration history](../measure_cleanup.md#rent-metadata-migration)
+for current measures and classification.
+
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
 Reviewed 2026-09-11 at commit `b4ab25e`. Scope: the rent calculations in
-[02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd), starting with available ACS source
+[02_assemble.Rmd](../../02a_build_measures_from_block_groups.Rmd), starting with available ACS source
 estimates and crosswalk allocations; earlier-vintage inspection was limited to
 conceptual comparability.
 
@@ -24,7 +32,7 @@ the source variable, `rent = B25064_001`, and its use against the earlier tract
 median. B25064's universe excludes no-cash-rent units. However, §2.5 explicitly
 chooses an average of source medians, while §2.6 calls it “weighted median rent.”
 The intended research quantity therefore needs to distinguish a tract median
-from the documented index. ([Source definitions](../schemas/acs_step1_2016_tract.md),
+from the documented index. ([Source definitions](../../schemas/acs_step1_2016_tract.md),
 [Census B25064](https://data.census.gov/table/ACSDT5Y2024.B25064).)
 
 For source block group $b$ and destination tract $t$, define
@@ -43,8 +51,8 @@ $$
 \frac{\sum_{b\in S_t}q_{bt}m_b}{\sum_{b\in S_t}q_{bt}}.
 $$
 
-[censor_tc_vars()](../R/assemble_helpers.R#L265) first sets `rentE >= 3500` to
-`NA`; [calc_agg_vars()](../R/assemble_helpers.R#L278) then uses
+[censor_tc_vars()](../../R/assemble_helpers.R#L265) first sets `rentE >= 3500` to
+`NA`; [calc_agg_vars()](../../R/assemble_helpers.R#L278) then uses
 `weightedMean(rentE, w = rhuE * wt_renthu, na.rm = TRUE)`. Missing/censored
 medians and their weights leave both numerator and denominator. The denominator
 is thus the available-rent subset, although saved tract `rhuE` sums all allocated
@@ -67,7 +75,7 @@ and `pct_miss_rent` is their sum after censoring; zero total renter units gives
 `NA`. Count sums use `na.rm = TRUE`. These describe units in block groups with
 missing/censored **medians**, not the share of individual rents unobserved or
 above $3,500. They flag coverage loss but do not correct it.
-([Share helpers](../R/assemble_helpers.R#L236).)
+([Share helpers](../../R/assemble_helpers.R#L236).)
 
 **Split-geography implementation is sound for this index.** Grouping is by
 destination `tr2010_id`; each allocation contributes $a_{bt}N_b$ once, with
@@ -76,8 +84,8 @@ contributes 25/75 units, not 100 to each tract. Original fractions are preserved
 when destinations are restricted, and pair uniqueness is asserted. `_agg`
 summary names preserve the source `rhuE` vector during calculation. Precomputed
 `rel_wt_rhu = q_bt / sum(q_bt)` is not used for `rentE` or `rentM`.
-([Allocation checks](../02a_build_measures_from_block_groups.Rmd),
-[weight preservation](../02a_build_measures_from_block_groups.Rmd).)
+([Allocation checks](../../02a_build_measures_from_block_groups.Rmd),
+[weight preservation](../../02a_build_measures_from_block_groups.Rmd).)
 
 **Statistical limits remain.** Medians cannot generally be combined by averaging;
 even changing to a weighted median of source medians would not recover the pooled
@@ -97,7 +105,7 @@ $$
 $$
 
 where $F_b$ is the source cash-rent distribution. The existing
-[calc_interp_rent()](../R/assemble_helpers.R#L394) approximates this using B25063
+[calc_interp_rent()](../../R/assemble_helpers.R#L394) approximates this using B25063
 bins. With source bin counts $n_{bk}$, it computes
 
 $$
@@ -129,7 +137,7 @@ bins while warning that they need not match published medians.
 [Census handbook, p. 11](https://www.census.gov/content/dam/Census/library/publications/2019/acs/acs_state_local_handbook_2019.pdf#page=16).)
 
 **The rent uncertainty calculation has a separate mismatch.**
-[rentM_agg](../R/assemble_helpers.R#L292) averages source MOEs $e_b$:
+[rentM_agg](../../R/assemble_helpers.R#L292) averages source MOEs $e_b$:
 `weightedMean(rentM, w = rhuE * wt_renthu, na.rm = TRUE)`, using the subset with
 available MOEs, independently of available medians. Censoring leaves `rentM`
 unchanged. The notebook instead specifies root-sum-of-squares. For the index,
@@ -153,7 +161,7 @@ high-rent source contributions disappear. Therefore `rentPOST` mixes
 aggregation methods and censoring levels. `interp_rentPOST` is conceptually
 closer, but still compares an interpolated median with a published median;
 common geography and dollar units do not eliminate that difference.
-([Panel definitions](../schemas/acs_full.md).) Census also documents changes to
+([Panel definitions](../../schemas/acs_full.md).) Census also documents changes to
 underlying contract-rent processing limits in 2020 and 2024 and advises caution
 with high-rent comparisons; these are distinct from the code's $3,500 censoring
 rule for published medians. Their local effect was not measured here.

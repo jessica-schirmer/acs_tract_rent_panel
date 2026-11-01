@@ -220,7 +220,7 @@ median-bin evidence, and original E/EA/M/MA remain in Steps 1/2, not this panel.
   even on native-selected rows. Missing BG records, incomplete renter counts,
   or nonpositive totals yield NA. It never classifies the selected tract rent.
 - `tc_flag_rent`, `m_flag_rent`, and `pct_tc_rent` are removed. Consumer migration
-  is documented in [README](../README.md#rent-metadata-migration).
+  is documented in the [migration record](../docs/measure_cleanup.md#rent-metadata-migration).
 - Missing inputs propagate through change/share-MOE formulas; negative radicands
   are clamped to zero. Count/share CVs are missing at zero estimates; unguarded
   dollar/change CVs can be `Inf`/`NaN`. BG count MOEs omit missing products, so

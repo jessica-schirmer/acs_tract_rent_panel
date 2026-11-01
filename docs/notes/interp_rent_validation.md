@@ -1,9 +1,18 @@
 # Validation of `interp_rent` as the 2024 tract rent measure
 
+**Historical validation — not a current output contract.** The counts and
+comparisons below use the 2026-09-11 inputs and implementation. Later changes
+removed the weighted-rent comparator and component top-code share and require
+all rent bins for interpolation. Use the
+[current block-group schema](../../schemas/acs_step2_2024_block_group_aggregated.md),
+[panel schema](../../schemas/acs_full.md), and
+[rent metadata migration](../measure_cleanup.md#rent-metadata-migration).
+Line references below are historical; linked source files are current successors.
+
 Reviewed 2026-09-11 at commit `b4ab25e8d95a11fc0811ae33d8df8539cad07ea1`.
 The [block-group rent weighting audit](2024_block_group_rent_weighting_audit.md)
-is authoritative on the estimator choice; this note evaluates the requested
-empirical conditions and consequences of that choice.
+records the estimator-choice assessment at that date; this note evaluates
+the requested empirical conditions and consequences using those inputs.
 
 ## 1. Conclusion
 
@@ -38,7 +47,7 @@ rent-related columns, and ran targeted calculations in memory. It did not run
 or knit an entire notebook, download new ACS observations, or regenerate data.
 The only repository write is this note.
 
-The [configured sample](../02a_build_measures_from_block_groups.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
+The [configured sample](../../02a_build_measures_from_block_groups.Rmd#13-set-data-directory-and-target-counties) is the five Southern California
 and nine Bay Area counties, selected by **destination 2010 tract**. Of 29,740
 statewide crosswalk rows, 19,807 point to the target tracts. Following the
 notebook, one unmatched source link with all four allocation weights equal to
@@ -57,7 +66,7 @@ each tract equal weight; quantiles use R's default type 7.
 **Reproduction checks:** Reallocated each of the 24 bin estimates, `rhucashE`,
 and `rhuE` with `sum(source_count * wt_renthu, na.rm = TRUE)`. Recomputed the
 existing censored-source weighted mean using `matrixStats::weightedMean`,
-called the unchanged [calc_interp_rent()](../R/assemble_helpers.R#L394), and
+called the unchanged [calc_interp_rent()](../../R/assemble_helpers.R#L394), and
 reconstructed its selected-bin diagnostics. Checked saved coverage shares and
 the panel's two rent levels, inflation-adjusted baseline, and two rent ratios.
 All **36 column comparisons passed**, including missingness patterns, with
@@ -71,7 +80,7 @@ the missing-source-median share.
 The [2024 Census B25063 variable definitions](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html)
 confirm `rhucashE = B25063_002E`, the cash-renter total. The 24 cash-rent bins
 are `_003E` through `_026E`; `_027E` is no-cash rent and is excluded.
-[Stage 1's mapping](../01_import_acs.Rmd#22-specify-variables-to-extract) and the helper's range table match the
+[Stage 1's mapping](../../01_import_acs.Rmd#22-specify-variables-to-extract) and the helper's range table match the
 published category order. The helper converts category suffixes to integers
 and sorts them numerically, so categories 10–24 follow category 9 correctly.
 The saved aggregation supplies exactly the 24 estimate columns, without MOEs
@@ -277,15 +286,17 @@ for both tracts are complete and reconcile.
 
 ### 6.3 2016–2024 rent change, including the downstream log outcome
 
-The [panel definition](../R/merge_helpers.R#L150) uses the existing tract
+The [panel definition](../../R/merge_helpers.R#L150) uses the existing tract
 B25064 `rentE` baseline, already censored in stage 2 and multiplied by **1.307**
 to express it in 2024 dollars. With that identical baseline `B` for each tract:
 
 - `interp_rentPOST = interp_rent / B` and `rentPOST = rentE_24 / B`, for `B > 0`.
-- The [downstream rent model](../../../analysis/tract_rent_acs/01_fe_rent.Rmd#L544)
-  constructs both `log_interp_rentPOST` and `log_rentPOST` using natural logs,
-  and [uses `log_rentPOST` as its outcome](../../../analysis/tract_rent_acs/01_fe_rent.Rmd#L845).
-  Both existing definitions are therefore reported, with emphasis on logs.
+- At the audit date, the downstream rent model at research-project path
+  `scripts/analysis/tract_rent_acs/01_fe_rent.Rmd` (outside this checkout)
+  constructed both `log_interp_rentPOST` and `log_rentPOST` using natural logs
+  at line 544, and used `log_rentPOST` as its outcome at line 845. Those are
+  historical line references and definitions, both reported here with emphasis
+  on logs; the downstream repository's current documentation governs its use.
 
 Of the 4,839 level-pair tracts, 17 lack a usable baseline: 16 have missing or
 censored baseline rent and one is absent from the 2016 table. The **4,822
@@ -387,7 +398,7 @@ the formulas and sample denominators stated above. The audit was deterministic.
 in Step 2; that path does not calculate interpolated rent. This audit used
 the original block-group cache; filenames, hashes, and results below still
 identify those original inputs, not regenerated outputs. See the
-[migration instructions](../README.md#stage-1-input-migration).
+[migration instructions](../../README.md#stage-1-input-migration).
 
 Input MD5 hashes were checked before and after the calculations and were
 unchanged. They identify the exact saved data behind this note:

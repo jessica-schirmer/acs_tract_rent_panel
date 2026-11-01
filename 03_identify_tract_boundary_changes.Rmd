@@ -39,13 +39,17 @@ knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = TRUE, message = TRUE
 5. Review geographic diagnostics
 6. Save and validate the output
 
-For later ACS comparison, select `geo_consistent == 1`, join native-2020 2024
-tract measures on `tr2020_id`, then 2016 measures on the explicit `tr2010_id`.
+[04_assemble_tract_panel.Rmd](04_assemble_tract_panel.Rmd) uses this crosswalk
+to select canonical 2024 measurements: native tract estimates where
+`geo_consistent == 1`, linked through explicit `tr2020_id` / `tr2010_id` pairs,
+and block-group-allocated estimates elsewhere. Selection has no fallback for
+missing measurements. The saved panel carries geographic/source fields; the
+crosswalk also supports notebook-only coverage and consistent-pair comparisons.
+See the [panel contract](schemas/acs_full.md#3-construction-rules).
+
 This notebook does not join ACS data, allocate changed tracts, or impose the
-Step 2 county sample. `04_assemble_tract_panel.Rmd` uses this crosswalk for notebook-only
-geographic coverage and consistent-pair measurement diagnostics; canonical
-source selection and saved panel fields remain unchanged. The historical
-`tract_change.feather` has a different contract and is preserved.
+Step 2 county sample. The historical `tract_change.feather` has a different
+contract and is preserved.
 
 # 1. Set up environment
 

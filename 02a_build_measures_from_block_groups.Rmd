@@ -609,7 +609,7 @@ print_numeric_summary(acs_2024_bg_aggregated_out, "acs_step2_2024_block_group_ag
 Review final status/reason counts separately from `pct_miss_rent`. The coverage
 check reconstructs its numerator from corrected original BG evidence and
 unchanged renter weights; incomplete or zero denominators remain missing.
-The [migration and impact report](README.md#rent-metadata-migration) describes
+The [migration and impact report](docs/measure_cleanup.md#rent-metadata-migration) describes
 potential downstream quality-screen changes.
 
 ```{r validate-county-rent-step2}

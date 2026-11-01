@@ -1,6 +1,15 @@
-# ACS measure cleanup
+# ACS measure cleanup and rent metadata migration
 
-Implemented 2026-09-17 following the analyst's scope decisions: remove
+**Historical scope:** the cleanup and follow-up sections below record the
+2026-09-17 implementation, its validation, and the downstream work identified
+at that time. Their field lists, commands, paths, and consumer status are not
+current setup instructions. The later [rent metadata migration](#rent-metadata-migration)
+supersedes their rent-share/flag semantics and consumer guidance. Use the
+[current README](../README.md#getting-started),
+[block-group schema](../schemas/acs_step2_2024_block_group_aggregated.md), and
+[panel schema](../schemas/acs_full.md) for the current pipeline.
+
+The cleanup was implemented 2026-09-17 following the analyst's scope decisions: remove
 block-group weighted dollar estimates **except median household income**,
 remove house-value-only diagnostics, keep native tract
 products and existing 2016 native panel fields, and defer analysis-consumer
@@ -58,11 +67,13 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
   every other status. Missing selected values never fall back to the other
   source. `interp_rentPOST` retains the positive, inflation-adjusted
   `rentE_16` denominator. No interpolation MOE/CV is invented.
-- Source `rentE` remains necessary for `rhu_miss_rent`, `pct_miss_rent`,
-  `pct_tc_rent`, `tc_flag_rent_24`, and historical income-correction
-  expectations. These source-quality definitions and downstream quality rules
-  are unchanged. Native `rentE_24_tract` and its diagnostic change ratio remain
-  internal to Step 4 for interpolation and paired source comparisons.
+- At the cleanup date, source `rentE` still supplied `rhu_miss_rent`,
+  `pct_miss_rent`, `pct_tc_rent`, `tc_flag_rent_24`, and income-correction
+  expectations; that task left their quality rules unchanged. The later
+  [rent metadata migration](#rent-metadata-migration) removed the exposure
+  share and changed the flag semantics. Native `rentE_24_tract` and its
+  diagnostic change ratio remain internal to Step 4 for source selection
+  and paired comparisons.
 - Explicit removal allowlists, obsolete-input fixtures, and negative schema
   tests intentionally name retired fields. Current schemas describe these
   names only as migration/removal entries, except when documenting retained
@@ -72,27 +83,26 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
   audits, interpolation validation note, and income
   correction note describe the pre-cleanup schema where applicable. Their
   old weighted-rent/value and low-rent references are not current contracts.
-  This record and the current schemas supersede those output descriptions.
+  The current schemas supersede those output descriptions.
 
 ## Files changed
 
 | Area | Files |
 |---|---|
-| Notebooks | [01_acs.Rmd](../01_import_acs.Rmd), [02a_aggregate_2024_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd), [02b_prepare_tract_sources.Rmd](../02b_build_measures_from_tracts.Rmd), [04_merge.Rmd](../04_assemble_tract_panel.Rmd) |
+| Notebooks (current filenames) | [01_import_acs.Rmd](../01_import_acs.Rmd), [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd), [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd), [04_assemble_tract_panel.Rmd](../04_assemble_tract_panel.Rmd) |
 | Helpers | [R/helpers.R](../R/helpers.R), [R/assemble_helpers.R](../R/assemble_helpers.R), [R/geography_qa.R](../R/geography_qa.R), [R/merge_helpers.R](../R/merge_helpers.R), [R/merge_diagnostics.R](../R/merge_diagnostics.R) |
 | Tests | [test_income_censoring.R](../tests/test_income_censoring.R), [test_rental_inventory.R](../tests/test_rental_inventory.R), [test_merge_diagnostics.R](../tests/test_merge_diagnostics.R) |
 | Step 1 schemas | [2016 tract](../schemas/acs_step1_2016_tract.md), [2024 block group](../schemas/acs_step1_2024_block_group.md), [2024 tract](../schemas/acs_step1_2024_tract.md) |
 | Step 2/panel schemas | [2016 tract](../schemas/acs_step2_2016_tract.md), [2024 block group](../schemas/acs_step2_2024_block_group_aggregated.md), [2024 tract](../schemas/acs_step2_2024_tract.md), [acs_full](../schemas/acs_full.md) |
-| Documentation | [README](../README.md), [shared PIPELINE](../../../PIPELINE.md), this cleanup record |
+| Documentation | [README](../README.md), shared research-project `scripts/PIPELINE.md` (outside this checkout), this cleanup record |
 
-Existing working-tree edits and schema renames are preserved. Step 3, source
-data, dependencies, and separate analysis repositories are unchanged. The
-missingness/completeness hardening was a separate task; this record describes
-the earlier measure cleanup.
+That cleanup preserved existing working-tree edits and schema renames and
+left Step 3, source data, dependencies, and separate analysis repositories
+unchanged. Missingness/completeness hardening was a separate task.
 
-## Validation and analyst follow-up
+## Validation and analyst follow-up (2026-09-17 record)
 
-Focused validation uses only synthetic inputs, temporary Feathers, and parsing:
+The recorded validation used only synthetic inputs, temporary Feathers, and parsing:
 
 ```sh
 Rscript --vanilla tests/test_income_censoring.R
@@ -100,7 +110,7 @@ Rscript --vanilla tests/test_rental_inventory.R
 Rscript --vanilla tests/test_merge_diagnostics.R
 ```
 
-All three scripts pass. Tests exercise the actual Step 1 mapping/schema chunks,
+All three scripts passed for that cleanup. Tests exercised the Step 1 mapping/schema chunks,
 old-cache low-rent removal, retained native dollar measures, income correction,
 all three migration contracts, hierarchy/no-fallback cases, and temporary
 save/reload paths. Removed fields fail validation even without prior references.
@@ -113,7 +123,10 @@ quality, censoring, and inventory helper bodies are unchanged. All R chunks
 in the affected notebooks and the changed helpers/tests parse. No ACS download,
 full render, or canonical output write was performed.
 
-After analyst regeneration:
+The following regeneration plan is preserved as historical context. It is
+superseded by the [current execution instructions](../README.md#run-the-pipeline)
+and schemas; its equality expectations apply only to the 2026-09-17 cleanup
+on identical inputs, before the later rent metadata changes.
 
 1. Preserve prior products/references, then regenerate Steps 1 and 2. Verify
    exactly the removal lists above; no unrelated column, type, key, row-count,
@@ -130,13 +143,49 @@ After analyst regeneration:
    equality for every retained mapped field, unchanged 2016 native fields,
    retained income, and unchanged `interp_rent`/`interp_rentPOST`. Review the
    reduced schema; the notebook validates, saves, and reloads the canonical panel.
-4. Complete the separate consumer migration before running analyses on the
-   reduced panel. [tract_rent_acs/R/helpers.R](../../../analysis/tract_rent_acs/R/helpers.R)
-   and [R/model_sample.R](../../../analysis/tract_rent_acs/R/model_sample.R)
-   still require retired panel fields. Its `01_fe_rent.Rmd` and `01_fe_rhu.Rmd`
-   still construct/select old rent changes and diagnostic fields. The
-   [RentHub preparation notebook](../../../analysis/tract_rent_renthub/00_prep_tract_data.Rmd)
-   also constructs `log_rentPOST` / `log_q1rentPOST` and selects retired fields.
-   These references are intentionally deferred, not supplied with replacement
-   aliases. Migrate their contracts, diagnostics, dependent summaries, and
-   schemas in that follow-up; preserve active weighted-income controls.
+4. The separately maintained consumers were deferred at that date. In the
+   surrounding research project, `scripts/analysis/tract_rent_acs/R/helpers.R`
+   and `R/model_sample.R`, plus that repository's `01_fe_rent.Rmd` and
+   `01_fe_rhu.Rmd`, then referenced retired fields. The RentHub consumer at
+   `scripts/analysis/tract_rent_renthub/00_prep_tract_data.Rmd` then constructed
+   `log_rentPOST` / `log_q1rentPOST` and selected retired fields. These paths
+   identify historical consumers outside this checkout; they do not establish
+   their present migration status. Their current documentation and the current
+   [ACS panel contract](../schemas/acs_full.md) govern any downstream work.
+
+## Rent metadata migration
+
+This later contract supersedes the cleanup record's old rent-share/flag
+definitions. Use year-specific `rent_status_16/24`, `tc_flag_rent_16/24`, and
+`rent_censor_bound_16/24`; only observed rent remains numeric. The
+[panel schema](../schemas/acs_full.md#6-missingness-and-special-value-rules)
+defines source evidence, classification, and units. Removed `m_flag_rent` is
+replaced by explicit status information. **The removed `pct_tc_rent` component
+share has no replacement share: the selected final-median top-code flag must
+not be substituted into its legacy rules.** `pct_miss_rent` remains block-group
+component coverage, even on native-selected rows, with corrected source
+classification and unchanged weights/denominator. The former `pct_m_rent`
+decomposition is also retired. Distribution-based rent now requires the
+cash-renter total and all 24 bins; see the
+[block-group schema](../schemas/acs_step2_2024_block_group_aggregated.md#3-construction-rules).
+
+The dated [expected-change report](acs_rent_expected_tract_changes.csv),
+[input manifest](acs_rent_expected_change_input_manifest.csv), and
+[diagnostic contract and reproduction procedure](../schemas/acs_rent_expected_tract_changes.md)
+preserve the 2026-10-21 evidence: five native unavailability resolutions,
+17 coverage changes, and native $3,500 recovery. These are expected changes
+against preserved inputs, not verified regenerated outputs or sample additions.
+The [original native evidence](acs_rent_native_2024_evidence.csv) and
+[source](acs_rent_coverage_source_changes.csv)/[tract coverage comparisons](acs_rent_coverage_tract_changes.csv)
+retain the underlying diagnostics and [input hashes](acs_rent_metadata_input_manifest.csv).
+
+Downstream ADU/model preparation is maintained separately and is not needed to
+run this repository. Historical [tests/check_rent_metadata_inputs.R](../tests/check_rent_metadata_inputs.R)
+and [tests/report_rent_expected_changes.R](../tests/report_rent_expected_changes.R)
+are optional diagnostic generators, not setup checks. They require preserved
+pre-regeneration inputs under `ACS_DATA_DIR`, including
+`tract_ADU_ACS_combined.feather`. The expected-change report also takes an
+explicit downstream analysis directory; see its
+[reproduction contract](../schemas/acs_rent_expected_tract_changes.md#9-validation-and-regeneration).
+Neither is called by notebooks 1–5 or the synthetic tests. Existing CSV reports
+remain dated evidence; do not regenerate them with current inputs.

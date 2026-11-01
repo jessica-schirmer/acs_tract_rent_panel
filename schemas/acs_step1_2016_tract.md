@@ -142,4 +142,4 @@ evidence remains insufficient. Retained MOEs do not establish observed rent.
 Run `Rscript tests/test_rent_metadata.R` and
 `Rscript tests/test_acs_input_qa.R` for synthetic checks.
 Analyst-run regeneration: `01_import_acs.Rmd`, then `02b_build_measures_from_tracts.Rmd`.
-See [migration and acceptance](../README.md#rent-metadata-migration).
+See [migration and acceptance](../docs/measure_cleanup.md#rent-metadata-migration).

@@ -1,8 +1,16 @@
 # Finding: `calc_pct_tc_m()` name-shadowing bug — and why `pct_miss_rent` was unaffected
 
+**Historical finding — superseded rent semantics.** This records the
+2026-06-12 bug and its fix; the claim that `pct_miss_rent` was unaffected applies
+to that bug only. The component shares and exposure-based flag below are
+retired, and later source classification changed some coverage values. Use the
+[current block-group schema](../../schemas/acs_step2_2024_block_group_aggregated.md)
+and [rent metadata migration](../measure_cleanup.md#rent-metadata-migration).
+The original commit, counts, and decomposition remain historical evidence.
+
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
@@ -56,7 +64,7 @@ Historical filename: these magnitudes use the original `acs_step1_24.feather`
 cache. Since the 2026-09-12 stage-1 revision, its current counterpart is
 `acs_step1_2024_block_group.feather`, with a revised variable contract requiring
 regeneration. The recorded findings refer to the original input; see the
-[migration note](../README.md#stage-1-input-migration).
+[migration note](../../README.md#stage-1-input-migration).
 
 | measure | buggy (old §2.3 printout) | corrected |
 |---|---|---|

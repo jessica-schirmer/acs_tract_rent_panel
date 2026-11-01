@@ -1,54 +1,68 @@
 # ACS Tract Rent Panel: Geographic Harmonization and Mapping
 
-This R pipeline constructs comparable census-tract measures of rent, rental housing inventory, and neighborhood characteristics from the 2012–2016 and 2020–2024 American Community Survey. It addresses changes in tract boundaries by retaining native tract estimates where geography is unchanged and allocating block-group measures to 2010 tract boundaries elsewhere. The resulting panel covers 14 counties in Southern California and the Bay Area and supports static and interactive maps of rent levels and change.
+Constructs comparable census-tract measures of rent, rental housing inventory, and neighborhood characteristics from the 2012–2016 and 2020–2024 American Community Survey. Addresses changes in tract boundaries by retaining native tract estimates where geography is unchanged and allocating block-group measures to 2010 tract boundaries elsewhere. The resulting panel covers 14 counties in Southern California and the Bay Area and supports static and interactive maps of rent levels and change.
 
 
 ![Baseline rent and rent change in Alameda County](outputs/figures/tract_rent_baseline_and_change_alameda.png)
 
-## Setup
+<a id="setup"></a>
+
+## Getting started
 
 Raw and intermediate datasets are not included in this public repository.
-Data can remain outside the checkout; no surrounding research-project directory
-structure is required.
+Configure their locations before running the notebooks; the tracked `.here`
+marker anchors repository-relative paths.
 
-1. Use **R 4.5.1**, the version recorded in [renv.lock](renv.lock), and install
-   Pandoc (included with RStudio), system `unzip`, and working PNG/PDF graphics
-   support (Quartz on macOS, Cairo elsewhere). CRAN binaries generally supply
-   the compiled R dependencies on macOS/Windows. Source builds need a C/C++/Fortran
-   toolchain; spatial packages need GDAL, GEOS, PROJ and UDUNITS2, while graphics
-   packages need FreeType, Fontconfig and Cairo development libraries. Linux
-   builds also commonly need curl, OpenSSL and libxml2 development libraries.
-   Follow the [sf system setup](https://r-spatial.github.io/sf/#installing),
-   [gdtools requirements](https://davidgohel.github.io/gdtools/), and
-   [Arrow installation guide](https://arrow.apache.org/docs/r/articles/install.html)
-   if binary packages are unavailable. The locked Arrow version requires C++17
-   and CMake >= 3.25 for a full source build; these are system prerequisites,
-   not notebook-installed packages.
-2. Start R in the repository root and run `renv::restore()`, or use the shell
-   command below. The tracked `.Rprofile` and `renv/activate.R` bootstrap the
-   pinned renv version and isolate the project library. Restore requires network
-   access unless the versions are already cached. Do not use `--vanilla` for
-   normal project commands: it bypasses `.Rprofile` and `.Renviron`.
+1. Install the R version recorded in [renv.lock](renv.lock) and the system
+   requirements below. **All notebook renders need Pandoc**, available with
+   RStudio or as a separate installation. Restoring R packages does not install
+   R, Pandoc, system libraries, or input data.
+2. From the repository root, restore the locked R packages. The tracked
+   [.Rprofile](.Rprofile) and [renv/activate.R](renv/activate.R) bootstrap renv
+   and activate the project library. Restore needs network access unless packages
+   are cached. Run project commands without `--vanilla`, which bypasses
+   `.Rprofile` and `.Renviron`.
 
    ```sh
    Rscript -e 'renv::restore(prompt = FALSE)'
    ```
 
-3. Copy [.Renviron.example](.Renviron.example) to an ignored `.Renviron` in the
-   repository root and fill in `ACS_RAW_DATA_DIR`, `ACS_DATA_DIR`, and
-   `CENSUS_API_KEY`. Request your own [Census API key](https://api.census.gov/data/key_signup.html)
-   and activate it using the emailed instructions. Environment variables supplied
-   before starting R are also supported. **Restart R after editing `.Renviron`.**
-   Absolute paths are accepted; relative paths resolve from the repository root
-   located by `here` and the tracked `.here` marker. No old-layout fallback exists.
-   The ignored local choices `data-raw/` (or `data-raw-temp/`) and `data/` are
-   supported. Other repository-local choices need corresponding ignore rules.
-4. Supply the three manual inputs below. Keep raw files unchanged. `ACS_DATA_DIR`
-   receives generated Feather files, so choose a dedicated output directory;
-   writers create missing output directories and announce replacements. Step 3
-   and the map retain their explicit overwrite controls; Step 4 checks any
-   prior schema before replacement. Notebooks 1 and 3 need both data variables;
-   notebooks 2a, 2b, 4 and 5 need only `ACS_DATA_DIR`.
+3. Copy [.Renviron.example](.Renviron.example) to the ignored `.Renviron` in the
+   repository root. Set `ACS_RAW_DATA_DIR` to the raw-input directory and
+   `ACS_DATA_DIR` to a dedicated generated-data directory. Absolute paths or
+   paths relative to this checkout are accepted; `data-raw/` and `data/` are
+   supported, ignored local choices. Other local choices need matching ignore
+   rules. **Notebook 1 requires `CENSUS_API_KEY`** for its rent-evidence requests:
+   request and activate your own [Census API key](https://api.census.gov/data/key_signup.html)
+   and put it in `.Renviron`. Environment variables set before starting R also
+   work. **Restart R after editing `.Renviron`.**
+4. Supply the manual inputs below without modifying their contents. Notebooks
+   1 and 3 need both data-directory variables; 2a, 2b, 4, and 5 need only
+   `ACS_DATA_DIR`. Writers create missing output directories and announce
+   replacements. Preserve any outputs you need before rerunning. Step 3's
+   `overwrite_output` and Step 5's `overwrite_figures` default to `TRUE`; setting
+   either to `FALSE` refuses replacement for that stage.
+
+### System requirements
+
+- **Full environment / Steps 1–4:** compiled packages need a C/C++/Fortran
+  toolchain when binaries are unavailable. Spatial dependencies are needed even
+  before mapping because these notebooks load `tidycensus`: source builds need
+  GDAL, GEOS, PROJ, SQLite, and UDUNITS2; see [sf installation](https://r-spatial.github.io/sf/#installing).
+  The locked packages also require curl, OpenSSL, and libxml2 development
+  libraries on typical Linux source builds. A full Arrow source build needs
+  C++17 and CMake >= 3.25; see the [Arrow installation guide](https://arrow.apache.org/docs/21.0/r/articles/install.html).
+- **Mapping and export:** Step 5 additionally needs system `unzip` on `PATH`
+  and working R PNG/PDF graphics support. Font and graphics source builds need
+  Cairo, FreeType, Fontconfig, HarfBuzz, FriBidi, and PNG/JPEG/TIFF/WebP libraries;
+  see [gdtools](https://davidgohel.github.io/gdtools/) and the system requirements
+  in [renv.lock](renv.lock). The complete restore includes these packages even
+  if you stop before mapping. Platform-specific export details are in
+  [notebook 5](05_map_tract_rents.Rmd#5-draw-and-save-the-paired-maps).
+
+macOS/Windows binary packages generally bundle compiled dependencies. Availability
+depends on the platform and locked versions; a clean restore and full pipeline
+run are not established by documentation checks alone.
 
 ### Manual inputs
 
@@ -56,8 +70,11 @@ Sign in to an [IPUMS NHGIS account](https://www.nhgis.org/geographic-crosswalks)
 Under **Downloads → Crosswalks to Census Tracts**, select **California, 2020 to
 2010** under **2020s Block Groups**, and **California, 2000 to 2010** under
 **2000 Census Tracts**. Download and extract both ZIPs, placing the CSVs at the
-exact paths below. Notebook 1 requires the second crosswalk even though later
-stages do not consume its output. The download links require IPUMS login.
+exact paths below. **Both crosswalks are mandatory:** notebook 1 checks both
+files before downloading ACS data, imports both, and validates both saved
+outputs. The 2000-to-2010 output is unused by later stages, but its input cannot
+be skipped in the current notebook. These downloads require IPUMS login and
+are not automated by this pipeline.
 
 | Manual download | Required path below `ACS_RAW_DATA_DIR` |
 |---|---|
@@ -67,8 +84,8 @@ stages do not consume its output. The download links require IPUMS login.
 
 The Census text is the California entry under **Census Tract Relationship Files**
 on the [2020 relationship-file page](https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2020.html).
-Save it unchanged as UTF-8 pipe-delimited text. Missing raw files stop execution
-with the expected full path and a link back to this setup section.
+Download it manually without an account and save it unchanged as UTF-8
+pipe-delimited text. Missing raw files stop execution with the expected path.
 
 ### Run the pipeline
 
@@ -83,19 +100,21 @@ Rscript -e 'rmarkdown::render("04_assemble_tract_panel.Rmd")'
 Rscript -e 'rmarkdown::render("05_map_tract_rents.Rmd")'
 ```
 
-Steps 2a/2b can run in either order after 1; Step 3 is independent of 1–2.
-Step 1 downloads statewide ACS estimates and rent evidence via the Census API.
-Step 4 always validates, saves `ACS_DATA_DIR/acs_full.feather`, and checks its
-readback; no prior panel is required. Step 5 needs only that panel and public
-Census 2010 TIGER/Line boundaries, which it downloads/caches under
-`outputs/cache/tiger2010/`. Figures remain under `outputs/figures/`.
-Optional historical Step 2 snapshots belong under `ACS_DATA_DIR/parity_reference/`;
-missing snapshots report parity as unchecked and do not block production.
+Steps 2a and 2b can run in either order after 1. Step 3 is independent of 1–2;
+run it before 4, or reuse its validated crosswalk. Step 4 needs all three Step 2
+products and the Step 3 crosswalk. Optional historical Step 2 snapshots belong
+under `${ACS_DATA_DIR}/parity_reference/`; missing snapshots leave parity unchecked.
 
-For inexpensive offline checks after restoration, run
-`Rscript tests/test_data_paths.R`, `Rscript tests/test_dependencies.R`, and the
-synthetic `tests/test_*.R` suites. Tests use temporary outputs; full empirical
-execution and diagnostic review remain analyst-run.
+**Notebook 5 requires the saved `${ACS_DATA_DIR}/acs_full.feather`.** Notebook
+4 configures that destination in §1.3 (`set-paths`) and always saves after
+validation in §7.5 (`save-panel`). An existing panel supplies a schema reference
+and is replaced after those checks; the replacement is announced, and the
+saved file is reloaded and checked. A first run needs no prior panel.
+
+Step 1 retrieves statewide ACS estimates and rent evidence automatically through
+the Census API. Step 5 can run independently once the saved panel exists; it
+downloads public 2010 TIGER/Line boundaries on the first uncached run and reuses
+them from `outputs/cache/tiger2010/`. Figure exports stay in `outputs/figures/`.
 
 ## Notebook overview
 
@@ -297,122 +316,80 @@ weighting limitations are documented in the [panel schema](schemas/acs_full.md#8
 ## Step 5: Map baseline rent and real change
 
 Notebook: [05_map_tract_rents.Rmd](05_map_tract_rents.Rmd). Produce paired
-static and HTML hover maps of 2012–2016 monthly median gross rent and its percentage change to
-2020–2024, using canonical rents already expressed in 2024 dollars. Select a
-county in the configuration chunk; no parcel, ADU, CV, or model-sample filters apply.
-Only the plotting frame omits confirmed water-only tracts (`ALAND10 == 0` and
-`AWATER10 > 0`). The full join retains every tract; tracts containing land or
-missing either area attribute remain displayed with their existing rent statuses.
+static and HTML hover maps of 2012–2016 monthly median gross rent and real
+percentage change to 2020–2024. Select the county in the `configuration` chunk;
+Alameda is the default.
 
 **Inputs:**
 
-- `${ACS_DATA_DIR}/acs_full.feather` — canonical 2010-tract panel; `rentE_16`,
-  `interp_rent`, `interp_rentPOST`, and their geographic/rent quality fields.
+- `${ACS_DATA_DIR}/acs_full.feather` — saved canonical 2010-tract panel from Step 4.
 - [Census 2010 TIGER/Line county tract ZIP](https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_06001_tract10.zip)
   — default Alameda boundaries, cached at
   `outputs/cache/tiger2010/tl_2010_06001_tract10.zip`; other county filenames use
-  the configured state/county FIPS. The notebook documents source vintage and fields.
+  the configured county FIPS.
 
 **Outputs:**
 
-- `outputs/figures/tract_rent_baseline_and_change_alameda.png` — paired maps
-  for the repository example.
-- `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent
-  vector figure. Filename suffixes follow the configured county name.
+- `outputs/figures/tract_rent_baseline_and_change_alameda.png` and
+  `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — paired static maps.
 - `outputs/figures/tract_rent_baseline_and_change_alameda.html` — self-contained
-  paired maps with tract/value hover labels; the suffix follows the same county configuration.
-- Inline figure, full-join validation, displayed status counts, and a separate
-  omitted water-only count; the original boundary ZIP is cached, with no
-  intermediate dataset written.
+  hover maps. All three filename suffixes follow the configured county.
+- Inline maps and join/display summaries; no intermediate dataset is written.
 
 **Steps:**
 
-1. Configure the processed-data directory, county, projection, and repository-local outputs.
-2. Validate wide-panel keys, canonical rent metadata, and the selected county.
-3. Cache 2010 boundaries, join one-to-one, and report unmatched GEOIDs in both directions.
-4. Derive percentage changes and display statuses, then omit confirmed water-only tracts from a separate plotting frame.
-5. Use the plotting frame for all map layers, status counts, full-range scales, and shared extents; export paired PNG/PDF maps and the HTML hover version.
-6. Reconcile full-join, displayed, and omitted counts; inspect plotted ranges and confirm all three exports.
+1. Configure the county, projection, and output locations.
+2. Load and validate the saved panel, then select the county.
+3. Load 2010 boundaries, join rent data, and report unmatched tracts.
+4. Derive percentage changes and display statuses; omit confirmed water-only tracts from plotting.
+5. Draw and export the paired PNG/PDF maps and HTML hover version.
+6. Summarize join coverage, displayed values/statuses, omissions, and exports.
 
-Helpers live in [R/tract_rent_maps.R](R/tract_rent_maps.R). Notebook 5 uses `sf`,
-`ggplot2`, `patchwork`, `arrow`, `dplyr`, `tibble`, `here`, `digest`, and
-`RColorBrewer`, plus `ggiraph` and `htmlwidgets` for HTML hover maps, with
-`knitr`/`rmarkdown` for rendering. Hatching uses clipped
-`sf` line geometry; no pattern package is needed. System `unzip` verifies ZIP
-checksums; PNG/vector PDF exports use native Quartz on macOS and Cairo elsewhere.
-HTML rendering also requires Pandoc (available with RStudio).
-
-Use the shared [setup and execution instructions](#setup) for environment restoration
-and notebook rendering.
-
-The configuration retains `overwrite_figures <- TRUE` and announces replacement
-of existing PNG/PDF/HTML files; set it to `FALSE` to refuse replacement. Full real-data
-rendering remains analyst-run. Review the notebook's final acceptance checks,
-including the unchanged-input Alameda counts and removal of the three western
-water-only pieces.
-
-Open the saved `.html` file directly in a browser (for example, double-click it).
-Its scripts and styles are embedded, so it works offline without a server or an
-asset folder. Hover labels show the full tract GEOID and the panel's value:
-whole-dollar baseline rent labeled as 2024 dollars, or signed real percentage
-change to one decimal place. Top-coded and unavailable values retain their
-panel-specific labels. The fixed side-by-side maps preserve proportions when
-resized; zoom, pan, selection, and cross-panel highlighting are disabled.
-Compare the HTML against both static exports during analyst acceptance review.
-
-The inexpensive offline check is:
+After [setup](#getting-started) and Step 4, render from the repository root:
 
 ```sh
-Rscript tests/test_tract_rent_maps.R --preview-dir /tmp/acs_tract_map_preview_r
+Rscript -e 'rmarkdown::render("05_map_tract_rents.Rmd")'
 ```
 
-Its explicitly synthetic PNG/PDF/HTML previews must not replace the empirical
-example below. The HTML fixture includes numeric, top-coded, unavailable, and
-multipart tracts for local hover checks.
+Open the exported `.html` directly in a browser; it works offline without a
+server. Hover over a tract for its full GEOID and baseline rent in 2024 dollars,
+real percentage change, or top-coded/unavailable label. Rendering and display
+details remain in [notebook 5](05_map_tract_rents.Rmd).
 
-## Rent metadata migration
+## Methods and limitations
 
-Use year-specific `rent_status_16/24`, `tc_flag_rent_16/24`, and
-`rent_censor_bound_16/24`; only observed rent remains numeric. The schemas above
-define source evidence, classification, and units. Removed `m_flag_rent` is
-replaced by explicit status information. **The removed `pct_tc_rent` component
-share has no replacement share: the selected final-median top-code flag must
-not be substituted into its legacy rules.** `pct_miss_rent` remains block-group
-component coverage, even on native-selected rows, with corrected source
-classification and unchanged weights/denominator.
+The 2012–2016 and 2020–2024 ACS releases pool observations across two separate
+five-year windows. They are period estimates, not observations of conditions
+in 2016 or 2024 alone; see the [Census guide to ACS estimates](https://www.census.gov/programs-surveys/acs/guidance/estimates.html).
 
-The dated [expected-change report](docs/acs_rent_expected_tract_changes.csv),
-[input manifest](docs/acs_rent_expected_change_input_manifest.csv), and
-[diagnostic contract and reproduction procedure](schemas/acs_rent_expected_tract_changes.md)
-preserve the 2026-10-21 evidence: five native unavailability resolutions,
-17 coverage changes, and native $3,500 recovery. These are expected changes
-against preserved inputs, not verified regenerated outputs or sample additions.
-The [original native evidence](docs/acs_rent_native_2024_evidence.csv) and
-[source](docs/acs_rent_coverage_source_changes.csv)/[tract coverage comparisons](docs/acs_rent_coverage_tract_changes.csv)
-retain the underlying diagnostics and [input hashes](docs/acs_rent_metadata_input_manifest.csv).
+Step 3 identifies one-to-one tract pairs whose positive land areas overlap
+exactly. Step 4 uses native 2024 tract estimates for those pairs and NHGIS-weighted
+block-group allocations elsewhere, without switching sources to fill missing
+values. Allocated counts and distribution-based medians approximate conditions
+within 2010 boundaries; allocation and rent-bin interpolation add uncertainty
+beyond ACS sampling error. They are not direct Census tract estimates, and no
+margin of error is calculated for interpolated rent. See the [block-group construction rules](schemas/acs_step2_2024_block_group_aggregated.md#3-construction-rules)
+and [panel limitations](schemas/acs_full.md#8-known-limitations--intentional-exceptions).
 
-Downstream ADU/model preparation is maintained separately and is not needed to
-run this repository. Historical `tests/check_rent_metadata_inputs.R` and
-`tests/report_rent_expected_changes.R` are optional diagnostic generators,
-not setup checks. They require preserved pre-regeneration inputs under
-`ACS_DATA_DIR`, including `tract_ADU_ACS_combined.feather`. The expected-change
-report also takes an explicit downstream analysis directory; see its
-[reproduction contract](schemas/acs_rent_expected_tract_changes.md#9-validation-and-regeneration).
-Neither is called by notebooks 1–5 or the synthetic tests. Existing CSV reports
-remain dated evidence; do not regenerate them with current inputs.
+Notebook 4 §2.3 and `inflation_factor_2016()` in [R/merge_helpers.R](R/merge_helpers.R)
+convert 2016 dollar estimates, their margins of error, and rent censoring bounds to 2024
+dollars using exactly **1.307**. This is the rounded ratio of the BLS CPI-U
+annual averages for all items, U.S. city average: **313.689 (2024) / 240.007
+(2016) = 1.306999…**, verified in the [BLS historical CPI-U table](https://www.bls.gov/cpi/tables/supplemental-files/historical-cpi-u-202412.pdf).
 
-## Detailed documentation and known inconsistencies
+Confirmed top-coded rents retain a status and lower bound, with no numeric
+estimate; other unavailable or unresolved rents also remain missing. A genuine
+observed $3,500 native rent is retained when its source evidence supports it.
+Block-group interpolation requires the cash-renter total and every rent bin.
+Maps distinguish top-coded from unavailable values and calculate percentage
+change only when both rents are observed and positive. Detailed classification
+rules are in the [panel schema](schemas/acs_full.md#6-missingness-and-special-value-rules).
+Mapped changes are descriptive and do not identify a causal effect of ADUs or
+any other intervention.
 
-Output schemas linked above are the current contracts, including methods,
-diagnostics, focused validation, and analyst-run regeneration procedures.
-The [crosswalk/contributor QA guide](docs/qa_guide.md) explains coverage limits;
-the [measure-cleanup record](docs/measure_cleanup.md) documents earlier field
-removals.
+## Detailed documentation
 
-Some supporting prose remains stale: the QA guide permits interpolation with
-a missing later bin. Use the current block-group schema's
-complete-distribution rules.
-Step 3's overview still describes diagnostic-only downstream use; Step 4 and
-the panel schema establish its role in canonical source selection. Historical
-consumer-migration instructions in the cleanup record should be read alongside
-the separately maintained downstream workflow.
+The schemas linked under each notebook define current dataset contracts. The
+[crosswalk/contributor QA guide](docs/qa_guide.md) explains coverage checks and
+their limits. [Measure-cleanup and rent-metadata history](docs/measure_cleanup.md)
+preserves dated migration evidence and superseded downstream instructions.

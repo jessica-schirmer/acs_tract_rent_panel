@@ -1,5 +1,12 @@
 # Step 2 block-group aggregation audit
 
+**Historical audit — superseded as current guidance.** Findings and field
+definitions below describe the 2026-09-15 implementation. Subsequent cleanup,
+count-completeness checks, and rent metadata changes supersede the missing-bin,
+component-share, and top-code rules recorded here. Use the
+[current block-group schema](../schemas/acs_step2_2024_block_group_aggregated.md)
+and [migration history](measure_cleanup.md#rent-metadata-migration).
+
 Historical notebook references below describe `02_assemble.Rmd` before its split.
 Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
 (block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)

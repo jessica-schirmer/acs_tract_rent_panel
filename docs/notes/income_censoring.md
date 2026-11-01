@@ -1,8 +1,8 @@
 # Income censoring: analyst decision and correction
 
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
@@ -21,7 +21,7 @@ historical and do not validate regenerated inventory outputs.
 retains source income independently and validates it on `tr2020_id`. Its parity
 is strict; the historical income-correction exceptions below apply only to the
 2016 and block-group products. Current filenames and diagnostic suffixes are
-listed in the [output migration](../README.md#stage-2-output-naming-and-references).
+listed in the [output migration](../../README.md#stage-2-output-naming-and-references).
 Historical filenames and empirical results below remain unchanged.
 
 **Subsequent BG count-completeness hardening:** `02a` now requires complete
@@ -29,17 +29,17 @@ positive-weight household counts for aggregated income and complete renter
 counts for its income MOE; the income CV requires both. The weighted-mean and
 CV formulas, available-income treatment, and independence from rent censoring
 remain. Corrected parity expectations apply these count gates; historical
-findings below predate this change. See the [current BG schema](../schemas/acs_step2_2024_block_group_aggregated.md).
+findings below predate this change. See the [current BG schema](../../schemas/acs_step2_2024_block_group_aggregated.md).
 
-**Files changed:** [R/assemble_helpers.R](../R/assemble_helpers.R),
-[R/geography_qa.R](../R/geography_qa.R),
-[tests/test_income_censoring.R](../tests/test_income_censoring.R), this note,
-[02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd) (income expectations, parity calls, and prose),
-[acs_step2_16.md](../schemas/acs_step2_16.md),
-[acs_step2_24.md](../schemas/acs_step2_24.md), and the income-status passage in
-[README.md](../README.md).
+**Files changed:** [R/assemble_helpers.R](../../R/assemble_helpers.R),
+[R/geography_qa.R](../../R/geography_qa.R),
+[tests/test_income_censoring.R](../../tests/test_income_censoring.R), this note,
+[02_assemble.Rmd](../../02a_build_measures_from_block_groups.Rmd) (income expectations, parity calls, and prose),
+[acs_step2_16.md](../../schemas/acs_step2_2016_tract.md),
+[acs_step2_24.md](../../schemas/acs_step2_2024_block_group_aggregated.md), and the income-status passage in
+[README.md](../../README.md).
 
-The [inspection](../docs/acs_tract_bay_area_inspection.md) establishes the issue.
+The [inspection](../../docs/acs_tract_bay_area_inspection.md) establishes the issue.
 This investigation concerns only its rent/income interaction.
 
 ## Previous behavior
@@ -66,7 +66,7 @@ returns `NA`, so the absence of a true condition does **not** make it inactive.
 Already missing income stays missing. The helper does not consult renter counts
 or apply a threshold to income itself. No rows are dropped.
 
-The calls in [02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd) applied this rule to 2024
+The calls in [02_assemble.Rmd](../../02a_build_measures_from_block_groups.Rmd) applied this rule to 2024
 block-group allocation rows in §2.4, before tract aggregation, and directly to
 2016 tracts in §3.2. In 2024, `calc_agg_vars()` uses
 `weightedMean(med_hhincE, w = hhE * wt_hh, na.rm = TRUE)`. Under the old helper,
@@ -78,12 +78,12 @@ contributions were lost. The correction restores those income contributions.
 
 | Project evidence | What it establishes |
 |---|---|
-| Previous [2016 step-2 schema](../schemas/acs_step2_16.md), introduced in commit `0a9ed5e` | Called the expression a "Known quirk (carried unchanged from source logic)" and claimed income was effectively not censored. This was a description of presumed execution, not an explicit decision to retain all available income. It overlooked missing-condition propagation. |
+| Previous [2016 step-2 schema](../../schemas/acs_step2_2016_tract.md), introduced in commit `0a9ed5e` | Called the expression a "Known quirk (carried unchanged from source logic)" and claimed income was effectively not censored. This was a description of presumed execution, not an explicit decision to retain all available income. It overlooked missing-condition propagation. |
 | Notebook §2.4 and §3.2 decision prose before Task 03A | Explained censoring rent at 3500, but supplied no rationale or policy for income depending on rent. |
-| Previous [2024 step-2 schema](../schemas/acs_step2_24.md) | Describes rent censoring before aggregation and weighted means of income, but does not state the income exclusion. |
-| [01_acs.Rmd](../01_import_acs.Rmd) and [step-1 schemas](../schemas/acs_step1_2016_tract.md) | Import `rent` from `B25064_001` and `med_hhinc` from `B19013_001`; the revised tract and block-group lists retain these same codes for both years and grains. The project adds no upstream rule tying income availability to rent. |
+| Previous [2024 step-2 schema](../../schemas/acs_step2_2024_block_group_aggregated.md) | Describes rent censoring before aggregation and weighted means of income, but does not state the income exclusion. |
+| [01_acs.Rmd](../../01_import_acs.Rmd) and [step-1 schemas](../../schemas/acs_step1_2016_tract.md) | Import `rent` from `B25064_001` and `med_hhinc` from `B19013_001`; the revised tract and block-group lists retain these same codes for both years and grains. The project adds no upstream rule tying income availability to rent. |
 | Helper and focused history | The same income expression appears in the initial notebook (`25da173`) and its extraction to `R/assemble_helpers.R` (`0a9ed5e`). These changes supply no income-censoring rationale. The 2,000,000 threshold also appears in median-house-value flagging; that is not evidence for an income threshold or authorization to change another variable. |
-| [R/merge_helpers.R](../R/merge_helpers.R) | Carries income and its CV into both vintages, inflation-adjusts 2016 dollar measures, and derives the income change ratio. This establishes downstream dependencies, not the desired censoring rule. |
+| [R/merge_helpers.R](../../R/merge_helpers.R) | Carries income and its CV into both vintages, inflation-adjusts 2016 dollar measures, and derives the income change ratio. This establishes downstream dependencies, not the desired censoring rule. |
 
 Task 03A established execution but could not establish the intended research
 rule from the repository. It corrected the documentation and preserved the
@@ -97,7 +97,7 @@ because rent is missing or top-coded. Its available source values and existing
 missingness are retained. No independent income-censoring rule was found in the
 project code, and no new income threshold or missing-value rule is introduced.
 
-The income correction in [censor_tc_vars()](../R/assemble_helpers.R) removed
+The income correction in [censor_tc_vars()](../../R/assemble_helpers.R) removed
 `med_hhincE = ifelse(rentE >= 2000000, NA, med_hhincE)`. The current shared helper retains only the separate lower-quartile assignment:
 
 ```r
@@ -110,7 +110,7 @@ contributions retain their existing `hhE * wt_hh` weights; missing source
 income is still omitted by `na.rm = TRUE`. An aggregate with all source incomes
 missing remains missing. The aggregation and CV formulas are unchanged.
 
-Median gross rent now uses the [source-evidence classification](../README.md#rent-metadata-migration);
+Median gross rent now uses the [source-evidence classification](../../schemas/acs_full.md#6-missingness-and-special-value-rules);
 this shared helper only censors lower-quartile rent at 3500. Median
 house value still receives its existing top-code flag at 2,000,000 without
 censoring the estimate. Other variables and derived-rent eligibility rules are
@@ -193,7 +193,7 @@ output schemas.
 
 ## Targeted validation
 
-Run the focused [regression script](../tests/test_income_censoring.R) from the
+Run the focused [regression script](../../tests/test_income_censoring.R) from the
 repository root:
 
 ```sh

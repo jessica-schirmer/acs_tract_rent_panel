@@ -1,13 +1,19 @@
 # Audit: 2024 rental housing unit aggregation
 
+**Historical audit — superseded missingness guidance.** This preserves the
+2026-09-11 checks and counts. The missing-dropping sums and low-rent-bin
+construction described below are no longer current; use the
+[current block-group schema](../../schemas/acs_step2_2024_block_group_aggregated.md)
+and [contributor QA guide](../qa_guide.md) for count completeness and inventory.
+
 Historical notebook references below describe `02_assemble.Rmd` before its split.
-Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_measures_from_block_groups.Rmd)
-(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../02b_build_measures_from_tracts.Rmd)
+Current successors are [02a_build_measures_from_block_groups.Rmd](../../02a_build_measures_from_block_groups.Rmd)
+(block-group aggregation, §2) and [02b_build_measures_from_tracts.Rmd](../../02b_build_measures_from_tracts.Rmd)
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
 Reviewed 2026-09-11 at commit `1e07d96`. Scope: renter **count estimates** in
-[02_assemble.Rmd](../02a_build_measures_from_block_groups.Rmd), from available block-group counts and
+[02_assemble.Rmd](../../02a_build_measures_from_block_groups.Rmd), from available block-group counts and
 crosswalk fractions through the saved 2010-tract counts. This assessment does
 not validate the separate rent statistics, share measures, or MOEs/CVs.
 
@@ -27,8 +33,8 @@ is occupied housing units. Renter occupancy includes units occupied without
 payment of rent and excludes vacant units available for rent. Thus this is an
 occupied-rental count, rather than the entire rental inventory or a year-end
 2024 census. The variable mapping and period appear in
-[01_acs.Rmd](../01_import_acs.Rmd#22-specify-variables-to-extract) and its
-[2024 extraction](../01_import_acs.Rmd#41-download-2024-acs-block-group-estimates).
+[01_acs.Rmd](../../01_import_acs.Rmd#22-specify-variables-to-extract) and its
+[2024 extraction](../../01_import_acs.Rmd#41-download-2024-acs-block-group-estimates).
 ([Census B25003](https://api.census.gov/data/2024/acs/acs5/groups/B25003.html),
 [Census tenure definitions](https://www2.census.gov/programs-surveys/acs/tech_docs/subject_definitions/2024_ACSSubjectDefinitions.pdf).)
 
@@ -36,7 +42,7 @@ Related rental counts use the same allocation arithmetic: `rhucashE` is
 `B25063_002E`; `grentcat1E`–`grentcat24E` are `B25063_003E`–`B25063_026E` cash-rent
 bins. `rhu_lrE` sums bins 1–18 (gross rent below $1,250), and `rhu_lr2E` sums
 bins 1–20 (below $2,000). These are cash-renter subsets, not all renters.
-([Source derivation](../01_import_acs.Rmd),
+([Source derivation](../../01_import_acs.Rmd),
 [Census B25063](https://api.census.gov/data/2024/acs/acs5/groups/B25063.html).)
 
 **Implemented calculation.** For source block group $b$, target tract $t$,
@@ -55,9 +61,9 @@ source's total across destinations. The supplied fraction is applied directly
 to the ACS count; there is no further division by a tract total. The crosswalk
 import only renames/selects columns.
 ([NHGIS weight definitions and method](https://www.nhgis.org/geographic-crosswalks),
-[crosswalk import](../01_import_acs.Rmd#61-crosswalk-2024-block-groups-to-2010-tracts).)
+[crosswalk import](../../01_import_acs.Rmd#61-crosswalk-2024-block-groups-to-2010-tracts).)
 
-[calc_agg_vars()](../R/assemble_helpers.R#L278) groups by `tr2010_id` and computes
+[calc_agg_vars()](../../R/assemble_helpers.R#L278) groups by `tr2010_id` and computes
 `rhuE_agg = sum(rhuE * wt_renthu, na.rm = TRUE)`, then renames it `rhuE`.
 The cash, low-rent, and bin counts use the same formula with their own source
 counts. `_agg` names prevent summary values from replacing source vectors
@@ -76,7 +82,7 @@ fractions explain why these counts differ.
 Selection uses the destination tract's state/county, preserving all matched
 sources allocating there, including sources outside the 14 target counties.
 Original fractions are not renormalized after destination filtering.
-[The notebook](../02a_build_measures_from_block_groups.Rmd) asserts unique source IDs, unique
+[The notebook](../../02a_build_measures_from_block_groups.Rmd) asserts unique source IDs, unique
 `(bg2020_id, tr2010_id)` pairs, no join multiplication, and exact fraction
 preservation. Later tract joins assert unique, fully matched tract keys.
 The cached IDs are character GEOIDs with the expected 12-/11-digit lengths.
@@ -94,8 +100,8 @@ contributions receives only the observed subtotal; one with all contributions
 missing receives zero. This can understate renter totals and makes missingness
 indistinguishable from a real zero. The low-rent source helper also uses
 `rowSums(..., na.rm = TRUE)`, so missing bins can already become partial/zero
-source counts. ([Count sums](../R/assemble_helpers.R#L311),
-[low-rent helper](../R/helpers.R#L23).)
+source counts. ([Count sums](../../R/assemble_helpers.R#L311),
+[low-rent helper](../../R/helpers.R#L23).)
 
 The retained cache contained **no missing, infinite, or negative** renter,
 cash-renter, no-cash-renter, low-rent, or rent-bin counts. Source cash plus
@@ -104,7 +110,7 @@ exactly. There were 470 source block groups with zero renter units and 52
 zero-renter destination tracts. Known zeros correctly contribute zero;
 undefined relative weights for a zero-total tract do not change its point
 count. Missing or censored **rent** does not remove renter **counts**:
-[censor_tc_vars()](../R/assemble_helpers.R#L265) leaves those counts unchanged.
+[censor_tc_vars()](../../R/assemble_helpers.R#L265) leaves those counts unchanged.
 
 **Conservation and reconciliation.** For complete counts,
 
@@ -132,7 +138,7 @@ the excluded allocation explains the total difference. Rounding errors are
 well within the notebook's `1e-6` source-fraction tolerance. All 5,513 saved
 values matched for each of `rhuE`, `rhucashE`, `rhu_lrE`, and `rhu_lr2E`.
 There is no unexplained systematic loss or inflation in these cached counts.
-The existing [tract reconciliation](../02a_build_measures_from_block_groups.Rmd) repeats the same
+The existing [tract reconciliation](../../02a_build_measures_from_block_groups.Rmd) repeats the same
 `na.rm = TRUE` formula; it alone cannot detect missing-count omission.
 
 **Panel comparability.** The earlier measure is the same `B25003_003E` universe
@@ -144,10 +150,10 @@ allocation error remains even when conservation is exact. Applying renter
 fractions to cash/low-rent subsets further assumes their distribution follows
 all renters within each source. Earlier low-rent thresholds are below $1,000
 and $1,500, versus $1,250 and $2,000 in 2024, so their intended real-threshold
-comparability is approximate. ([Earlier extraction](../01_import_acs.Rmd#31-download-2016-acs-tract-estimates),
-[shared variable mapping](../01_import_acs.Rmd#22-specify-variables-to-extract),
-[earlier preparation](../02a_build_measures_from_block_groups.Rmd),
-[threshold definitions](../schemas/acs_step1_2016_tract.md),
+comparability is approximate. ([Earlier extraction](../../01_import_acs.Rmd#31-download-2016-acs-tract-estimates),
+[shared variable mapping](../../01_import_acs.Rmd#22-specify-variables-to-extract),
+[earlier preparation](../../02a_build_measures_from_block_groups.Rmd),
+[threshold definitions](../../schemas/acs_step1_2016_tract.md),
 [2016 B25003](https://api.census.gov/data/2016/acs/acs5/groups/B25003.html).)
 
 **Recommended next step.** Retain the renter-count formula: it is correct for
@@ -172,7 +178,7 @@ the three Feathers were unchanged. This note is the only repository write.
 `acs_step1_2024_block_group.feather`, requires regeneration for the revised
 variable contract. Stage 2 now also consumes `acs_step1_2024_tract.feather` in
 its separate native-2020 tract path. This note's empirical findings
-refer to the original cached inputs. See the [migration and parity compatibility](../README.md#stage-1-input-migration).
+refer to the original cached inputs. See the [migration and parity compatibility](../../README.md#stage-1-input-migration).
 
 **Subsequent Step 2 inventory implementation (2026-09-12):** Both original products
 add `rhu_inventoryE` from renter-occupied, vacant-for-rent, and rented-not-occupied
@@ -188,4 +194,4 @@ and preserves shared-column checks. Synthetic tests passed; full execution,
 canonical output regeneration, and empirical inventory review remain analyst-run.
 
 The subsequently added 2024 tract-source inventory uses direct tract sums with
-the same missingness rule. See the [current output names and separate validation](../README.md#stage-2-output-naming-and-references).
+the same missingness rule. See the [current output names and separate validation](../../README.md#stage-2-output-naming-and-references).
