@@ -112,6 +112,10 @@ duplicate GEOIDs and inconsistent rent/status/flag/bound bundles. Bounds are
 $4,574.50 for baseline and $3,500 for later rent; flags determine top-coding,
 so a genuine observed $3,500 later rent remains usable.
 
+Source/status and join-coverage summaries explicitly use `dplyr::count()` because
+`matrixStats`, loaded by earlier notebooks, also defines `count()` and can mask
+it in a shared R session.
+
 ```{r load-panel}
 if (!file.exists(panel_path)) stop("Canonical panel not found: ", panel_path, ". Run notebook 4 separately.")
 panel <- arrow::read_feather(panel_path, col_select = all_of(map_panel_columns))
@@ -127,7 +131,7 @@ print(county_panel |>
     min = ~ if (all(is.na(.x))) NA_real_ else min(.x, na.rm = TRUE),
     max = ~ if (all(is.na(.x))) NA_real_ else max(.x, na.rm = TRUE)
   ))), width = Inf)
-print(count(county_panel, acs_source_24, rent_status_16, rent_status_24, name = "tracts"), n = Inf)
+print(dplyr::count(county_panel, acs_source_24, rent_status_16, rent_status_24, name = "tracts"), n = Inf)
 ```
 
 # 3. Load tract boundaries and join rent data
@@ -157,7 +161,7 @@ coverage <- joined$coverage
 cat("Left join:", nrow(boundaries), "polygons ->", nrow(mapped), "rows; expected no multiplication or loss.\n")
 coverage_counts <- coverage |>
   mutate(coverage = factor(coverage, levels = c("matched", "boundary_only", "panel_only"))) |>
-  count(coverage, name = "tracts", .drop = FALSE)
+  dplyr::count(coverage, name = "tracts", .drop = FALSE)
 print(coverage_counts)
 for (direction in c("boundary_only", "panel_only")) {
   unmatched <- filter(coverage, coverage == direction) |> select(tr2010_id)

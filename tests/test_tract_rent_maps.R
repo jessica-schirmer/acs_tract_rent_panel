@@ -4,6 +4,7 @@ suppressPackageStartupMessages({
   library(here)
   library(arrow)
   library(dplyr)
+  library(matrixStats)
   library(tibble)
   library(sf)
   library(ggplot2)
@@ -318,8 +319,9 @@ grDevices::png(file.path(temporary, "synthetic_inline.png"), width = 1400, heigh
                type = if (capabilities("aqua")) "quartz" else "cairo")
 tryCatch({
   for (label in chunks) {
-    quiet(eval(notebook_chunk(label), env))
+    result <- quiet(eval(notebook_chunk(label), env))
     if (label == "load-packages") {
+      stopifnot(identical(get("count", envir = env), matrixStats::count))
       env$draw_paired_maps <- local({
         draw <- get("draw_paired_maps", envir = env)
         function(mapped, county_label, synthetic = FALSE, hover = FALSE) {
@@ -332,12 +334,30 @@ tryCatch({
       env$boundary_cache_dir <- cache_dir
       env$output_stem <- file.path(temporary, "synthetic_notebook")
     }
+    if (label == "load-panel") {
+      stopifnot(identical(env$panel, panel), identical(env$county_panel, selected),
+                sum(result$tracts) == nrow(selected))
+    }
   }
 }, finally = grDevices::dev.off())
 stopifnot(nrow(env$mapped) == 12, nrow(env$plot_data) == 11, env$omitted_water_only_count == 1,
           identical(env$status_counts$change, c(4L, 3L, 4L)), all(file.exists(env$export_paths)),
+          identical(as.character(env$coverage_counts$coverage), c("matched", "boundary_only", "panel_only")),
+          identical(env$coverage_counts$tracts, c(11L, 1L, 1L)),
           length(env$export_paths) == 3L, endsWith(env$html_path, ".html"))
 cat("Passed: parsing, contiguous sections, and every notebook chunk on synthetic Feather/2010 boundaries.\n")
+
+# Reuse the synthetic cache with no panel-only tracts; retain the zero-count category.
+diagnostic_env <- new.env(parent = env)
+diagnostic_env$county_panel <- filter(selected, tr2010_id %in% boundaries$tr2010_id)
+county_panel_before <- diagnostic_env$county_panel
+stopifnot(identical(get("count", envir = diagnostic_env), matrixStats::count))
+quiet(eval(notebook_chunk("boundaries-and-join"), diagnostic_env))
+stopifnot(identical(diagnostic_env$county_panel, county_panel_before),
+          identical(as.character(diagnostic_env$coverage_counts$coverage),
+                    c("matched", "boundary_only", "panel_only")),
+          identical(diagnostic_env$coverage_counts$tracts, c(11L, 1L, 0L)))
+cat("Passed: notebook diagnostic counts with matrixStats masking count, unchanged inputs, and zero-count coverage categories.\n")
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args)) {
