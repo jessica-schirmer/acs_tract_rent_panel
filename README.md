@@ -3,8 +3,9 @@
 Constructs comparable census-tract measures of rent, rental housing inventory, and neighborhood characteristics from the 2012–2016 and 2020–2024 American Community Survey. Addresses changes in tract boundaries by retaining native tract estimates where geography is unchanged and allocating block-group measures to 2010 tract boundaries elsewhere. The resulting panel covers 14 counties in Southern California and the Bay Area and supports static and interactive maps of rent levels and change.
 
 
-![Baseline rent and rent change in Alameda County](outputs/figures/tract_rent_baseline_and_change_alameda.html)
+[![Baseline rent and rent change in Alameda County](outputs/figures/tract_rent_baseline_and_change_alameda.png)](https://jessica-schirmer.github.io/acs_tract_rent_panel/outputs/figures/tract_rent_baseline_and_change_alameda.html)
 
+*Click the map to open the interactive version with tract hover labels.*
 <a id="setup"></a>
 
 ## Getting started
