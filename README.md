@@ -328,12 +328,12 @@ against regenerated inputs.
 Output schemas linked above are the current contracts, including methods,
 diagnostics, focused validation, and analyst-run regeneration procedures.
 The [crosswalk/contributor QA guide](docs/qa_guide.md) explains coverage limits;
-the [hardening record](docs/step1_step2_bg_qa_hardening_plan.md) and
-[measure-cleanup record](docs/measure_cleanup.md) document earlier changes.
+the [measure-cleanup record](docs/measure_cleanup.md) documents earlier field
+removals.
 
 Some supporting prose remains stale: the QA guide permits interpolation with
-a missing later bin, and the hardening record retains older rent-share/flag
-semantics. Use the current block-group schema's complete-distribution rules.
+a missing later bin. Use the current block-group schema's
+complete-distribution rules.
 Step 3's overview still describes diagnostic-only downstream use; Step 4 and
 the panel schema establish its role in canonical source selection. Historical
 consumer-migration instructions in the cleanup record should be read alongside

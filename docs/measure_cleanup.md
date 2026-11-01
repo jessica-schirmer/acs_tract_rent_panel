@@ -1,8 +1,8 @@
 # ACS measure cleanup
 
-Implemented 2026-09-17 from `task_spec_02_cleanup.md` and the analyst's scope
-clarifications: remove block-group weighted dollar estimates **except median
-household income**, remove house-value-only diagnostics, keep native tract
+Implemented 2026-09-17 following the analyst's scope decisions: remove
+block-group weighted dollar estimates **except median household income**,
+remove house-value-only diagnostics, keep native tract
 products and existing 2016 native panel fields, and defer analysis-consumer
 migration to a separate task. Canonical data files were not regenerated.
 
@@ -67,9 +67,9 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
   tests intentionally name retired fields. Current schemas describe these
   names only as migration/removal entries, except when documenting retained
   native/source estimates.
-- Dated audits, session logs, notes, and archived task specifications remain
-  historical records. In particular, the block-group aggregation audit,
-  rent-weighting/rental-unit audits, interpolation validation note, and income
+- Dated audits and methodological notes remain historical records. In
+  particular, the block-group aggregation audit, rent-weighting/rental-unit
+  audits, interpolation validation note, and income
   correction note describe the pre-cleanup schema where applicable. Their
   old weighted-rent/value and low-rent references are not current contracts.
   This record and the current schemas supersede those output descriptions.
@@ -83,12 +83,12 @@ are also removed. `diag_rentPOST_24_bg_agg` is no longer constructed.
 | Tests | [test_income_censoring.R](../tests/test_income_censoring.R), [test_rental_inventory.R](../tests/test_rental_inventory.R), [test_merge_diagnostics.R](../tests/test_merge_diagnostics.R) |
 | Step 1 schemas | [2016 tract](../schemas/acs_step1_2016_tract.md), [2024 block group](../schemas/acs_step1_2024_block_group.md), [2024 tract](../schemas/acs_step1_2024_tract.md) |
 | Step 2/panel schemas | [2016 tract](../schemas/acs_step2_2016_tract.md), [2024 block group](../schemas/acs_step2_2024_block_group_aggregated.md), [2024 tract](../schemas/acs_step2_2024_tract.md), [acs_full](../schemas/acs_full.md) |
-| Documentation | [README](../README.md), [shared PIPELINE](../../../PIPELINE.md), [pending hardening plan](step1_step2_bg_qa_hardening_plan.md), this cleanup record |
+| Documentation | [README](../README.md), [shared PIPELINE](../../../PIPELINE.md), this cleanup record |
 
 Existing working-tree edits and schema renames are preserved. Step 3, source
 data, dependencies, and separate analysis repositories are unchanged. The
-pending QA-hardening plan now refers to the reduced schema; its proposed
-missingness/completeness changes have not been implemented here.
+missingness/completeness hardening was a separate task; this record describes
+the earlier measure cleanup.
 
 ## Validation and analyst follow-up
 

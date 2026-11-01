@@ -1,8 +1,7 @@
 # Publication-readiness audit — 2026-10-31
 
-Audit requested in [task_spec_06_audit.md](../task_spec_06_audit.md). The intended
-public workflow is Steps 1–4 followed by the baseline-rent and rent-change maps
-in Step 5; the ADU-supply map is postponed.
+The intended public workflow is Steps 1–4 followed by the baseline-rent and
+rent-change maps in Step 5; the ADU-supply map is postponed.
 
 Preserving meaningful Git history looks reasonably straightforward after
 targeted credential cleanup and owner review of downstream diagnostic data.
@@ -14,6 +13,13 @@ The audit was read-only. This report was saved afterward at the analyst's
 request; no remediation, history changes, dependency installation, credential
 rotation, pipeline execution, or output regeneration was performed. Findings
 and line references describe the audited snapshot, not a subsequent re-audit.
+
+**Subsequent local history cleanup:** The identified credential was redacted
+from retained history, and internal task specs, prompts, the rent-missingness
+session log, and the QA-hardening plan were removed. The latter two removals
+were explicitly selected by the owner. Commit identifiers below describe the
+pre-cleanup history retained in the private backup. Credential revocation and
+downstream diagnostic sharing remain separate owner decisions.
 
 The confirmed findings are:
 

@@ -6,8 +6,8 @@ Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_m
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
-**Audit date:** 2026-09-15. **Authority:** the intended list in
-[task_spec_03_agg_audit.md](../task_spec_03_agg_audit.md).
+**Audit date:** 2026-09-15. **Authority:** the analyst's intended estimates,
+recorded in the [reconciliation table below](#b1-every-intended-estimate).
 **Product:** `../../../data/acs_step2_2024_block_group_aggregated.feather`,
 2020–2024 ACS block groups allocated to `tr2010_id` (2010 tracts).
 

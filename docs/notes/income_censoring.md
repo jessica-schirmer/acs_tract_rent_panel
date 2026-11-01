@@ -6,10 +6,10 @@ Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_m
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
-**Status:** Implemented following the analyst's decision in
-[task_spec_04_confirm_plan.md](../task_spec_04_confirm_plan.md) and subsequent
-authorization to implement the plan. Median household income is retained
-independently of missing or top-coded rent. Production outputs have not been
+**Status:** Implemented following the
+[analyst decision documented below](#analyst-decision-and-implementation).
+Median household income is retained independently of missing or top-coded
+rent. Production outputs have not been
 written. The assembly parity checks now verify this approved correction against
 the preserved references. Cached-input assembly and complete Southern California
 difference-table validation passed; downstream panel/sample acceptance remains

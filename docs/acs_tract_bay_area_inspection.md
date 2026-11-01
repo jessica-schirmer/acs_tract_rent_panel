@@ -6,7 +6,8 @@ Current successors are [02a_build_measures_from_block_groups.Rmd](../02a_build_m
 (native tract preparation, §§2–3). Historical section/line numbers and findings
 are retained; successor links do not imply that those line numbers still apply.
 
-Inspection date: 2026-09-11. Scope: [task_spec_01_inspect.md](../task_spec_01_inspect.md).
+Inspection date: 2026-09-11. Scope: extending the ACS tract assembly pipeline
+from Southern California to Southern California plus the Bay Area.
 
 The recommendation is to **lightly parameterize the existing R pipeline, then
 extend it**. The Bay Area inputs are already cached, but geographic filtering
