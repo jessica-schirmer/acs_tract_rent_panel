@@ -9,6 +9,8 @@ Assembly covers five Southern California and nine Bay Area counties; the
 ACS imports and the tract-consistency crosswalk are statewide. Downstream
 analysis stages apply their own sample restrictions; see the
 [shared pipeline](../../PIPELINE.md).
+Notebook 5 demonstrates the cleaned rent measures with paired static maps,
+independent of parcel data and downstream analysis samples.
 
 ## Notebook overview
 
@@ -26,6 +28,10 @@ analysis stages apply their own sample restrictions; see the
 - [04_assemble_tract_panel.Rmd](04_assemble_tract_panel.Rmd) combines all three Step 2 products and the Step 3
   crosswalk, selects 2024 measurements by geographic consistency, and calculates
   panel changes and source comparisons.
+- [05_map_tract_rents.ipynb](05_map_tract_rents.ipynb) maps baseline monthly gross
+  rent and subsequent real percentage change on 2010 tracts, with explicit
+  top-coded and unavailable display statuses. It reads the saved Step 4 panel;
+  Alameda County is the default.
 
 <a id="stage-1-input-migration"></a>
 
@@ -202,6 +208,53 @@ Canonical `interp_rent` is the native median gross rent for consistent tracts
 and the block-group distribution interpolation elsewhere. `interp_rentPOST`
 divides it by positive, inflation-adjusted `rentE_16`. Income/uncertainty
 weighting limitations are documented in the [panel schema](schemas/acs_full.md#8-known-limitations--intentional-exceptions).
+
+## Step 5: Map baseline rent and real change
+
+Notebook: [05_map_tract_rents.ipynb](05_map_tract_rents.ipynb). Produce paired
+static maps of 2012–2016 monthly median gross rent and its percentage change to
+2020–2024, using canonical rents already expressed in 2024 dollars. Select a
+county in the configuration cell; no parcel, ADU, CV, or model-sample filters apply.
+
+**Inputs:**
+
+- `../../../data/acs_full.feather` — canonical 2010-tract panel; `rentE_16`,
+  `interp_rent`, `interp_rentPOST`, and their geographic/rent quality fields.
+- [Census 2010 TIGER/Line county tract ZIP](https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_06001_tract10.zip)
+  — default Alameda boundaries, cached at
+  `outputs/cache/tiger2010/tl_2010_06001_tract10.zip`; other county filenames use
+  the configured state/county FIPS. The notebook documents source vintage and fields.
+
+**Outputs:**
+
+- `outputs/figures/tract_rent_baseline_and_change_alameda.png` — paired maps
+  for the repository example.
+- `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent
+  vector figure. Both filename suffixes follow the configured county name.
+- Inline figure and validation tables; the original boundary ZIP is cached,
+  with no intermediate dataset written.
+
+**Steps:**
+
+1. Configure project-relative inputs, county, projection, and output paths.
+2. Validate wide-panel keys, canonical rent metadata, and the selected county.
+3. Cache 2010 boundaries, join one-to-one, and report unmatched GEOIDs in both directions.
+4. Derive percentage changes and classify each polygon as a value, top-coded, or unavailable.
+5. Display and export paired maps with full-range scales and shared extents.
+6. Reconcile tract/join/status counts, inspect value ranges, and confirm both exports.
+
+Use a Python 3.10+ kernel with [requirements.txt](requirements.txt); helpers live
+in [tract_rent_maps.py](tract_rent_maps.py). Notebook cells do not install packages.
+Existing figures require `overwrite_figures = True` to replace them. The analyst
+runs notebook 5 against the real panel and reviews its final acceptance checks.
+The inexpensive offline check is
+`python tests/test_tract_rent_maps.py --preview-dir /tmp/acs_tract_map_preview`;
+its explicitly synthetic preview must not replace the empirical example below.
+
+The Alameda example becomes available after the analyst runs notebook 5 with
+the default county and generates the PNG:
+
+![Alameda County: baseline monthly gross rent and inflation-adjusted percentage change](outputs/figures/tract_rent_baseline_and_change_alameda.png)
 
 ## Rent metadata migration
 
