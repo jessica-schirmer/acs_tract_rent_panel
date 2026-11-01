@@ -127,6 +127,7 @@ def cache_boundaries(cache_dir, county_fips):
 
 
 def load_boundaries(path, county_fips, map_crs="EPSG:3310"):
+    """Retain every tract and its source areas; absent area fields stay unknown."""
     county_scope(county_fips)
     validate_boundary_archive(path, county_fips)
     tracts = gpd.read_file(f"zip://{Path(path).resolve()}", engine="fiona")
@@ -142,7 +143,9 @@ def load_boundaries(path, county_fips, map_crs="EPSG:3310"):
             or not tracts.geometry.is_valid.all()
             or not tracts.geom_type.isin(["Polygon", "MultiPolygon"]).all()):
         raise ValueError("Boundary geometry needs analyst review; no polygons were dropped or repaired")
-    tracts = tracts[["GEOID10", "geometry"]].rename(columns={"GEOID10": "tr2010_id"})
+    tracts = tracts.reindex(columns=["GEOID10", "ALAND10", "AWATER10", "geometry"]).rename(
+        columns={"GEOID10": "tr2010_id"},
+    )
     tracts["tr2010_id"] = tracts["tr2010_id"].astype("string")
     tracts = tracts.to_crs(map_crs)
     if not tracts.crs.is_projected:
@@ -206,7 +209,7 @@ def display_summary(mapped):
 
 
 def draw_paired_maps(mapped, county_label, *, synthetic=False):
-    """Draw the full observed ranges; use shared extents and a zero-centered scale."""
+    """Use the supplied plotting frame for every layer, count, range, and extent."""
     if mapped.empty or mapped.crs is None or not mapped.crs.is_projected:
         raise ValueError("Maps require nonempty projected boundaries")
     counts, _ = display_summary(mapped)
@@ -284,7 +287,8 @@ def draw_paired_maps(mapped, county_label, *, synthetic=False):
             "Later rent uses native tract medians on unchanged geography; elsewhere, block-group rent distributions are allocated to 2010 tracts.\n"
             "Top-coded: baseline period at left; either period at right (including cases also missing the other period). Other unavailable tracts remain gray.\n"
             "Change requires positive rents in both periods. Baseline dollars already include the pipeline’s 1.307 inflation factor; no further adjustment.\n"
-            f"Full value ranges shown; no trimming or CV/sample filters. Projection: {mapped.crs.to_string()}."
+            "Confirmed water-only tracts omitted from display. Full ranges; no trimming or CV/sample filters. "
+            f"Projection: {mapped.crs.to_string()}."
         )
         fig.text(0.055, 0.115, notes, va="top", fontsize=8.5, color="#4b5563", linespacing=1.5)
     return fig, axes

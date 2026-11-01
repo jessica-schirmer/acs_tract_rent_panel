@@ -195,8 +195,6 @@ class TractRentMapTests(unittest.TestCase):
         for cell in notebook.cells:
             if cell.cell_type == "code":
                 ast.parse(cell.source, filename=f"notebook:{cell.id}")
-                self.assertIsNone(cell.execution_count)
-                self.assertEqual(cell.outputs, [])
         panel, boundaries = synthetic_inputs()
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)

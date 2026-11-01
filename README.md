@@ -215,6 +215,9 @@ Notebook: [05_map_tract_rents.ipynb](05_map_tract_rents.ipynb). Produce paired
 static maps of 2012–2016 monthly median gross rent and its percentage change to
 2020–2024, using canonical rents already expressed in 2024 dollars. Select a
 county in the configuration cell; no parcel, ADU, CV, or model-sample filters apply.
+Only the plotting frame omits confirmed water-only tracts (`ALAND10 == 0` and
+`AWATER10 > 0`). The full join retains every tract; tracts containing land or
+missing either area attribute remain displayed with their existing rent statuses.
 
 **Inputs:**
 
@@ -231,17 +234,18 @@ county in the configuration cell; no parcel, ADU, CV, or model-sample filters ap
   for the repository example.
 - `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent
   vector figure. Both filename suffixes follow the configured county name.
-- Inline figure and validation tables; the original boundary ZIP is cached,
-  with no intermediate dataset written.
+- Inline figure, full-join validation, displayed status counts, and a separate
+  omitted water-only count; the original boundary ZIP is cached, with no
+  intermediate dataset written.
 
 **Steps:**
 
 1. Configure project-relative inputs, county, projection, and output paths.
 2. Validate wide-panel keys, canonical rent metadata, and the selected county.
 3. Cache 2010 boundaries, join one-to-one, and report unmatched GEOIDs in both directions.
-4. Derive percentage changes and classify each polygon as a value, top-coded, or unavailable.
-5. Display and export paired maps with full-range scales and shared extents.
-6. Reconcile tract/join/status counts, inspect value ranges, and confirm both exports.
+4. Derive percentage changes and display statuses, then omit confirmed water-only tracts from a separate plotting frame.
+5. Use the plotting frame for all map layers, status counts, full-range scales, and shared extents; export both panels.
+6. Reconcile full-join, displayed, and omitted counts; inspect plotted ranges and confirm both exports.
 
 Use a Python 3.10+ kernel with [requirements.txt](requirements.txt); helpers live
 in [tract_rent_maps.py](tract_rent_maps.py). Notebook cells do not install packages.
