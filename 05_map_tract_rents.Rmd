@@ -1,0 +1,288 @@
+---
+title: "ACS Step 5 — Map baseline gross rent and real change"
+author: "Jessica Schirmer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = FALSE, message = TRUE,
+                     fig.width = 14, fig.height = 9, dpi = 150)
+```
+
+## Notebook Overview
+
+Map monthly median **gross rent** from the 2012–2016 ACS beside its real
+percentage change to 2020–2024. This native R stage follows
+[04_assemble_tract_panel.Rmd](04_assemble_tract_panel.Rmd); Alameda County is
+the default, and both panels use 2010 tract geography.
+
+**Inputs:**
+
+- `../../../data/acs_full.feather` — canonical wide panel, one row per
+  `tr2010_id`; see the [panel schema](schemas/acs_full.md).
+- Census 2010 TIGER/Line county tract ZIP. Alameda's
+  [tl_2010_06001_tract10.zip](https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_06001_tract10.zip)
+  is reused or downloaded to `outputs/cache/tiger2010/tl_2010_06001_tract10.zip`.
+- [R/tract_rent_maps.R](R/tract_rent_maps.R) — validation, cache, and plotting
+  helpers. R dependencies are recorded in [renv.lock](renv.lock).
+
+**Outputs** (the suffix follows the configured county):
+
+- `outputs/figures/tract_rent_baseline_and_change_alameda.png` — paired static maps.
+- `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent vector figure.
+- Inline figure, join coverage/unmatched GEOIDs, displayed status counts/ranges,
+  and a separate omitted water-only count. No intermediate dataset is saved.
+
+**Steps:**
+
+1. Configure inputs and map scope.
+2. Load and validate the ACS panel.
+3. Load tract boundaries and join rent data.
+4. Prepare map measures and plotting data.
+5. Draw and save the paired maps.
+6. Summarize validation.
+
+The first uncached run downloads the county's public boundary ZIP. Packages
+are managed outside this notebook; see the [execution instructions](README.md#step-5-map-baseline-rent-and-real-change).
+Full real-data rendering and review belong to the analyst. The
+[focused R check](tests/test_tract_rent_maps.R) uses synthetic data.
+
+# 1. Configure inputs and map scope
+
+Use `here::here()` to anchor paths to this repository. Select a three-character
+county FIPS from the panel's 14-county universe. Both maps use California
+Albers, EPSG:3310, and the same extent. `overwrite_figures <- TRUE` explicitly
+enables replacement of both existing exports; every write is announced.
+
+```{r load-packages, message=FALSE}
+library(here)
+library(arrow)
+library(dplyr)
+library(tibble)
+library(sf)
+library(ggplot2)
+library(patchwork)
+library(digest)
+library(RColorBrewer)
+
+source(here::here("R", "tract_rent_maps.R"))
+cat(R.version.string, "| sf", as.character(packageVersion("sf")),
+    "| ggplot2", as.character(packageVersion("ggplot2")),
+    "| patchwork", as.character(packageVersion("patchwork")), "\n")
+```
+
+```{r configuration}
+county_fips <- "001"
+overwrite_figures <- TRUE
+map_crs <- "EPSG:3310"
+panel_path <- here::here("..", "..", "..", "data", "acs_full.feather")
+boundary_cache_dir <- here::here("outputs", "cache", "tiger2010")
+figure_dir <- here::here("outputs", "figures")
+county <- county_scope(county_fips)
+output_stem <- file.path(figure_dir, paste0("tract_rent_baseline_and_change_", county$suffix))
+cat("Scope:", county$name, "County, California (", paste0("06", county_fips), ")\n",
+    "Canonical input:", panel_path, "\nFigure outputs:", paste0(output_stem, ".{png,pdf}"), "\n")
+print(map_counties)
+```
+
+# 2. Load and validate the ACS panel
+
+### Decision: Use canonical gross rents in their existing 2024 dollars
+
+`rentE_16` is baseline monthly median gross rent, already multiplied by exactly
+**1.307** in notebook 4. `interp_rent` is the selected 2024 native tract median
+on consistent geography, or the median interpolated from allocated block-group
+rent distributions elsewhere. Apply no further inflation adjustment.
+`interp_rentPOST` is the later/baseline ratio, not a percentage.
+
+Validate the full wide panel before county selection. Reject damaged or
+duplicate GEOIDs and inconsistent rent/status/flag/bound bundles. Bounds are
+$4,574.50 for baseline and $3,500 for later rent; flags determine top-coding,
+so a genuine observed $3,500 later rent remains usable.
+
+```{r load-panel}
+if (!file.exists(panel_path)) stop("Canonical panel not found: ", panel_path, ". Run notebook 4 separately.")
+panel <- arrow::read_feather(panel_path, col_select = all_of(map_panel_columns))
+validate_map_panel(panel)
+panel_count <- nrow(panel)
+county_panel <- filter(panel, startsWith(tr2010_id, paste0("06", county_fips)))
+cat("Panel loaded:", panel_count, "unique tracts; county selection:", nrow(county_panel), "retained.\n",
+    "Expected: county subset only, one row per tract, no sample or quality filtering.\n")
+if (!nrow(county_panel)) cat("REVIEW: no canonical rows for this county; every boundary will be unavailable.\n")
+print(county_panel |>
+  summarise(across(c(rentE_16, interp_rent, interp_rentPOST), list(
+    count = ~ sum(!is.na(.x)),
+    min = ~ if (all(is.na(.x))) NA_real_ else min(.x, na.rm = TRUE),
+    max = ~ if (all(is.na(.x))) NA_real_ else max(.x, na.rm = TRUE)
+  ))), width = Inf)
+print(count(county_panel, acs_source_24, rent_status_16, rent_status_24, name = "tracts"), n = Inf)
+```
+
+# 3. Load tract boundaries and join rent data
+
+### Decision: Retain the full county boundary frame on 2010 geography
+
+Reuse the original Census ZIP, checking its required shapefile members and
+checksums; invalid cached files stop execution and are never silently replaced.
+Each run prints its source URL and SHA-256. The 2010 record fields `GEOID10`,
+`STATEFP10`, and `COUNTYFP10` identify the tract/county, while `ALAND10` and
+`AWATER10` give land/water area in square meters. Missing areas stay unknown.
+Geometry is validated and projected without dropping, repairing, or clipping
+tracts. Current/2020 boundaries cannot replace these 2010 polygons.
+
+The one-to-one left join retains every boundary. Boundary-only records become
+unavailable; panel-only records cannot be mapped. Report exact unmatched IDs
+in both directions for analyst review before publishing.
+
+```{r boundaries-and-join}
+boundary_path <- cache_boundaries(boundary_cache_dir, county_fips)
+boundaries <- load_boundaries(boundary_path, county_fips, map_crs)
+cat("2010 county boundaries:", nrow(boundaries), "rows; retained after projection:", nrow(boundaries), ".\n")
+joined <- join_panel_to_boundaries(boundaries, county_panel)
+mapped <- joined$mapped
+coverage <- joined$coverage
+cat("Left join:", nrow(boundaries), "polygons ->", nrow(mapped), "rows; expected no multiplication or loss.\n")
+coverage_counts <- coverage |>
+  mutate(coverage = factor(coverage, levels = c("matched", "boundary_only", "panel_only"))) |>
+  count(coverage, name = "tracts", .drop = FALSE)
+print(coverage_counts)
+for (direction in c("boundary_only", "panel_only")) {
+  unmatched <- filter(coverage, coverage == direction) |> select(tr2010_id)
+  cat(direction, ":", nrow(unmatched), "\n")
+  if (nrow(unmatched)) print(unmatched, n = Inf) else cat("(none)\n")
+}
+if (any(coverage_counts$tracts[coverage_counts$coverage != "matched"] > 0)) {
+  cat("REVIEW: explain unmatched IDs before publishing; panel-only records are absent from the maps.\n")
+}
+```
+
+# 4. Prepare map measures and plotting data
+
+### Decision: Preserve top-code precedence and positive-rent change eligibility
+
+Color finite observed baseline rent, including a valid zero. Change requires
+finite, strictly positive observed rents in **both** periods and equals
+`100 * (interp_rent / rentE_16 - 1)`. No demeaning, quantiles, CV thresholds,
+parcel/ADU fields, or downstream sample restrictions enter the maps.
+
+| Display | Baseline | Change |
+|---|---|---|
+| Colored value | Observed nonnegative baseline rent | Observed positive rents in both periods |
+| Top-coded, hatched cream | Confirmed baseline top-code | Confirmed top-code in either period |
+| Missing / unavailable, gray | Other unavailable baseline or no panel row | Other unavailable/zero rent in either period or no panel row |
+
+Confirmed top-coding takes precedence even if the other period is unavailable.
+`unavailable_other` and `unresolved` have no numeric rent or confirmed flag.
+Diagonal hatching is drawn with `sf` lines clipped to top-coded polygons,
+preserving polygon holes; no additional pattern package is required.
+
+### Decision: Omit confirmed water-only tracts only from plotting
+
+Keep `mapped` intact. Omit from `plot_data` only tracts with known
+`ALAND10 == 0` and `AWATER10 > 0`. Missing areas never qualify, and every
+land-containing tract remains. Both panels, all outlines, their common extent,
+status counts, and ranges use this same plotting frame. Report omissions
+separately; do not hardcode any GEOID or remove individual polygon pieces.
+
+```{r prepare-display}
+mapped <- prepare_map_measures(mapped)
+known_area <- !is.na(mapped$ALAND10) & !is.na(mapped$AWATER10)
+water_only <- confirmed_water_only(mapped)
+plot_data <- mapped[!water_only, ]
+omitted_water_only_count <- sum(water_only)
+display <- display_summary(plot_data)
+status_counts <- display$counts
+plotted_ranges <- display$ranges
+cat("After preparing measures:", nrow(mapped), "full joined polygons; expected unchanged.\n",
+    "Plotting frame:", nrow(mapped), "->", nrow(plot_data), "tracts; omitted water-only:", omitted_water_only_count, "\n",
+    "Tracts with unknown land/water area retained:", sum(!known_area), "\n",
+    "Counts and ranges below describe displayed tracts only.\n")
+print(status_counts)
+print(plotted_ranges)
+valid_change <- mapped$change_status == "value"
+stopifnot(map_values_equal(mapped$rent_change_pct[valid_change],
+                          100 * (mapped$interp_rentPOST[valid_change] - 1), atol = 1e-10))
+```
+
+# 5. Draw and save the paired maps
+
+The sequential **YlGnBu** baseline scale spans the full observed range; the
+diverging **RdBu** change scale runs blue for decreases to red for increases,
+symmetrically around zero at the largest absolute change. There is no trimming.
+Pad a constant baseline only enough to draw its colorbar; use ±1% for all-zero
+change. A panel without eligible values says so and retains its status fills.
+Use identical EPSG:3310 extents with 2.5% padding and thin tract outlines.
+Export a 14 × 9-inch PNG at 220 dpi and a vector PDF, with no online basemap.
+
+```{r draw-and-save}
+maps <- draw_paired_maps(plot_data, paste0(county$name, " County, California"))
+map_layouts <- lapply(maps$panels, function(p) ggplot_build(p)$layout$panel_params[[1]])
+stopifnot(identical(map_layouts[[1]]$x_range, map_layouts[[2]]$x_range),
+          identical(map_layouts[[1]]$y_range, map_layouts[[2]]$y_range))
+print(maps$figure)
+export_paths <- save_paired_figure(maps$figure, output_stem, overwrite = overwrite_figures)
+```
+
+# 6. Summarize validation
+
+Reconcile panel coverage and the full boundary join, then reconcile displayed
+and omitted counts. Verify key uniqueness, unchanged retained rows, complete
+display statuses, and finite eligible values. Passing these checks does not
+replace the analyst's review of geography and the exported layout.
+
+```{r final-validation}
+stopifnot(!anyDuplicated(boundaries$tr2010_id), !anyNA(mapped$tr2010_id),
+  !anyDuplicated(mapped$tr2010_id), nrow(mapped) == nrow(boundaries),
+  identical(mapped$tr2010_id, boundaries$tr2010_id),
+  sum(coverage_counts$tracts[coverage_counts$coverage %in% c("matched", "boundary_only")]) == nrow(boundaries),
+  sum(coverage_counts$tracts[coverage_counts$coverage %in% c("matched", "panel_only")]) == nrow(county_panel),
+  !anyDuplicated(plot_data$tr2010_id), nrow(plot_data) + omitted_water_only_count == nrow(mapped),
+  identical(plot_data, mapped[!water_only, ]), !any(water_only[!known_area]),
+  all(mapped$tr2010_id[which(mapped$ALAND10 > 0)] %in% plot_data$tr2010_id),
+  all(colSums(status_counts[c("baseline", "change")]) == nrow(plot_data)))
+full_counts <- display_summary(mapped)$counts
+omitted_counts <- display_summary(mapped[water_only, ])$counts
+stopifnot(all(full_counts[c("baseline", "change")] - status_counts[c("baseline", "change")] ==
+                omitted_counts[c("baseline", "change")]))
+for (period in c("baseline", "change")) {
+  status <- mapped[[paste0(period, "_status")]]
+  value <- mapped[[if (period == "baseline") "baseline_rent" else "rent_change_pct"]]
+  stopifnot(all(status %in% map_display_statuses), !anyNA(status),
+            identical(status == "value", !is.na(value)), all(is.finite(value[status == "value"])))
+}
+either_top <- mapped$tc_flag_rent_16 %in% 1 | mapped$tc_flag_rent_24 %in% 1
+stopifnot(!any(mapped$baseline_status[mapped$tc_flag_rent_16 %in% 1] == "value"),
+  !any(mapped$change_status[either_top] == "value"),
+  all(mapped$rentE_16[valid_change] > 0 & mapped$interp_rent[valid_change] > 0),
+  all(mapped$baseline_status[mapped$panel_join == "left_only"] == "unavailable"),
+  all(mapped$change_status[mapped$panel_join == "left_only"] == "unavailable"),
+  all(file.exists(export_paths)), all(file.info(export_paths)$size > 0))
+cat("Panel:", panel_count, "rows; county:", nrow(county_panel), "\n",
+    "Boundaries / full join:", nrow(boundaries), "/", nrow(mapped), "\n",
+    "Displayed:", nrow(plot_data), "; omitted water-only:", omitted_water_only_count, "\n")
+print(coverage_counts)
+print(status_counts)
+print(plotted_ranges)
+print(tibble(export = export_paths, bytes = file.info(export_paths)$size))
+cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, status/count reconciliation, measure rules, and PNG/PDF export.\n")
+```
+
+**Analyst acceptance checks before publishing:**
+
+- Confirm the 2010 archive URL/hash and shared projection/extent, and explain
+  any unmatched GEOIDs. All land-containing and unknown-area tracts remain.
+- Confirm current notebook 4 inputs, unchanged 2024-dollar rents, and displayed
+  percentages agreeing with `100 * (interp_rentPOST - 1)` where eligible.
+- For unchanged Alameda inputs, use **361 joined, 360 displayed, one omitted**
+  as references: baseline **357 colored, 0 top-coded, 3 unavailable**; change
+  **316 colored, 42 top-coded, 2 unavailable**. These are acceptance references,
+  not assertions for other counties or input versions.
+- Inspect both PNG/PDF exports for readable titles, colorbars, legends, notes,
+  distinct hatched/gray statuses, and removal of the three western water-only
+  pieces. The README example must remain an empirical figure.
