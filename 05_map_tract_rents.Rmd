@@ -36,6 +36,8 @@ the default, and both panels use 2010 tract geography.
 
 - `outputs/figures/tract_rent_baseline_and_change_alameda.png` — paired static maps.
 - `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent vector figure.
+- `outputs/figures/tract_rent_baseline_and_change_alameda.html` — self-contained
+  paired maps with tract/value hover labels; open directly in a local browser.
 - Inline figure, join coverage/unmatched GEOIDs, displayed status counts/ranges,
   and a separate omitted water-only count. No intermediate dataset is saved.
 
@@ -45,7 +47,7 @@ the default, and both panels use 2010 tract geography.
 2. Load and validate the ACS panel.
 3. Load tract boundaries and join rent data.
 4. Prepare map measures and plotting data.
-5. Draw and save the paired maps.
+5. Draw and save the paired PNG/PDF maps and HTML hover version.
 6. Summarize validation.
 
 The first uncached run downloads the county's public boundary ZIP. Packages
@@ -58,7 +60,7 @@ Full real-data rendering and review belong to the analyst. The
 Use `here::here()` to anchor paths to this repository. Select a three-character
 county FIPS from the panel's 14-county universe. Both maps use California
 Albers, EPSG:3310, and the same extent. `overwrite_figures <- TRUE` explicitly
-enables replacement of both existing exports; every write is announced.
+enables replacement of existing PNG/PDF/HTML exports; every write is announced.
 
 ```{r load-packages, message=FALSE}
 library(here)
@@ -70,6 +72,9 @@ library(ggplot2)
 library(patchwork)
 library(digest)
 library(RColorBrewer)
+library(ggiraph)
+library(htmlwidgets)
+library(rmarkdown)
 
 source(here::here("R", "tract_rent_maps.R"))
 cat(R.version.string, "| sf", as.character(packageVersion("sf")),
@@ -87,7 +92,7 @@ figure_dir <- here::here("outputs", "figures")
 county <- county_scope(county_fips)
 output_stem <- file.path(figure_dir, paste0("tract_rent_baseline_and_change_", county$suffix))
 cat("Scope:", county$name, "County, California (", paste0("06", county_fips), ")\n",
-    "Canonical input:", panel_path, "\nFigure outputs:", paste0(output_stem, ".{png,pdf}"), "\n")
+    "Canonical input:", panel_path, "\nFigure outputs:", paste0(output_stem, ".{png,pdf,html}"), "\n")
 print(map_counties)
 ```
 
@@ -219,7 +224,7 @@ Pad a constant baseline only enough to draw its colorbar; use ±1% for all-zero
 change. A panel without eligible values retains its status counts and fills.
 Use identical EPSG:3310 extents with 2.5% padding and thin tract outlines.
 Export a 14 × 8-inch PNG at 220 dpi and a vector PDF, with no online basemap.
-Both exports use only this footnote; methodological explanations remain in
+All three exports use only this footnote; methodological explanations remain in
 the notebook sections above:
 
 > Source: U.S. Census Bureau, ACS 2012-2016 / 2020-2024; 2010 TIGER/Line tract boundaries.
@@ -231,6 +236,27 @@ stopifnot(identical(map_layouts[[1]]$x_range, map_layouts[[2]]$x_range),
           identical(map_layouts[[1]]$y_range, map_layouts[[2]]$y_range))
 print(maps$figure)
 export_paths <- save_paired_figure(maps$figure, output_stem, overwrite = overwrite_figures)
+```
+
+The HTML version reuses the same plotting data, projection, extents, scales,
+headings, and legends. Transparent polygons above the decorative layers provide
+hover labels for every part of each displayed tract, including top-coded and
+unavailable tracts. Labels contain only the full GEOID and that panel's value:
+baseline rent rounded to whole 2024 dollars, or real change to one decimal
+place with a plus sign for increases. Status labels replace numeric values for
+top-coded and unavailable observations; censoring bounds never appear as estimates.
+
+The two panels have separate hover identifiers and no linked highlighting,
+selection, zoom, or pan controls. Resizing scales the entire figure while
+preserving geographic proportions. `ggiraph` and `htmlwidgets` produce one
+self-contained HTML file using Pandoc; no server, network connection, or
+supporting asset folder is needed to open it locally.
+
+```{r hover-map}
+map_widget <- draw_paired_map_widget(plot_data, paste0(county$name, " County, California"))
+html_path <- save_paired_html(map_widget, output_stem, overwrite = overwrite_figures)
+export_paths <- c(export_paths, html_path)
+map_widget
 ```
 
 # 6. Summarize validation
@@ -274,7 +300,7 @@ print(coverage_counts)
 print(status_counts)
 print(plotted_ranges)
 print(tibble(export = export_paths, bytes = file.info(export_paths)$size))
-cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, status/count reconciliation, measure rules, and PNG/PDF export.\n")
+cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, status/count reconciliation, measure rules, and PNG/PDF/HTML export.\n")
 ```
 
 **Analyst acceptance checks before publishing:**
@@ -290,3 +316,7 @@ cat("Passed: tract uniqueness, one-to-one joins, display-only water exclusion, s
 - Inspect both PNG/PDF exports for readable titles, colorbars, legends, and the
   single source line, distinct hatched/gray statuses, and removal of the three
   western water-only pieces. The README example must remain an empirical figure.
+- Open the HTML locally and compare both panels with the PNG/PDF. Check numeric,
+  top-coded, and unavailable tooltips, including each part of multipart tracts
+  and areas crossed by hatching. Confirm panel-specific values, fixed extents,
+  proportional resizing, and absence of persistent or cross-panel selection.

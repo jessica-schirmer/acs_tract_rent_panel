@@ -11,6 +11,11 @@ suppressPackageStartupMessages({
   library(digest)
   library(RColorBrewer)
   library(knitr)
+  library(ggiraph)
+  library(htmlwidgets)
+  library(htmltools)
+  library(rmarkdown)
+  library(xml2)
 })
 source(here::here("R", "tract_rent_maps.R"))
 
@@ -211,6 +216,92 @@ stopifnot(identical(hashes, vapply(exports, function(path) digest(file = path, a
 cat("Passed: hatch holes, shared extent/all layers, full scales, empty/constant panels, PNG/PDF, and overwrite guard.\n")
 invisible(grDevices::dev.off())
 
+# Exercise every display status and multipart components with the same prepared frame.
+hover_data <- plot_data
+for (row in c(1, 4, 6)) {
+  bounds <- st_bbox(hover_data[row, ])
+  st_geometry(hover_data)[row] <- st_sfc(st_multipolygon(list(
+    unclass(box(bounds["xmin"], bounds["ymin"], 350)),
+    unclass(box(bounds["xmax"] - 350, bounds["ymax"] - 350, 350))
+  )), crs = 3310)
+}
+hover_before <- hover_data
+baseline_hover <- map_hover_data(hover_data, "baseline")
+change_hover <- map_hover_data(hover_data, "change")
+stopifnot(identical(hover_data, hover_before),
+  identical(st_geometry(baseline_hover), st_geometry(hover_data)),
+  !anyDuplicated(c(baseline_hover$map_data_id, change_hover$map_data_id)),
+  identical(baseline_hover$map_tooltip[1], "Tract GEOID: 06001000001<br>Baseline rent: $1,000 (2024 dollars)"),
+  identical(change_hover$map_tooltip[1:3], c(
+    "Tract GEOID: 06001000001<br>Inflation-adjusted rent change: +50.0%",
+    "Tract GEOID: 06001000002<br>Inflation-adjusted rent change: -30.0%",
+    "Tract GEOID: 06001000003<br>Inflation-adjusted rent change: 0.0%")),
+  endsWith(change_hover$map_tooltip[10], "+16.7%"),
+  endsWith(baseline_hover$map_tooltip[8], "$0 (2024 dollars)"),
+  endsWith(baseline_hover$map_tooltip[4], "Top-coded"),
+  endsWith(baseline_hover$map_tooltip[6], "Unavailable"),
+  endsWith(baseline_hover$map_tooltip[5], "$1,800 (2024 dollars)"),
+  endsWith(change_hover$map_tooltip[5], "Top-coded"),
+  endsWith(baseline_hover$map_tooltip[11], "Unavailable"),
+  endsWith(change_hover$map_tooltip[11], "Top-coded"))
+placeholders <- hover_data
+placeholders$baseline_rent[placeholders$baseline_status != "value"] <- 4574.5
+placeholders$rent_change_pct[placeholders$change_status != "value"] <- 99999
+stopifnot(identical(map_hover_data(placeholders, "baseline")$map_tooltip, baseline_hover$map_tooltip),
+          identical(map_hover_data(placeholders, "change")$map_tooltip, change_hover$map_tooltip))
+fractional_rent <- hover_data[1, ]
+fractional_rent$baseline_rent <- 1306.6
+stopifnot(endsWith(map_hover_data(fractional_rent, "baseline")$map_tooltip, "$1,307 (2024 dollars)"))
+
+hover_maps <- draw_paired_maps(hover_data, "Test County", synthetic = TRUE, hover = TRUE)
+static_maps <- draw_paired_maps(hover_data, "Test County", synthetic = TRUE)
+for (i in 1:2) {
+  interactive_build <- ggplot_build(hover_maps$panels[[i]])
+  static_build <- ggplot_build(static_maps$panels[[i]])
+  for (field in c("x_range", "y_range", "crs", "default_crs")) {
+    stopifnot(identical(interactive_build$layout$panel_params[[1]][[field]],
+                        static_build$layout$panel_params[[1]][[field]]))
+  }
+  stopifnot(identical(interactive_build$data[seq_along(static_build$data)], static_build$data))
+  overlay <- tail(hover_maps$panels[[i]]$layers, 1)[[1]]
+  stopifnot(identical(overlay$data$tr2010_id, hover_data$tr2010_id),
+            identical(overlay$aes_params$fill, "transparent"), is.na(overlay$aes_params$colour))
+}
+widget <- draw_paired_map_widget(hover_data, "Test County", synthetic = TRUE)
+stopifnot(widget$x$settings$zoom$min == 1, widget$x$settings$zoom$max == 1,
+  !widget$x$settings$zoom$default_on, widget$x$settings$select$type == "none",
+  !widget$x$settings$hover$reactive, !widget$x$settings$hover$linked,
+  all(c("selection", "zoom", "misc") %in% widget$x$settings$toolbar$hidden),
+  widget$x$settings$sizing$rescale, widget$x$settings$sizing$width == 1,
+  widget$sizingPolicy$browser$defaultWidth == "100%")
+svg <- read_xml(widget$x$html)
+stopifnot(sum(startsWith(xml_text(xml_find_all(svg, "//*[local-name()='text']")), "Source:")) == 1L)
+hit_targets <- xml_find_all(svg, "//*[@data-id]")
+target_ids <- xml_attr(hit_targets, "data-id")
+stopifnot(setequal(target_ids, c(baseline_hover$map_data_id, change_hover$map_data_id)),
+          !any(grepl(tract_id(12), target_ids, fixed = TRUE)))
+for (labels in list(baseline_hover, change_hover)) {
+  for (row in seq_len(nrow(labels))) {
+    nodes <- hit_targets[target_ids == labels$map_data_id[row]]
+    stopifnot(length(nodes) >= 1L,
+              all(xml_attr(nodes, "title") == as.character(htmlEscape(labels$map_tooltip[row]))))
+    if (st_geometry_type(labels)[row] == "MULTIPOLYGON") {
+      stopifnot(length(nodes) == length(st_geometry(labels)[[row]]))
+    }
+  }
+}
+html_export <- save_paired_html(widget, file.path(temporary, "synthetic_hover"))
+html_doc <- read_html(html_export)
+assets <- xml_attr(xml_find_all(html_doc, "//script[@src]"), "src")
+assets <- c(assets, xml_attr(xml_find_all(html_doc, "//link[@rel='stylesheet']"), "href"))
+stopifnot(all(startsWith(assets, "data:")),
+          !dir.exists(file.path(temporary, "synthetic_hover_files")),
+          identical(hashes, vapply(exports, function(path) digest(file = path, algo = "sha256"), "")))
+html_hash <- digest(file = html_export, algo = "sha256")
+expect_error(save_paired_html(widget, file.path(temporary, "synthetic_hover")), "Existing figure")
+stopifnot(identical(html_hash, digest(file = html_export, algo = "sha256")))
+cat("Passed: panel-specific hover labels/statuses, censored placeholders, unchanged static layers/extents, SVG targets, self-contained HTML, and overwrite guard.\n")
+
 # Execute the actual notebook chunks with only synthetic paths after configuration.
 lines <- readLines(here::here("05_map_tract_rents.Rmd"), warn = FALSE)
 headings <- grep("^# [0-9]+\\. ", lines, value = TRUE)
@@ -228,7 +319,9 @@ tryCatch({
     if (label == "load-packages") {
       env$draw_paired_maps <- local({
         draw <- get("draw_paired_maps", envir = env)
-        function(mapped, county_label) draw(mapped, "Test County", synthetic = TRUE)
+        function(mapped, county_label, synthetic = FALSE, hover = FALSE) {
+          draw(mapped, "Test County", synthetic = TRUE, hover = hover)
+        }
       })
     }
     if (label == "configuration") {
@@ -239,13 +332,15 @@ tryCatch({
   }
 }, finally = grDevices::dev.off())
 stopifnot(nrow(env$mapped) == 12, nrow(env$plot_data) == 11, env$omitted_water_only_count == 1,
-          identical(env$status_counts$change, c(4L, 3L, 4L)), all(file.exists(env$export_paths)))
+          identical(env$status_counts$change, c(4L, 3L, 4L)), all(file.exists(env$export_paths)),
+          length(env$export_paths) == 3L, endsWith(env$html_path, ".html"))
 cat("Passed: parsing, contiguous sections, and every notebook chunk on synthetic Feather/2010 boundaries.\n")
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args)) {
   stopifnot(length(args) == 2L, args[1] == "--preview-dir")
-  paths <- save_paired_figure(preview$figure, file.path(args[2], "synthetic_tract_rents"), overwrite = TRUE)
+  paths <- save_paired_figure(static_maps$figure, file.path(args[2], "synthetic_tract_rents"), overwrite = TRUE)
+  paths <- c(paths, save_paired_html(widget, file.path(args[2], "synthetic_tract_rents"), overwrite = TRUE))
   cat("Synthetic preview only:", paste(paths, collapse = ", "), "\n")
 }
 unlink(temporary, recursive = TRUE)

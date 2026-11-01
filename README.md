@@ -9,7 +9,7 @@ Assembly covers five Southern California and nine Bay Area counties; the
 ACS imports and the tract-consistency crosswalk are statewide. Downstream
 analysis stages apply their own sample restrictions; see the
 [shared pipeline](../../PIPELINE.md).
-Notebook 5 demonstrates the cleaned rent measures with paired static maps,
+Notebook 5 demonstrates the cleaned rent measures with paired static and HTML hover maps,
 independent of parcel data and downstream analysis samples.
 
 ## Notebook overview
@@ -31,7 +31,7 @@ independent of parcel data and downstream analysis samples.
 - [05_map_tract_rents.Rmd](05_map_tract_rents.Rmd) maps baseline monthly gross
   rent and subsequent real percentage change on 2010 tracts, with explicit
   top-coded and unavailable display statuses. It reads the saved Step 4 panel;
-  Alameda County is the default.
+  Alameda County is the default; the HTML version adds tract/value hover labels.
 
 <a id="stage-1-input-migration"></a>
 
@@ -212,7 +212,7 @@ weighting limitations are documented in the [panel schema](schemas/acs_full.md#8
 ## Step 5: Map baseline rent and real change
 
 Notebook: [05_map_tract_rents.Rmd](05_map_tract_rents.Rmd). Produce paired
-static maps of 2012–2016 monthly median gross rent and its percentage change to
+static and HTML hover maps of 2012–2016 monthly median gross rent and its percentage change to
 2020–2024, using canonical rents already expressed in 2024 dollars. Select a
 county in the configuration chunk; no parcel, ADU, CV, or model-sample filters apply.
 Only the plotting frame omits confirmed water-only tracts (`ALAND10 == 0` and
@@ -233,7 +233,9 @@ missing either area attribute remain displayed with their existing rent statuses
 - `outputs/figures/tract_rent_baseline_and_change_alameda.png` — paired maps
   for the repository example.
 - `outputs/figures/tract_rent_baseline_and_change_alameda.pdf` — equivalent
-  vector figure. Both filename suffixes follow the configured county name.
+  vector figure. Filename suffixes follow the configured county name.
+- `outputs/figures/tract_rent_baseline_and_change_alameda.html` — self-contained
+  paired maps with tract/value hover labels; the suffix follows the same county configuration.
 - Inline figure, full-join validation, displayed status counts, and a separate
   omitted water-only count; the original boundary ZIP is cached, with no
   intermediate dataset written.
@@ -244,24 +246,23 @@ missing either area attribute remain displayed with their existing rent statuses
 2. Validate wide-panel keys, canonical rent metadata, and the selected county.
 3. Cache 2010 boundaries, join one-to-one, and report unmatched GEOIDs in both directions.
 4. Derive percentage changes and display statuses, then omit confirmed water-only tracts from a separate plotting frame.
-5. Use the plotting frame for all map layers, status counts, full-range scales, and shared extents; export both panels.
-6. Reconcile full-join, displayed, and omitted counts; inspect plotted ranges and confirm both exports.
+5. Use the plotting frame for all map layers, status counts, full-range scales, and shared extents; export paired PNG/PDF maps and the HTML hover version.
+6. Reconcile full-join, displayed, and omitted counts; inspect plotted ranges and confirm all three exports.
 
 Helpers live in [R/tract_rent_maps.R](R/tract_rent_maps.R). Notebook 5 uses `sf`,
 `ggplot2`, `patchwork`, `arrow`, `dplyr`, `tibble`, `here`, `digest`, and
-`RColorBrewer`, with `knitr`/`rmarkdown` for rendering. Hatching uses clipped
+`RColorBrewer`, plus `ggiraph` and `htmlwidgets` for HTML hover maps, with
+`knitr`/`rmarkdown` for rendering. Hatching uses clipped
 `sf` line geometry; no pattern package is needed. System `unzip` verifies ZIP
 checksums; PNG/vector PDF exports use native Quartz on macOS and Cairo elsewhere.
 HTML rendering also requires Pandoc (available with RStudio).
 
 [renv.lock](renv.lock) records the installed versions of the repository's R
-dependencies, including the map stage. It was created without activating a
-project library or changing installed packages. The map checks used R 4.5.1,
-sf 1.0-21, ggplot2 4.0.0, patchwork 1.3.2, and arrow 21.0.0.1. An analyst setting
-up an isolated library can run `renv::activate()` followed by `renv::restore()`
-before starting a fresh R session; no notebook chunk installs packages.
-All notebook 5 dependencies were available. The repository-wide snapshot found
-an existing upstream dependency gap: `viridis`, required by `Hmisc`, was absent.
+dependencies, including `ggiraph` 0.9.6 and `gdtools` 0.5.2 for the HTML map.
+An analyst setting up an isolated library can run `renv::activate()` followed
+by `renv::restore()` before starting a fresh R session; no notebook chunk
+installs packages. The repository-wide snapshot found an existing upstream
+dependency gap: `viridis`, required by `Hmisc`, was absent.
 The lockfile records installed packages only; resolve that gap before treating
 it as a complete upstream environment. Notebook 5 does not use `Hmisc` or `viridis`.
 
@@ -272,10 +273,19 @@ Rscript -e 'rmarkdown::render("05_map_tract_rents.Rmd")'
 ```
 
 The configuration retains `overwrite_figures <- TRUE` and announces replacement
-of existing PNG/PDF files; set it to `FALSE` to refuse replacement. Full real-data
+of existing PNG/PDF/HTML files; set it to `FALSE` to refuse replacement. Full real-data
 rendering remains analyst-run. Review the notebook's final acceptance checks,
 including the unchanged-input Alameda counts and removal of the three western
 water-only pieces.
+
+Open the saved `.html` file directly in a browser (for example, double-click it).
+Its scripts and styles are embedded, so it works offline without a server or an
+asset folder. Hover labels show the full tract GEOID and the panel's value:
+whole-dollar baseline rent labeled as 2024 dollars, or signed real percentage
+change to one decimal place. Top-coded and unavailable values retain their
+panel-specific labels. The fixed side-by-side maps preserve proportions when
+resized; zoom, pan, selection, and cross-panel highlighting are disabled.
+Compare the HTML against both static exports during analyst acceptance review.
 
 The inexpensive offline check is:
 
@@ -283,7 +293,9 @@ The inexpensive offline check is:
 Rscript --vanilla tests/test_tract_rent_maps.R --preview-dir /tmp/acs_tract_map_preview_r
 ```
 
-Its explicitly synthetic PNG/PDF preview must not replace the empirical example below.
+Its explicitly synthetic PNG/PDF/HTML previews must not replace the empirical
+example below. The HTML fixture includes numeric, top-coded, unavailable, and
+multipart tracts for local hover checks.
 
 The Alameda example becomes available after the analyst runs notebook 5 with
 the default county and generates the PNG:

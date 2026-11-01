@@ -1,5 +1,6 @@
 # Validation and static plotting helpers for 05_map_tract_rents.Rmd.
-# Load dplyr, sf, ggplot2, patchwork, digest, and RColorBrewer in the caller.
+# Load dplyr, sf, ggplot2, patchwork, digest, and RColorBrewer in the caller;
+# HTML output also uses ggiraph, htmlwidgets, and rmarkdown.
 
 map_counties <- c(
   "001" = "Alameda", "013" = "Contra Costa", "037" = "Los Angeles",
@@ -264,7 +265,29 @@ map_status_legend <- function() {
   )
 }
 
-draw_paired_maps <- function(mapped, county_label, synthetic = FALSE) {
+map_hover_data <- function(mapped, period = c("baseline", "change")) {
+  period <- match.arg(period)
+  validate_map_tract_ids(mapped$tr2010_id, "Map hover labels")
+  status <- mapped[[paste0(period, "_status")]]
+  value <- mapped[[if (period == "baseline") "baseline_rent" else "rent_change_pct"]]
+  if (length(status) != nrow(mapped) || length(value) != nrow(mapped) ||
+      !all(status %in% map_display_statuses) || any(!is.finite(value[status == "value"]))) {
+    stop("Hover labels require prepared panel-specific statuses and finite eligible values.")
+  }
+  label <- ifelse(status == "top_coded", "Top-coded", "Unavailable")
+  eligible <- status == "value"
+  label[eligible] <- if (period == "baseline") {
+    paste0("$", formatC(value[eligible], format = "f", digits = 0, big.mark = ",", decimal.mark = "."), " (2024 dollars)")
+  } else {
+    ifelse(value[eligible] == 0, "0.0%", sprintf("%+.1f%%", value[eligible]))
+  }
+  mapped$map_data_id <- paste(period, mapped$tr2010_id, sep = "-")
+  mapped$map_tooltip <- paste0("Tract GEOID: ", mapped$tr2010_id, "<br>",
+    if (period == "baseline") "Baseline rent: " else "Inflation-adjusted rent change: ", label)
+  mapped
+}
+
+draw_paired_maps <- function(mapped, county_label, synthetic = FALSE, hover = FALSE) {
   if (!nrow(mapped) || is.na(sf::st_crs(mapped)) || !isFALSE(sf::st_is_longlat(mapped))) {
     stop("Maps require nonempty projected boundaries.")
   }
@@ -302,6 +325,12 @@ draw_paired_maps <- function(mapped, county_label, synthetic = FALSE) {
       p <- p + ggplot2::geom_sf(data = top, fill = "#fff6dd", colour = "#525c66", linewidth = 0.25 / 2.845) +
         ggplot2::geom_sf(data = map_hatch_lines(top, bounds, span / 90), colour = "#525c66", linewidth = 0.7 / 2.845)
     }
+    if (isTRUE(hover)) {
+      # A transparent top layer receives events over every polygon and hatch line.
+      p <- p + ggiraph::geom_sf_interactive(data = map_hover_data(mapped, period),
+        ggplot2::aes(tooltip = map_tooltip, data_id = map_data_id, group = tr2010_id),
+        fill = "transparent", colour = NA, show.legend = FALSE, hover_nearest = FALSE)
+    }
     p + ggplot2::coord_sf(crs = sf::st_crs(mapped), default_crs = sf::st_crs(mapped),
                           xlim = xlim, ylim = ylim, expand = FALSE, datum = NA)
   })
@@ -320,6 +349,42 @@ draw_paired_maps <- function(mapped, county_label, synthetic = FALSE) {
                                              margin = ggplot2::margin(t = 10)),
         plot.margin = ggplot2::margin(24, 32, 8, 32)))
   list(figure = figure, panels = panels)
+}
+
+draw_paired_map_widget <- function(mapped, county_label, synthetic = FALSE) {
+  maps <- draw_paired_maps(mapped, county_label, synthetic = synthetic, hover = TRUE)
+  ggiraph::girafe(ggobj = maps$figure, width_svg = 14, height_svg = 8,
+    options = list(
+      htmlwidgets::sizingPolicy(browser.defaultWidth = "100%"),
+      ggiraph::opts_sizing(rescale = TRUE, width = 1),
+      ggiraph::opts_zoom(min = 1, max = 1, default_on = FALSE),
+      ggiraph::opts_selection(type = "none", only_shiny = FALSE, linked = FALSE),
+      ggiraph::opts_toolbar(saveaspng = FALSE, hidden = c("selection", "zoom", "misc")),
+      ggiraph::opts_hover(css = "fill:rgba(24,37,54,0.06);stroke:#334155;stroke-width:0.6px;cursor:default;",
+        reactive = FALSE, linked = FALSE),
+      ggiraph::opts_hover_inv(css = ""),
+      ggiraph::opts_tooltip(css = paste0("background:white;color:#182536;border:1px solid #cbd5e1;",
+        "border-radius:4px;padding:8px 10px;font:13px sans-serif;line-height:1.5;"),
+        opacity = 1, delay_mouseover = 0, delay_mouseout = 50)
+    ))
+}
+
+save_paired_html <- function(widget, output_stem, overwrite = FALSE) {
+  path <- paste0(output_stem, ".html")
+  if (file.exists(path) && !isTRUE(overwrite)) {
+    stop("Existing figure: ", path, ". Set overwrite_figures = TRUE to replace it.")
+  }
+  if (!rmarkdown::pandoc_available()) stop("Pandoc is required to save the self-contained map HTML.")
+  staging <- tempfile("acs-map-html-")
+  dir.create(staging)
+  on.exit(unlink(staging, recursive = TRUE), add = TRUE)
+  staged_html <- file.path(staging, "map.html")
+  htmlwidgets::saveWidget(widget, staged_html, selfcontained = TRUE, title = "Tract gross rents")
+  dir.create(dirname(output_stem), recursive = TRUE, showWarnings = FALSE)
+  message(if (file.exists(path)) "Replacing " else "Saving ", path)
+  if (!file.copy(staged_html, path, overwrite = overwrite)) stop("Could not save HTML: ", path)
+  stopifnot(file.info(path)$size > 0)
+  path
 }
 
 save_paired_figure <- function(figure, output_stem, overwrite = FALSE) {
